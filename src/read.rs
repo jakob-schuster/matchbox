@@ -11,6 +11,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 
 use crate::{
     core::{
+        self,
         rec::{self, ConcreteRec, FastaRead, Rec},
         Effect, Val,
     },
@@ -238,11 +239,12 @@ impl Reader {
                         .map(|result| match result {
                             Err(_) => panic!("Bad record!"),
                             Ok(record) => {
-                                let arena = Arena::new();
-                                local_fn(
-                                    Val::Rec(arena.alloc(rec::FastaRead { read: record })),
-                                    &arena,
-                                )
+                                todo!()
+                                // let arena = Arena::new();
+                                // local_fn(
+                                //     Val::Rec(arena.alloc(rec::FastaRead { read: record })),
+                                //     &arena,
+                                // )
                             }
                         })
                         .collect_into_vec(&mut outs);
@@ -252,6 +254,32 @@ impl Reader {
                     }
                 }
             }
+        }
+    }
+}
+
+pub fn read_fa_new<'p, 'a: 'p>(filename: &str, prog: &core::Prog<'p>, arena: &'p Arena) {
+    let input_records = bio::io::fasta::Reader::from_file(filename)
+        .unwrap()
+        .records();
+
+    // let arena = Arena::new();
+    for record in input_records {
+        match record {
+            Ok(read) => {
+                let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
+                let effects = prog.eval(arena.alloc(val), &arena).expect("");
+
+                println!(
+                    "{}",
+                    effects
+                        .iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Err(_) => panic!("bad read?!"),
         }
     }
 }

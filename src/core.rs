@@ -41,12 +41,12 @@ pub struct ProgData<'a> {
 }
 
 impl<'a> Prog<'a> {
-    pub fn eval<'b>(
-        &self,
-        read: &'b FastaRead,
-        arena: &'b Arena,
-    ) -> Result<Vec<Effect>, EvalError> {
-        eval_stmt(arena, &Env::default(), &self.data.stmt)
+    pub fn eval(&self, read: &'a Val<'a>, arena: &'a Arena) -> Result<Vec<Effect>, EvalError> {
+        eval_stmt(
+            arena,
+            &library::standard_library(arena, false).tms.with(read),
+            &self.data.stmt,
+        )
     }
 }
 
@@ -90,18 +90,18 @@ pub struct PatternBranchData<'a> {
     pub stmt: Stmt<'a>,
 }
 
-pub fn eval_prog<'a, 'b: 'a>(
+pub fn eval_prog<'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
-    prog: &Prog<'b>,
+    prog: &Prog<'a>,
 ) -> Result<Vec<Effect>, EvalError> {
     eval_stmt(arena, env, &prog.data.stmt)
 }
 
-fn eval_stmt<'a, 'b: 'a>(
+fn eval_stmt<'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
-    stmt: &Stmt<'b>,
+    stmt: &Stmt<'a>,
 ) -> Result<Vec<Effect>, EvalError> {
     match &stmt.data {
         StmtData::Let { tm, next } => {
@@ -143,10 +143,10 @@ fn eval_stmt<'a, 'b: 'a>(
     }
 }
 
-fn eval_branch<'a, 'b: 'a>(
+fn eval_branch<'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
-    branch: &Branch<'b>,
+    branch: &Branch<'a>,
 ) -> Result<Option<Vec<Effect>>, EvalError> {
     match &branch.data {
         BranchData::Bool { tm, stmt } => match eval(arena, env, tm)? {
@@ -176,10 +176,10 @@ fn eval_branch<'a, 'b: 'a>(
     }
 }
 
-fn eval_pattern_branch<'a, 'b: 'a>(
+fn eval_pattern_branch<'a>(
     arena: &'a Arena,
-    env: &'a Env<&'a Val<'a>>,
-    branch: &PatternBranch<'b>,
+    env: &Env<&'a Val<'a>>,
+    branch: &PatternBranch<'a>,
     val: &'a Val<'a>,
 ) -> Result<Option<Vec<Effect>>, EvalError> {
     match &branch.data.matcher.evaluate(arena, env, val)?[..] {
@@ -269,10 +269,10 @@ pub enum TmData<'a> {
     },
 }
 
-pub fn eval<'a, 'b: 'a>(
+pub fn eval<'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
-    tm: &Tm<'b>,
+    tm: &Tm<'a>,
 ) -> Result<&'a Val<'a>, EvalError> {
     match &tm.data {
         // look up the variable in the environment
@@ -568,7 +568,7 @@ impl<'arena: 'a, 'a> Val<'a> {
         }
     }
 
-    pub fn eq<'b>(&self, arena: &'arena Arena, other: &Val<'b>) -> bool {
+    pub fn eq(&self, arena: &'arena Arena, other: &Val<'a>) -> bool {
         match (self, other) {
             (Val::Univ, Val::Univ)
             | (Val::AnyTy, Val::AnyTy)

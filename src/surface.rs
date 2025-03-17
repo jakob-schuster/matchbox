@@ -8,8 +8,9 @@ use crate::{
         matcher::{self, LocTm, OpTm},
         EvalError,
     },
+    parse,
     util::{Arena, CoreRecField, Env, Located, Location, Ran, RecField},
-    visit,
+    visit, GlobalConfig,
 };
 
 /// An error that will be raised if there was a problem in the surface syntax,
@@ -304,36 +305,6 @@ impl<'a> Context<'a> {
         let val = self.tys.get_index(index);
 
         Some((index, val))
-    }
-
-    pub fn standard_library(arena: &'a Arena) -> Context<'a> {
-        let entries = vec![
-            ("Type", core::TmData::Univ, core::TmData::Univ),
-            ("Any", core::TmData::Univ, core::TmData::AnyTy),
-            ("Bool", core::TmData::Univ, core::TmData::BoolTy),
-            ("Num", core::TmData::Univ, core::TmData::NumTy),
-            ("Str", core::TmData::Univ, core::TmData::StrTy),
-        ];
-
-        let a = entries
-            .iter()
-            .try_fold(Context::default(), |ctx, (name, ty, tm)| {
-                let ty1 = core::eval(
-                    arena,
-                    &ctx.tms,
-                    arena.alloc(core::Tm::new(Location::new(0, 0), ty.clone())),
-                )?;
-                let tm1 = core::eval(
-                    arena,
-                    &ctx.tms,
-                    arena.alloc(core::Tm::new(Location::new(0, 0), tm.clone())),
-                )?;
-
-                Ok::<Context, EvalError>(ctx.bind_def(name.to_string(), ty1, tm1))
-            })
-            .expect("could not evaluate standard library!");
-
-        a
     }
 }
 
@@ -884,7 +855,7 @@ fn infer_read_pattern<'a>(
                                         head: Arc::new(
                                             check_tm(
                                                 arena,
-                                                &Context::standard_library(arena),
+                                                &core::library::standard_library(arena, true),
                                                 arena.alloc(Tm::new(
                                                     expr_num.location.clone(),
                                                     TmData::Name {
@@ -1114,8 +1085,8 @@ fn infer_tm<'a>(
                 arena.alloc(core::Val::RecTy { fields: tys }),
             ))
         }
-        TmData::RecProj { tm, name } => {
-            let (tm, ty) = infer_tm(arena, ctx, tm)?;
+        TmData::RecProj { tm: head_tm, name } => {
+            let (head_tm, ty) = infer_tm(arena, ctx, head_tm)?;
 
             match ty {
                 core::Val::RecTy { fields } => {
@@ -1124,7 +1095,7 @@ fn infer_tm<'a>(
                             core::Tm::new(
                                 tm.location.clone(),
                                 core::TmData::RecProj {
-                                    tm: Arc::new(tm),
+                                    tm: Arc::new(head_tm),
                                     name: name.as_bytes(),
                                 },
                             ),
@@ -1320,6 +1291,7 @@ fn infer_tm<'a>(
                         _ => body,
                     };
 
+                    println!("body ty is {}", body_ty);
                     Ok((
                         core::Tm::new(
                             tm.location.clone(),
@@ -1374,19 +1346,23 @@ fn infer_bin_op<'a>(
         let ctm1 = check_tm(arena, ctx, tm1, ty1)?;
 
         match ctx.lookup(name.to_string()) {
-            Some((index, ty)) => Ok((
-                core::Tm::new(
-                    location.clone(),
-                    core::TmData::FunApp {
-                        head: Arc::new(core::Tm::new(
-                            location.clone(),
-                            core::TmData::Var { index },
-                        )),
-                        args: vec![ctm0, ctm1],
-                    },
-                ),
-                ty,
-            )),
+            Some((index, ty)) => match ty {
+                core::Val::FunTy { args, body } => Ok((
+                    core::Tm::new(
+                        location.clone(),
+                        core::TmData::FunApp {
+                            head: Arc::new(core::Tm::new(
+                                location.clone(),
+                                core::TmData::Var { index },
+                            )),
+                            args: vec![ctm0, ctm1],
+                        },
+                    ),
+                    body,
+                )),
+
+                _ => panic!("operator has non-function type?!"),
+            },
             None => Err(ElabError::new(location, "unbound name")),
         }
     };

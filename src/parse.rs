@@ -1,4 +1,4 @@
-use parser::prog;
+use parser::{prog, tm};
 
 use crate::{surface::*, util, GlobalConfig};
 use std::rc::Rc;
@@ -12,6 +12,14 @@ pub struct ParseError {
 
 pub fn parse(string: &str, global_config: &GlobalConfig) -> Result<Prog, ParseError> {
     prog(string, global_config).map_err(|e| ParseError {
+        start: e.location.offset,
+        end: e.location.offset + 1,
+        message: "Parse error".to_string(),
+    })
+}
+
+pub fn parse_tm(string: &str, global_config: &GlobalConfig) -> Result<Tm, ParseError> {
+    tm(string, global_config).map_err(|e| ParseError {
         start: e.location.offset,
         end: e.location.offset + 1,
         message: "Parse error".to_string(),
@@ -96,7 +104,7 @@ peg::parser! {
             = name:name() _ "in" _ tm:tm() { ReadParameterData { name, tm } }
         //
 
-        rule tm() -> Tm = located(<tm_data()>)
+        pub rule tm() -> Tm = located(<tm_data()>)
         #[cache_left_rec]
         rule tm_data() -> TmData
             = tm_data1()

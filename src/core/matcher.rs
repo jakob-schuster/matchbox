@@ -12,13 +12,11 @@ use std::{collections::HashMap, sync::Arc};
 
 pub trait Matcher<'a>: Send + Sync {
     fn evaluate<'b>(
-        &self,
-        arena: &'b Arena,
-        env: &'b Env<&'b Val<'b>>,
-        val: &'b Val<'b>,
-    ) -> Result<Vec<Vec<&'b Val<'b>>>, EvalError>
-    where
-        'a: 'b;
+        &'b self,
+        arena: &'a Arena,
+        env: &'b Env<&'a Val<'a>>,
+        val: &'a Val<'a>,
+    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>;
 }
 
 pub struct Chain<'a> {
@@ -27,14 +25,11 @@ pub struct Chain<'a> {
 }
 impl<'a> Matcher<'a> for Chain<'a> {
     fn evaluate<'b>(
-        &self,
-        arena: &'b Arena,
-        env: &'b Env<&'b Val<'b>>,
-        val: &'b Val<'b>,
-    ) -> Result<Vec<Vec<&'b Val<'b>>>, EvalError>
-    where
-        'a: 'b,
-    {
+        &'b self,
+        arena: &'a Arena,
+        env: &'b Env<&'a Val<'a>>,
+        val: &'a Val<'a>,
+    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
         let r1 = self.m1.evaluate(arena, env, val)?;
         let r2 = self.m2.evaluate(arena, env, val)?;
 
@@ -49,14 +44,11 @@ pub struct FieldAccess<'a> {
 }
 impl<'a> Matcher<'a> for FieldAccess<'a> {
     fn evaluate<'b>(
-        &self,
-        arena: &'b Arena,
-        env: &'b Env<&'b Val<'b>>,
-        val: &'b Val<'b>,
-    ) -> Result<Vec<Vec<&'b Val<'b>>>, EvalError>
-    where
-        'a: 'b,
-    {
+        &'b self,
+        arena: &'a Arena,
+        env: &'b Env<&'a Val<'a>>,
+        val: &'a Val<'a>,
+    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
         match val {
             Val::Rec(rec) => match rec.get(self.name.as_bytes(), arena) {
                 Ok(field) => self.inner.evaluate(arena, env, &field),
@@ -72,14 +64,11 @@ impl<'a> Matcher<'a> for FieldAccess<'a> {
 pub struct Succeed {}
 impl<'a> Matcher<'a> for Succeed {
     fn evaluate<'b>(
-        &self,
-        arena: &'b Arena,
-        env: &'b Env<&'b Val<'b>>,
-        val: &'b Val<'b>,
-    ) -> Result<Vec<Vec<&'b Val<'b>>>, EvalError>
-    where
-        'a: 'b,
-    {
+        &'b self,
+        arena: &'a Arena,
+        env: &'b Env<&'a Val<'a>>,
+        val: &'a Val<'a>,
+    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
         // one world, with no binds
         Ok(vec![vec![]])
     }
@@ -88,14 +77,11 @@ impl<'a> Matcher<'a> for Succeed {
 pub struct Bind {}
 impl<'a> Matcher<'a> for Bind {
     fn evaluate<'b>(
-        &self,
-        arena: &'b Arena,
-        env: &'b Env<&'b Val<'b>>,
-        val: &'b Val<'b>,
-    ) -> Result<Vec<Vec<&'b Val<'b>>>, EvalError>
-    where
-        'a: 'b,
-    {
+        &'b self,
+        arena: &'a Arena,
+        env: &'b Env<&'a Val<'a>>,
+        val: &'a Val<'a>,
+    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
         Ok(vec![vec![val]])
     }
 }
@@ -112,14 +98,11 @@ impl<'a> Equal<'a> {
 
 impl<'a> Matcher<'a> for Equal<'a> {
     fn evaluate<'b>(
-        &self,
-        arena: &'b Arena,
-        env: &'b Env<&'b Val<'b>>,
-        val: &'b Val<'b>,
-    ) -> Result<Vec<Vec<&'b Val<'b>>>, EvalError>
-    where
-        'a: 'b,
-    {
+        &'b self,
+        arena: &'a Arena,
+        env: &'b Env<&'a Val<'a>>,
+        val: &'a Val<'a>,
+    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
         if val.eq(arena, &self.val) {
             // one world, with no binds
             Ok(vec![vec![]])
@@ -140,14 +123,11 @@ pub struct ReadMatcher<'a> {
 
 impl<'a> Matcher<'a> for ReadMatcher<'a> {
     fn evaluate<'b>(
-        &self,
-        arena: &'b Arena,
-        env: &'b Env<&'b Val<'b>>,
-        val: &'b Val<'b>,
-    ) -> Result<Vec<Vec<&'b Val<'b>>>, EvalError>
-    where
-        'a: 'b,
-    {
+        &'b self,
+        arena: &'a Arena,
+        env: &'b Env<&'a Val<'a>>,
+        val: &'a Val<'a>,
+    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
         if let Val::Rec(rec) = val {
             if let Val::Str { s: seq } = rec.get(b"seq", arena).expect("") {
                 // first, generate all the worlds from the operations
@@ -185,7 +165,7 @@ impl<'a> Matcher<'a> for ReadMatcher<'a> {
                                     arena,
                                 )));
 
-                                arena.alloc(sliced) as &'b Val<'b>
+                                arena.alloc(sliced) as &'a Val<'a>
                             }),
                         )
                         .collect::<Vec<_>>();
@@ -388,18 +368,15 @@ impl<'a> BindCtx<'a> {
     }
 }
 
-impl<'b> OpVal<'b> {
-    fn exec<'a>(
+impl<'a> OpVal<'a> {
+    fn exec(
         &self,
         arena: &'a Arena,
         env: &Env<&'a Val<'a>>,
         seq: &'a [u8],
         loc_ctx: &LocCtx,
         bind_ctx: &BindCtx<'a>,
-    ) -> Result<Vec<(BindCtx<'a>, LocCtx)>, core::EvalError>
-    where
-        'b: 'a,
-    {
+    ) -> Result<Vec<(BindCtx<'a>, LocCtx)>, core::EvalError> {
         match self {
             OpVal::Let { loc, tm } => {
                 let pos = eval_loc_tm(&arena, env, loc_ctx, tm)?;
@@ -510,11 +487,11 @@ pub enum LocTm<'a> {
         offset: core::Tm<'a>,
     },
 }
-fn eval_loc_tm<'a, 'b: 'a>(
+fn eval_loc_tm<'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
     loc_ctx: &LocCtx,
-    loc_tm: &LocTm<'b>,
+    loc_tm: &LocTm<'a>,
 ) -> Result<usize, core::EvalError> {
     match loc_tm {
         LocTm::Var { loc } => Ok(loc_ctx.get(loc)),

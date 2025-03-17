@@ -1,7 +1,200 @@
-use crate::util::{self, bytes_to_string, Arena, Location};
+use crate::{
+    core,
+    surface::Context,
+    util::{self, bytes_to_string, Arena, CoreRecField, Location},
+};
 use std::{path::Path, sync::Arc};
 
 use super::{rec::ConcreteRec, EvalError, Val};
+
+pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
+    let entries = vec![
+        ("Type", core::TmData::Univ, core::TmData::Univ),
+        ("Any", core::TmData::Univ, core::TmData::AnyTy),
+        ("Bool", core::TmData::Univ, core::TmData::BoolTy),
+        ("Num", core::TmData::Univ, core::TmData::NumTy),
+        ("Str", core::TmData::Univ, core::TmData::StrTy),
+    ];
+
+    let mut ctx = entries
+        .iter()
+        .try_fold(Context::default(), |ctx, (name, ty, tm)| {
+            let ty1 = core::eval(
+                arena,
+                &ctx.tms,
+                arena.alloc(core::Tm::new(Location::new(0, 0), ty.clone())),
+            )?;
+            let tm1 = core::eval(
+                arena,
+                &ctx.tms,
+                arena.alloc(core::Tm::new(Location::new(0, 0), tm.clone())),
+            )?;
+
+            Ok::<Context, EvalError>(ctx.bind_def(name.to_string(), ty1, tm1))
+        })
+        .expect("could not evaluate standard library!");
+
+    ctx = vec![
+        (
+            "binary_plus",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::NumTy,
+            Arc::new(core::library::binary_plus)
+                as Arc<
+                    dyn Fn(
+                            &'a Arena,
+                            &Location,
+                            &[&'a core::Val<'a>],
+                        ) -> Result<&'a core::Val<'a>, EvalError>
+                        + Send
+                        + Sync,
+                >,
+        ),
+        (
+            "binary_times",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::NumTy,
+            Arc::new(core::library::binary_times),
+        ),
+        (
+            "binary_division",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::NumTy,
+            Arc::new(core::library::binary_division),
+        ),
+        (
+            "binary_modulo",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::NumTy,
+            Arc::new(core::library::binary_modulo),
+        ),
+        (
+            "binary_exponent",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::NumTy,
+            Arc::new(core::library::binary_exponent),
+        ),
+        (
+            "binary_minus",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::NumTy,
+            Arc::new(core::library::binary_minus),
+        ),
+        (
+            "binary_equal",
+            vec![core::TmData::AnyTy, core::TmData::AnyTy],
+            core::TmData::BoolTy,
+            Arc::new(core::library::binary_equal),
+        ),
+        (
+            "binary_not_equal",
+            vec![core::TmData::AnyTy, core::TmData::AnyTy],
+            core::TmData::BoolTy,
+            Arc::new(core::library::binary_not_equal),
+        ),
+        (
+            "binary_less_than",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::BoolTy,
+            Arc::new(core::library::binary_less_than),
+        ),
+        (
+            "binary_greater_than",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::BoolTy,
+            Arc::new(core::library::binary_greater_than),
+        ),
+        (
+            "binary_less_than_or_equal",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::BoolTy,
+            Arc::new(core::library::binary_less_than_or_equal),
+        ),
+        (
+            "binary_greater_than_or_equal",
+            vec![core::TmData::NumTy, core::TmData::NumTy],
+            core::TmData::BoolTy,
+            Arc::new(core::library::binary_greater_than_or_equal),
+        ),
+        (
+            "binary_and",
+            vec![core::TmData::BoolTy, core::TmData::BoolTy],
+            core::TmData::BoolTy,
+            Arc::new(core::library::binary_and),
+        ),
+        (
+            "binary_or",
+            vec![core::TmData::BoolTy, core::TmData::BoolTy],
+            core::TmData::BoolTy,
+            Arc::new(core::library::binary_or),
+        ),
+        (
+            "unary_minus",
+            vec![core::TmData::NumTy],
+            core::TmData::NumTy,
+            Arc::new(core::library::unary_minus),
+        ),
+        (
+            "unary_reverse_complement",
+            vec![core::TmData::StrTy],
+            core::TmData::StrTy,
+            Arc::new(core::library::unary_reverse_complement),
+        ),
+    ]
+    .into_iter()
+    .try_fold(ctx.clone(), |ctx0, (name, args, return_ty, fun)| {
+        let args = args
+            .iter()
+            .map(|arg| {
+                core::eval(
+                    arena,
+                    &ctx0.tms,
+                    arena.alloc(core::Tm::new(Location::new(0, 0), arg.clone())),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let body = core::eval(
+            arena,
+            &ctx0.tms,
+            arena.alloc(core::Tm::new(Location::new(0, 0), return_ty.clone())),
+        )?;
+
+        Ok(ctx0.bind_def(
+            name.to_string(),
+            arena.alloc(core::Val::FunTy { args, body }),
+            arena.alloc(core::Val::FunForeign { f: fun }),
+        )) as Result<_, EvalError>
+    })
+    .expect("could not evaluate standard library!");
+
+    // this is a bit insane, clean it up later
+    if with_read {
+        ctx = ctx.bind_param(
+            "read".to_string(),
+            core::eval(
+                arena,
+                &ctx.tms,
+                &core::Tm::new(
+                    Location::new(0, 0),
+                    core::TmData::FunApp {
+                        head: Arc::new(core::Tm::new(
+                            Location::new(0, 0),
+                            core::TmData::FunForeignLit {
+                                args: vec![],
+                                body: Arc::new(core::library::read_ty),
+                            },
+                        )),
+                        args: vec![],
+                    },
+                ),
+            )
+            .expect("could not evaluate standard library!"),
+            arena,
+        );
+    }
+
+    ctx
+}
 
 pub fn foreign<'a>(
     location: &Location,
@@ -351,6 +544,35 @@ pub fn csv_first<'a>(
 
             todo!()
         }
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn read_ty<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[&'a Val<'a>],
+) -> Result<&'a Val<'a>, EvalError> {
+    match vtms {
+        [] => Ok(arena.alloc(Val::RecTy {
+            fields: vec![
+                CoreRecField {
+                    name: b"seq",
+                    data: arena.alloc(Val::StrTy),
+                },
+                CoreRecField {
+                    name: b"id",
+                    data: arena.alloc(Val::StrTy),
+                },
+                CoreRecField {
+                    name: b"desc",
+                    data: arena.alloc(Val::StrTy),
+                },
+            ],
+        })),
         _ => Err(EvalError::new(
             &location,
             "bad arguments given to function?!",

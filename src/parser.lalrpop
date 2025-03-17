@@ -1,0 +1,93 @@
+use std::str::FromStr;
+use crate::{surface, util};
+use std::rc::Rc;
+
+grammar;
+
+pub Prog: surface::Prog = {
+    <stmts:NonEmptyList<Stmt, "">> => surface::Prog { stmts },
+}
+
+pub Stmt: surface::Stmt = Located<StmtData>;
+StmtData: surface::StmtData = {
+    AtomicStmtData,
+
+    <name:Name> "=" <tm:Tm> => surface::StmtData::Let { name, tm },
+
+    <tm0:Tm> "|>" <tm1:Tm> => surface::StmtData::Out { tm0, tm1 },
+
+    "if" <branches:NonEmptyList<Branch, ",">> => surface::StmtData::If { branches },
+};
+
+AtomicStmtData: surface::StmtData = {
+};
+
+GroupStmt: surface::Stmt = Located<GroupStmtData>;
+GroupStmtData: surface::StmtData = {
+    "{" <stmts:List<Stmt, ";">> "}" => surface::StmtData::Group { stmts },
+}
+
+//
+
+Branch: surface::Branch = Located<BranchData>;
+BranchData: surface::BranchData = {
+    <tm:Tm> "=>" <stmt:GroupStmt> => surface::BranchData::Bool { tm, stmt },
+}
+
+//
+
+pub Tm: surface::Tm = Located<TmData>;
+TmData: surface::TmData = {
+    AtomicTmData,
+
+    <tm:AtomicTm> "." <name:Name> => surface::TmData::RecProj { tm: Rc::new(tm), name }
+}
+
+AtomicTm: surface::Tm = Located<AtomicTmData>;
+AtomicTmData: surface::TmData = {
+    <b:Bool> => surface::TmData::BoolLit { b },
+    <n:Num> => surface::TmData::NumLit { n },
+    <s:r#"'([^'\\]|\\.)*'"#> => surface::TmData::StrLit { s: s[1..s.len()-1].as_bytes().to_vec() },
+    "{" <fields:List<RecLitField, ",">> "}" => surface::TmData::RecLit { fields },
+
+    <name:Name> => surface::TmData::Name { name },
+}
+
+//
+
+RecLitField: util::RecField<surface::Tm> = {
+    <name:Name> "=" <tm:Tm> => util::RecField::new(name, tm)
+}
+
+//
+
+Bool: bool = {
+    "true" => true,
+    "false" => false,
+}
+Num: surface::Num = <s:r"[0-9]+"> => surface::Num::Int(i32::from_str(s).unwrap());
+
+Name: String = <s:r"[a-zA-Z][a-zA-Z0-9\-]*"> => s.to_string();
+
+//
+
+#[inline]
+Located<T>: util::Located<T> = {
+    <start: @L> <data: T> <end: @R> => util::Located::new(util::Location::new(start, end), data),
+};
+
+#[inline]
+List<Entry, Sep>: Vec<Entry> = {
+    <mut entries: (<Entry> Sep)*> <last: Entry?> => {
+        entries.extend(last);
+        entries
+    }
+}
+
+#[inline]
+NonEmptyList<Entry, Sep>: Vec<Entry> = {
+    <mut entries: (<Entry> Sep)*> <last: Entry> (<Sep>)? => {
+        entries.push(last);
+        entries
+    }
+}

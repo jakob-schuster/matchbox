@@ -1,0 +1,18 @@
+[package]
+name = "matchbox-demake"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bumpalo = "*"
+bio = "*"
+rayon = "*"
+itertools = "*"
+csv = "*"
+peg = "*"
+codespan-reporting = "*"
+codespan = "*"
+flate2 = { version = "*", features = ["zlib-ng"] }
+
+[dev-dependencies]
+insta = { version = "1.42.0", features = ["yaml"] }

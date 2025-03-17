@@ -16,18 +16,18 @@ impl VarMyers {
         }
     }
 
-    pub fn find_all(&self, seq: &[u8], edit_dist: u8) -> Vec<(usize, usize, usize)> {
+    pub fn find_all(&self, seq: &[u8], edit_dist: usize) -> Vec<(usize, usize, usize)> {
         match self {
             VarMyers::Short(s) => s
                 .clone()
-                .find_all(seq, edit_dist)
+                .find_all(seq, edit_dist as u8)
                 .map(|(s, e, d)| (s, e, d as usize))
                 .collect_vec(),
             VarMyers::Long(l) => l.clone().find_all(seq, edit_dist as usize).collect_vec(),
         }
     }
 
-    pub fn find_all_disjoint(&self, seq: &[u8], edit_dist: u8) -> Vec<(usize, usize, usize)> {
+    pub fn find_all_disjoint(&self, seq: &[u8], edit_dist: usize) -> Vec<(usize, usize, usize)> {
         let mut matches = self.find_all(seq, edit_dist);
 
         matches.sort_by_key(|(_, _, dist)| *dist);

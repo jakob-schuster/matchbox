@@ -260,6 +260,9 @@ pub enum TmData<'a> {
     RecTy {
         fields: Vec<CoreRecField<'a, Tm<'a>>>,
     },
+    RecWithTy {
+        fields: Vec<CoreRecField<'a, &'a Tm<'a>>>,
+    },
     RecLit {
         fields: Vec<CoreRecField<'a, Tm<'a>>>,
     },
@@ -334,6 +337,18 @@ pub fn eval<'a>(
                 })
                 .collect::<Result<Vec<_>, EvalError>>()?,
         })),
+        TmData::RecWithTy { fields } => Ok(arena.alloc(Val::RecWithTy {
+            fields: fields
+                .iter()
+                .map(|field| {
+                    Ok(CoreRecField::new(
+                        field.name,
+                        eval(arena, env, &field.data)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, EvalError>>()?,
+        })),
+
         // allocate a RecLit as a ConcreteRec
         TmData::RecLit { fields } => Ok(arena.alloc(Val::Rec(
             arena.alloc(ConcreteRec {
@@ -811,8 +826,8 @@ pub enum PortableVal {
 
 #[derive(Clone)]
 pub struct Effect {
-    val: PortableVal,
-    handler: PortableVal,
+    pub val: PortableVal,
+    pub handler: PortableVal,
 }
 
 impl<'a> Display for Prog<'a> {
@@ -908,6 +923,15 @@ impl<'a> Display for TmData<'a> {
             TmData::ListTy { ty } => format!("[{}]", ty).fmt(f),
             TmData::RecTy { fields } => format!(
                 "{{ {} }}",
+                fields
+                    .iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .fmt(f),
+            TmData::RecWithTy { fields } => format!(
+                "{{ {} .. }}",
                 fields
                     .iter()
                     .map(|f| f.to_string())

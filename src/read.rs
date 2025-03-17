@@ -15,6 +15,7 @@ use crate::{
         rec::{self, ConcreteRec, FastaRead, Rec},
         Effect, Val,
     },
+    output::OutputHandler,
     util::Arena,
 };
 
@@ -258,10 +259,28 @@ impl Reader {
     }
 }
 
-pub fn read_fa_new<'p, 'a: 'p>(filename: &str, prog: &core::Prog<'p>, arena: &'p Arena) {
-    let input_records = bio::io::fasta::Reader::from_file(filename)
-        .unwrap()
-        .records();
+pub fn read_any<'p, 'a: 'p>(
+    filename: &str,
+    prog: &core::Prog<'p>,
+    arena: &'p Arena,
+    output_handler: &mut OutputHandler,
+) {
+    let (filetype, buffer) = get_filetype_and_buffer(filename).unwrap();
+
+    match filetype {
+        FileType::Fasta => read_fa_new(buffer, prog, arena, output_handler),
+        FileType::Fastq => read_fq_new(buffer, prog, arena, output_handler),
+        _ => todo!(),
+    }
+}
+
+pub fn read_fa_new<'p, 'a: 'p>(
+    buffer: Box<dyn BufRead>,
+    prog: &core::Prog<'p>,
+    arena: &'p Arena,
+    output_handler: &mut OutputHandler,
+) {
+    let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
 
     // let arena = Arena::new();
     for record in input_records {
@@ -270,18 +289,50 @@ pub fn read_fa_new<'p, 'a: 'p>(filename: &str, prog: &core::Prog<'p>, arena: &'p
                 let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
                 let effects = prog.eval(arena.alloc(val), &arena).expect("");
 
-                println!(
-                    "{}",
-                    effects
-                        .iter()
-                        .map(|a| a.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+                // println!(
+                //     "{}",
+                //     effects
+                //         .iter()
+                //         .map(|a| a.to_string())
+                //         .collect::<Vec<_>>()
+                //         .join(", ")
+                // );
+
+                for effect in &effects {
+                    output_handler.handle(effect);
+                }
             }
             Err(_) => panic!("bad read?!"),
         }
     }
+
+    output_handler.finish();
+}
+
+pub fn read_fq_new<'p, 'a: 'p>(
+    buffer: Box<dyn BufRead>,
+    prog: &core::Prog<'p>,
+    arena: &'p Arena,
+    output_handler: &mut OutputHandler,
+) {
+    let input_records = bio::io::fastq::Reader::from_bufread(buffer).records();
+
+    // let arena = Arena::new();
+    for record in input_records {
+        match record {
+            Ok(read) => {
+                let val = core::Val::Rec(arena.alloc(rec::FastqRead { read }));
+                let effects = prog.eval(arena.alloc(val), &arena).expect("");
+
+                for effect in &effects {
+                    output_handler.handle(effect);
+                }
+            }
+            Err(_) => panic!("bad read?!"),
+        }
+    }
+
+    output_handler.finish();
 }
 
 pub fn read_fa<'a, T: Send, R>(

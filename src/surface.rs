@@ -819,6 +819,10 @@ fn infer_read_pattern<'a>(
         sized: &Vec<(core::Tm<'a>, Ran<usize>)>,
         arena: &'a Arena,
     ) -> (Vec<usize>, Vec<OpTm<'a>>) {
+        println!(
+            "entering check_all_fixed_lens with {}",
+            known.iter().join(", ")
+        );
         fn learn_new_fixed_lens<'aa>(
             known: &mut Vec<usize>,
             fixed_lens: &[(core::Tm<'aa>, Ran<usize>)],

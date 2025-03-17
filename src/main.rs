@@ -5,13 +5,15 @@ use codespan_reporting::{
     files::{Error, SimpleFile},
     term::{self, termcolor::StandardStream},
 };
+use output::OutputHandler;
 use parse::parse;
-use read::{read_fa_new, Reader};
+use read::{read_any, read_fa_new, Reader};
 use surface::elab_prog;
 use util::{Arena, Env};
 
 mod core;
 mod myers;
+mod output;
 mod parse;
 mod read;
 mod surface;
@@ -22,9 +24,7 @@ use surface::Context;
 
 fn main() {
     let code = r"
-        b = 10
-
-        if read is [_ AAA rest:_] => {rest.seq |> 'found'}
+        if read is [_ fst:|10|] => { fst |> file('out.fa')}
     ";
 
     let mut writer = StandardStream::stderr(term::termcolor::ColorChoice::Always);
@@ -42,7 +42,6 @@ fn main() {
         })
         .unwrap();
 
-    println!("{:?}", prog);
     let arena = Arena::new();
     let ctx = core::library::standard_library(&arena, true);
 
@@ -58,7 +57,9 @@ fn main() {
         })
         .unwrap();
 
-    read_fa_new("local/input_upper.fa", &cprog, &arena);
+    println!("{}", cprog);
+    let mut output_handler = OutputHandler::default();
+    read_any("local/input_upper.fa", &cprog, &arena, &mut output_handler);
 }
 
 pub struct GlobalConfig {

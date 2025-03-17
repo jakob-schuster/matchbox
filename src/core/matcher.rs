@@ -557,7 +557,7 @@ impl Seq {
         let trimmed = &seq[start as usize..end as usize];
 
         self.myers
-            .find_all_disjoint(trimmed, self.dist as u8)
+            .find_all_disjoint(trimmed, self.dist)
             .iter()
             .map(|(mat_start, mat_end, dist)| {
                 Mat::new(

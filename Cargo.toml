@@ -1,5 +1,5 @@
 [package]
-name = "matchbox-demake"
+name = "matchbox"
 version = "0.1.0"
 edition = "2021"
 
@@ -16,3 +16,6 @@ flate2 = { version = "*", features = ["zlib-ng"] }
 
 [dev-dependencies]
 insta = { version = "1.42.0", features = ["yaml"] }
+
+[profile.dev]
+debug = true

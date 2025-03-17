@@ -13,7 +13,16 @@ pub trait Rec<'a>: Display + Send + Sync {
     fn all(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>>;
     fn with(&self, key: &'a [u8], val: &'a Val<'a>, arena: &'a Arena) -> ConcreteRec<'a> {
         let mut map = self.all(arena);
-        map.insert(&key, val);
+        map.insert(key, val);
+
+        ConcreteRec { map }
+    }
+    fn with_all(&self, entries: &[(&'a [u8], &'a Val<'a>)], arena: &'a Arena) -> ConcreteRec<'a> {
+        let mut map = self.all(arena);
+
+        for (key, val) in entries {
+            map.insert(key, val);
+        }
 
         ConcreteRec { map }
     }
@@ -91,6 +100,50 @@ impl<'a> Rec<'a> for FastaRead {
 }
 
 impl Display for FastaRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
+pub struct FastqRead {
+    pub read: bio::io::fastq::Record,
+}
+
+impl<'a> Rec<'a> for FastqRead {
+    fn get(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError> {
+        match key {
+            b"seq" => Ok(arena.alloc(Val::Str {
+                s: arena.alloc(self.read.seq().to_vec()),
+            })),
+            b"id" => Ok(arena.alloc(Val::Str {
+                s: arena.alloc(self.read.id().as_bytes().to_vec()),
+            })),
+            b"desc" => Ok(arena.alloc(Val::Str {
+                s: arena.alloc(self.read.desc().unwrap_or_default().as_bytes().to_vec()),
+            })),
+            b"qual" => Ok(arena.alloc(Val::Str {
+                s: arena.alloc(self.read.desc().unwrap_or_default().as_bytes().to_vec()),
+            })),
+
+            _ => Err(InternalError {
+                message: String::from_utf8(key.to_vec()).expect("Couldn't convert vec to string!"),
+            }),
+        }
+    }
+
+    fn all(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>> {
+        let mut map: HashMap<&'a [u8], &'a Val<'a>> = HashMap::new();
+        let fields: Vec<&[u8]> = vec![b"seq", b"id", b"desc", b"qual"];
+
+        for field in fields {
+            map.insert(field, self.get(field, arena).expect("Couldn't get field!"));
+        }
+
+        map
+    }
+}
+
+impl Display for FastqRead {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         todo!()
     }

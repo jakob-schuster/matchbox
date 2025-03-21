@@ -91,7 +91,7 @@ peg::parser! {
             // hole
             = "_" { RegionData::Hole }
             // sized hole sugar
-            / "|" tm:tm() "|" {RegionData::Sized { tm: tm.clone(), regs: vec![] } }
+            / "|" tm:tm() "|" {RegionData::Sized { tm: tm.clone(), regs: vec![Region::new(tm.location.clone(), RegionData::Hole)] } }
             // terms
             / tm:tm() { RegionData::Term { tm } }
 

@@ -1,11 +1,11 @@
-use std::{collections::HashMap, io::Read, ops::Deref, rc::Rc, sync::Arc};
+use std::{collections::HashMap, fmt::Display, io::Read, ops::Deref, rc::Rc, sync::Arc};
 
 use itertools::Itertools;
 
 use crate::{
     core::{
         self, eval, library,
-        matcher::{self, LocTm, OpTm},
+        matcher::read_matcher::{self, LocTm, OpTm},
         EvalError,
     },
     parse,
@@ -23,14 +23,14 @@ pub struct ElabError {
 }
 
 impl ElabError {
-    fn new(location: &Location, message: &str) -> ElabError {
+    pub fn new(location: &Location, message: &str) -> ElabError {
         ElabError {
             location: location.clone(),
             message: message.to_string(),
         }
     }
 
-    fn from_eval_error(eval_error: EvalError) -> ElabError {
+    pub fn from_eval_error(eval_error: EvalError) -> ElabError {
         ElabError {
             location: eval_error.location,
             message: eval_error.message,
@@ -617,7 +617,13 @@ fn infer_pattern<'a>(
 
             // this should be enough information to walk the regions and typecheck them
 
-            let (matcher, named) = infer_read_pattern(arena, &ctx, regs, params.clone(), *error)?;
+            let (matcher, named) = core::matcher::read_matcher::infer_read_pattern(
+                arena,
+                &ctx,
+                regs,
+                params.clone(),
+                *error,
+            )?;
 
             let new_binds = params
                 .iter()
@@ -647,361 +653,6 @@ fn infer_pattern<'a>(
     }
 }
 
-#[derive(Clone)]
-enum Reg<'a> {
-    Hole,
-    Exp(Vec<String>, core::Tm<'a>),
-}
-
-fn flatten_regs<'a>(
-    binds: &[String],
-    bind_tys: &HashMap<String, &'a core::Val<'a>>,
-    i: usize,
-    regs: Vec<&'a Region>,
-    sized_acc: Vec<(core::Tm<'a>, Ran<usize>)>,
-    named_acc: Vec<(String, Ran<usize>)>,
-    regs_acc: Vec<(Reg<'a>, Ran<usize>)>,
-    arena: &'a Arena,
-    ctx: &Context<'a>,
-) -> Result<
-    (
-        Vec<(core::Tm<'a>, Ran<usize>)>,
-        Vec<(String, Ran<usize>)>,
-        Vec<(Reg<'a>, Ran<usize>)>,
-    ),
-    ElabError,
-> {
-    let first = regs.first();
-    let rest = regs.iter().skip(1).cloned().collect_vec();
-
-    match first {
-        Some(reg) => match &reg.data {
-            RegionData::Hole => flatten_regs(
-                binds,
-                bind_tys,
-                i + 1,
-                rest,
-                sized_acc,
-                named_acc,
-                regs_acc
-                    .into_iter()
-                    .chain([(Reg::Hole, Ran::new(i, i + 1))])
-                    .collect(),
-                arena,
-                ctx,
-            ),
-            RegionData::Term { tm } => {
-                // get the ids used in the tm
-                let ids = visit::ids_tm(&tm)
-                    .into_iter()
-                    .filter(|id| binds.contains(id))
-                    .collect::<Vec<_>>();
-
-                // build a new context with these bound
-                let new_ctx = ids.iter().fold(ctx.clone(), |ctx0, id| {
-                    ctx0.bind_param(id.clone(), bind_tys.get(id).unwrap(), arena)
-                });
-
-                // check that the tm is a string
-                let ctm = check_tm(arena, &new_ctx, &tm, &core::Val::StrTy)?;
-
-                flatten_regs(
-                    binds,
-                    bind_tys,
-                    i + 1,
-                    rest,
-                    sized_acc,
-                    named_acc,
-                    regs_acc
-                        .into_iter()
-                        .chain([(
-                            Reg::Exp(
-                                // collect only the ids present in both the
-                                // exp and the binds
-                                ids, ctm,
-                            ),
-                            Ran::new(i, i + 1),
-                        )])
-                        .collect(),
-                    arena,
-                    ctx,
-                )
-            }
-            RegionData::Named {
-                name,
-                regs: inner_regs,
-            } => flatten_regs(
-                binds,
-                bind_tys,
-                i,
-                inner_regs.iter().chain(rest).collect_vec(),
-                sized_acc,
-                named_acc
-                    .into_iter()
-                    .chain([(name.clone(), Ran::new(i, i + inner_regs.len() as usize))])
-                    .collect(),
-                regs_acc,
-                arena,
-                ctx,
-            ),
-            RegionData::Sized {
-                tm,
-                regs: inner_regs,
-            } => {
-                // first check that tm is a numeric
-                let ctm = check_tm(arena, ctx, &tm, &core::Val::NumTy)?;
-
-                flatten_regs(
-                    binds,
-                    bind_tys,
-                    i,
-                    inner_regs.iter().chain(rest).collect_vec(),
-                    sized_acc
-                        .into_iter()
-                        .chain([(ctm, Ran::new(i, i + inner_regs.len() as usize))])
-                        .collect_vec(),
-                    named_acc,
-                    regs_acc,
-                    arena,
-                    ctx,
-                )
-            }
-        },
-        None => Ok((sized_acc, named_acc, regs_acc)),
-    }
-}
-
-fn infer_read_pattern<'a>(
-    arena: &'a Arena,
-    ctx: &Context<'a>,
-    regs: &'a [Region],
-    params: Vec<(String, &'a core::Val<'a>, &'a core::Val<'a>)>,
-    error: f32,
-) -> Result<(matcher::ReadMatcher<'a>, Vec<String>), ElabError> {
-    // first, separate all the regions out into
-    // - a vec of hole/tm
-    // - the list of named, sized, etc with location ranges
-
-    let param_names = params
-        .iter()
-        .map(|(name, _, _)| name.clone())
-        .collect::<Vec<_>>();
-
-    let bind_tys = params
-        .clone()
-        .into_iter()
-        .map(|(name, _, ty)| (name, ty))
-        .collect::<HashMap<_, _>>();
-
-    let (sized, named, regs) = flatten_regs(
-        &param_names,
-        &bind_tys,
-        0,
-        regs.iter().collect(),
-        vec![],
-        vec![],
-        vec![],
-        arena,
-        ctx,
-    )?;
-
-    // then, walk along and generate an order for everything to happen in
-    // gaining information as we go
-
-    // the locations we know at the start
-    let mut known = vec![0, regs.len()];
-
-    let mut ops: Vec<OpTm> = vec![];
-
-    fn check_all_fixed_lens<'a>(
-        ops: &Vec<OpTm<'a>>,
-        known: &mut Vec<usize>,
-        sized: &Vec<(core::Tm<'a>, Ran<usize>)>,
-        arena: &'a Arena,
-    ) -> (Vec<usize>, Vec<OpTm<'a>>) {
-        println!(
-            "entering check_all_fixed_lens with {}",
-            known.iter().join(", ")
-        );
-        fn learn_new_fixed_lens<'aa>(
-            known: &mut Vec<usize>,
-            fixed_lens: &[(core::Tm<'aa>, Ran<usize>)],
-            arena: &'aa Arena,
-        ) -> Vec<OpTm<'aa>> {
-            let mut ops = vec![];
-            let mut new_known = known.clone();
-
-            for (expr_num, ran) in fixed_lens {
-                match ran.map(|l| known.contains(l)).to_tuple() {
-                    // todo: insert something that actually verifies the length?
-                    (true, true) => {}
-
-                    // if one end is known, insert a let operation
-                    (true, false) => {
-                        ops.push(OpTm::Let {
-                            loc: ran.end,
-                            tm: matcher::LocTm::Offset {
-                                loc_tm: Arc::new(LocTm::Var { loc: ran.start }),
-                                offset: expr_num.clone(),
-                            },
-                        });
-                        new_known.push(ran.end);
-                    }
-
-                    (false, true) => {
-                        ops.push(OpTm::Let {
-                            loc: ran.start,
-                            tm: matcher::LocTm::Offset {
-                                loc_tm: Arc::new(LocTm::Var { loc: ran.end }),
-                                offset: core::Tm::new(
-                                    expr_num.location.clone(),
-                                    core::TmData::FunApp {
-                                        head: Arc::new(
-                                            check_tm(
-                                                arena,
-                                                &core::library::standard_library(arena, true),
-                                                arena.alloc(Tm::new(
-                                                    expr_num.location.clone(),
-                                                    TmData::Name {
-                                                        name: "un_minus".to_string(),
-                                                    },
-                                                )),
-                                                &core::Val::FunTy {
-                                                    args: vec![&core::Val::NumTy],
-                                                    body: &core::Val::NumTy,
-                                                },
-                                            )
-                                            .expect("couldn't find unary minus operation?!"),
-                                        ),
-                                        args: vec![expr_num.clone()],
-                                    },
-                                ),
-                            },
-                        });
-
-                        new_known.push(ran.start);
-                    }
-
-                    (false, false) => {}
-                }
-            }
-
-            known.clone_from(&new_known);
-
-            ops
-        }
-
-        // first check if we know one side of any fixed-length regions
-        let mut ops = ops.clone();
-        let mut known = known.clone();
-
-        let mut ops_new = ops.clone();
-        ops_new.extend(learn_new_fixed_lens(&mut known, sized, arena));
-        // WARN have changed this -- see if it works
-        while !ops.len().eq(&ops_new.len()) {
-            // update the old ops
-            ops.clone_from(&ops_new);
-            // extend the new ops
-            ops_new.extend(learn_new_fixed_lens(&mut known, sized, arena));
-        }
-        ops.clone_from(&ops_new);
-
-        (known, ops)
-    }
-
-    // first, the naive approach - just bind everything left to right
-
-    fn get_tightest_known(known_locs: &[usize], ran: &Ran<usize>) -> Ran<usize> {
-        if let (Some(start), Some(end)) = (
-            known_locs.iter().filter(|loc| **loc <= ran.start).max(),
-            known_locs.iter().filter(|loc| **loc >= ran.end).min(),
-        ) {
-            Ran::new(*start, *end)
-        } else {
-            panic!("didn't know the necessary locations?!");
-        }
-    }
-
-    // rank the binds - with ones as-yet-unknown ranking the worst
-
-    // rank the fixed-size regions we know,
-    // with as-yet-unknown ranking the worst
-
-    // in that order, can we make any restrictions within these regions?
-
-    let bindable_regs = regs.iter().flat_map(|(reg, ran)| match reg {
-        Reg::Hole => None,
-        Reg::Exp(binds, exp) => Some((ran.clone(), (binds, exp.clone()))),
-    });
-
-    for (ran, (binds, exp)) in bindable_regs {
-        // first, do the whole checking-for-range-restrictions thing
-        (known, ops) = check_all_fixed_lens(&ops, &mut known, &sized, arena);
-
-        let search: Ran<usize> = get_tightest_known(&known, &ran);
-
-        // todo: check if the loc is fixed
-        let fixed = Ran::new(search.start == ran.start, search.end == ran.end);
-
-        ops.push(OpTm::Restrict {
-            ids: binds.clone(),
-            tm: exp,
-            ran: search,
-            fixed,
-            save: vec![ran.clone()],
-        });
-
-        known.push(ran.start);
-        known.push(ran.end);
-    }
-
-    // check for range restriction one final time
-    (_, ops) = check_all_fixed_lens(&ops, &mut known, &sized, arena);
-
-    let param_vals = params
-        .clone()
-        .iter()
-        .map(|(name, val, _)| match val {
-            core::Val::List { v } => (name.clone(), v.clone()),
-            _ => panic!("parameter was not drawing from list?"),
-        })
-        .collect::<HashMap<_, _>>();
-    let param_indices = param_names
-        .iter()
-        .enumerate()
-        .map(|(i, name)| (name.clone(), i))
-        .collect::<HashMap<_, _>>();
-
-    let final_ops = ops
-        .iter()
-        .map(|op| op.eval(arena, ctx, param_vals.clone(), param_indices.clone(), error))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(ElabError::from_eval_error)?;
-
-    Ok((
-        matcher::ReadMatcher {
-            ops: final_ops,
-            binds: named.iter().map(|(_, ran)| ran.clone()).collect::<Vec<_>>(),
-            end: regs.len(),
-        },
-        named.iter().map(|(name, _)| name.clone()).collect(),
-    ))
-}
-
-fn infer_read_region<'a>(
-    arena: &'a Arena,
-    ctx: &Context<'a>,
-    reg: &Region,
-    params: Vec<(String, &'a core::Val<'a>, &'a core::Val<'a>)>,
-) {
-    match &reg.data {
-        RegionData::Hole => todo!(),
-        RegionData::Term { tm } => todo!(),
-        RegionData::Named { name, regs } => todo!(),
-        RegionData::Sized { tm, regs } => todo!(),
-    }
-}
-
 fn equate_ty<'a>(
     location: &Location,
     ty1: &core::Val<'a>,
@@ -1017,7 +668,7 @@ fn equate_ty<'a>(
     }
 }
 
-fn check_tm<'a>(
+pub fn check_tm<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
     tm: &'a Tm,
@@ -1032,7 +683,7 @@ fn check_tm<'a>(
     }
 }
 
-fn infer_tm<'a>(
+pub fn infer_tm<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
     tm: &'a Tm,
@@ -1565,6 +1216,21 @@ fn elab_str_lit_reg<'a>(
             // is this arena allocation a bit rogue? this is not what this arena was meant for...
             // should one arena have one distinct semantic content?
             check_tm(arena, ctx, arena.alloc(wrapped_tm), &core::Val::StrTy)
+        }
+    }
+}
+
+impl<'a> Display for RegionData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegionData::Hole => "_".fmt(f),
+            RegionData::Term { tm } => format!("{:?}", tm).fmt(f),
+            RegionData::Named { name, regs } => {
+                format!("{}:({})", name, regs.iter().join(" ")).fmt(f)
+            }
+            RegionData::Sized { tm, regs } => {
+                format!("|{:?}:{}|", tm, regs.iter().join(" ")).fmt(f)
+            }
         }
     }
 }

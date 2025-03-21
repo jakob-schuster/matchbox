@@ -365,6 +365,28 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
             },
             Arc::new(core::library::counts),
         ),
+        // WARN this signature is not specific enough - currently just
+        //      (list: [AnyTy], val: AnyTy) -> Bool,
+        // but actually should be
+        //      (A: Type) => (list: [A], val: A) -> Bool
+        // it's not that bad because if you look up something incompatible it'll just be always false rather than type error
+        (
+            "contains",
+            vec![
+                core::TmData::ListTy {
+                    ty: Arc::new(core::Tm::new(Location::new(0, 0), core::TmData::AnyTy)),
+                },
+                core::TmData::AnyTy,
+            ],
+            core::TmData::BoolTy,
+            Arc::new(core::library::contains),
+        ),
+        (
+            "distance",
+            vec![core::TmData::StrTy, core::TmData::StrTy],
+            core::TmData::NumTy,
+            Arc::new(core::library::contains),
+        ),
     ]
     .into_iter()
     .try_fold(ctx.clone(), |ctx0, (name, args, return_ty, fun)| {
@@ -1356,6 +1378,48 @@ pub fn counts<'a>(
                 arena.alloc(Val::Str { s: b"counts" }) as &Val,
             )]),
         })))),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn contains<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[&'a Val<'a>],
+) -> Result<&'a Val<'a>, EvalError> {
+    match vtms {
+        [Val::List { v }, v0] => {
+            // look for the query value in the list
+            for v1 in v {
+                if v1.eq(arena, v0) {
+                    // if you find it, return early
+                    return Ok(arena.alloc(Val::Bool { b: true }));
+                }
+            }
+            Ok(arena.alloc(Val::Bool { b: false }))
+        }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn distance<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[&'a Val<'a>],
+) -> Result<&'a Val<'a>, EvalError> {
+    match vtms {
+        [Val::Str { s: s0 }, Val::Str { s: s1 }] => {
+            let distance = bio::alignment::distance::levenshtein(s0, s1);
+            Ok(arena.alloc(Val::Num { n: distance as f32 }))
+        }
 
         _ => Err(EvalError::new(
             &location,

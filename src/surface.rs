@@ -30,6 +30,20 @@ impl ElabError {
         }
     }
 
+    pub fn new_unbound_name(location: &Location, name: &str) -> ElabError {
+        ElabError {
+            location: location.clone(),
+            message: format!("unbound name '{}'", name),
+        }
+    }
+
+    pub fn new_non_existent_field_access(location: &Location, name: &str) -> ElabError {
+        ElabError {
+            location: location.clone(),
+            message: format!("trying to access non-existent field '{}'", name),
+        }
+    }
+
     pub fn from_eval_error(eval_error: EvalError) -> ElabError {
         ElabError {
             location: eval_error.location,
@@ -489,7 +503,9 @@ fn infer_pattern_branch<'a>(
     ty: &'a core::Val<'a>,
 ) -> Result<(core::PatternBranch<'a>, core::Val<'a>), ElabError> {
     // just check the type of the pattern itself
-    let (matcher, ty, bind_tys) = infer_pattern(arena, ctx, &branch.data.pat, ty)?;
+    let (matcher, ty1, bind_tys) = infer_pattern(arena, ctx, &branch.data.pat, ty)?;
+    // make sure that it aligns with the type that you're putting in
+    equate_ty(&branch.data.pat.location, &ty1, ty)?;
 
     let stmt = elab_stmt(
         arena,
@@ -506,7 +522,7 @@ fn infer_pattern_branch<'a>(
             branch.location.clone(),
             core::PatternBranchData { matcher, stmt },
         ),
-        ty,
+        ty1,
     ))
 }
 
@@ -756,16 +772,13 @@ pub fn infer_tm<'a>(
                             ),
                             field.data,
                         )),
-                        None => Err(ElabError::new(
-                            &tm.location,
-                            "trying to access non-existent field",
-                        )),
+                        None => Err(ElabError::new_non_existent_field_access(&tm.location, name)),
                     }
                 }
                 // todo: improve this message
                 _ => Err(ElabError::new(
                     &tm.location,
-                    "trying to access field of a non-record",
+                    "trying to access field of a value which doesn't have any fields",
                 )),
             }
         }
@@ -970,7 +983,7 @@ pub fn infer_tm<'a>(
                 core::Tm::new(tm.location.clone(), core::TmData::Var { index }),
                 ty,
             )),
-            None => Err(ElabError::new(&tm.location, "unbound name")),
+            None => Err(ElabError::new_unbound_name(&tm.location, &name)),
         },
         TmData::BinOp { tm0, tm1, op } => infer_bin_op(op, arena, ctx, &tm.location, tm0, tm1),
         TmData::UnOp { tm, op } => infer_un_op(op, arena, ctx, &tm.location, tm),
@@ -1018,7 +1031,7 @@ fn infer_bin_op<'a>(
 
                 _ => panic!("operator has non-function type?!"),
             },
-            None => Err(ElabError::new(location, "unbound name")),
+            None => Err(ElabError::new_unbound_name(location, &name)),
         }
     };
 
@@ -1088,7 +1101,7 @@ fn infer_un_op<'a>(
                     ),
                     ty,
                 )),
-                None => Err(ElabError::new(location, "unbound name")),
+                None => Err(ElabError::new_unbound_name(location, name)),
             }
         };
 
@@ -1112,7 +1125,7 @@ fn infer_un_op<'a>(
                         ),
                         ty,
                     )),
-                    None => Err(ElabError::new(location, "unbound name")),
+                    None => Err(ElabError::new_unbound_name(location, "unary_minus")),
                 },
                 core::Val::StrTy => match ctx.lookup("unary_reverse_complement".to_string()) {
                     Some((index, ty)) => Ok((
@@ -1128,7 +1141,10 @@ fn infer_un_op<'a>(
                         ),
                         ty,
                     )),
-                    None => Err(ElabError::new(location, "unbound name")),
+                    None => Err(ElabError::new_unbound_name(
+                        location,
+                        "unary_reverse_complement",
+                    )),
                 },
                 core::Val::FunReturnTyAwaiting { .. } => panic!(
                     "trying to apply an operation on a value whose type is not yet defined; todo"

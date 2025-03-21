@@ -75,10 +75,10 @@ impl<'a> Matcher<'a> for ReadMatcher<'a> {
 
                 Ok(envs.collect::<Vec<_>>())
             } else {
-                todo!()
+                panic!("gave non-read value to read matcher?!")
             }
         } else {
-            todo!()
+            panic!("gave non-record value to read matcher?!")
         }
     }
 }

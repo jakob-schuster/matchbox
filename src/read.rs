@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::{Display, Pointer},
     fs::File,
     io::{stdin, BufRead, BufReader},
     path::Path,
@@ -44,14 +45,34 @@ impl Prog {
 
 #[derive(Debug)]
 pub enum InputError {
-    FileNameError,
+    FileNameError { filename: String },
     FileTypeError(FileTypeError),
-    FileOpenError(std::io::Error),
+    FileOpenError { filename: String },
+}
+
+impl Display for InputError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputError::FileNameError { filename } => {
+                format!("could not determine type of file '{}'", filename).fmt(f)
+            }
+            InputError::FileTypeError(file_type_error) => file_type_error.fmt(f),
+            InputError::FileOpenError { filename } => {
+                format!("could not open file '{}'", filename).fmt(f)
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
-pub enum FileTypeError {
-    UnknownFileType,
+pub struct FileTypeError {
+    extension: String,
+}
+
+impl Display for FileTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!("inappropriate file extension '{}'", self.extension).fmt(f)
+    }
 }
 
 pub enum FileType {
@@ -79,7 +100,9 @@ impl TryFrom<&str> for FileType {
             "sam" => Ok(FileType::Sam),
             "bam" => Ok(FileType::Bam),
 
-            _ => Err(FileTypeError::UnknownFileType),
+            _ => Err(FileTypeError {
+                extension: value.to_string(),
+            }),
         }
     }
 }
@@ -93,7 +116,9 @@ fn get_filetype_and_buffer(input_file: &str) -> Result<(FileType, Box<dyn BufRea
     } else {
         let path = Path::new(&input_file);
 
-        let file = File::open(path).map_err(InputError::FileOpenError)?;
+        let file = File::open(path).map_err(|_| InputError::FileOpenError {
+            filename: input_file.to_string(),
+        })?;
 
         match &input_file.split('.').collect_vec()[..] {
             [.., ext, "gz"] => match FileType::try_from(*ext) {
@@ -109,7 +134,9 @@ fn get_filetype_and_buffer(input_file: &str) -> Result<(FileType, Box<dyn BufRea
                 Err(err) => Err(InputError::FileTypeError(err)),
             },
 
-            _ => Err(InputError::FileNameError),
+            _ => Err(InputError::FileNameError {
+                filename: input_file.to_string(),
+            }),
         }
     }
 }

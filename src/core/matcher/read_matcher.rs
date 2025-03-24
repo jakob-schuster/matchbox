@@ -21,13 +21,16 @@ pub struct ReadMatcher<'a> {
     pub end: usize,
 }
 
-impl<'a> Matcher<'a> for ReadMatcher<'a> {
-    fn evaluate<'b>(
-        &'b self,
+impl<'p> Matcher<'p> for ReadMatcher<'p> {
+    fn evaluate<'a>(
+        &self,
         arena: &'a Arena,
-        env: &'b Env<&'a Val<'a>>,
+        env: &Env<&'a Val<'a>>,
         val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
+    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+    where
+        'p: 'a,
+    {
         if let Val::Rec(rec) = val {
             if let Val::Str { s: seq } = rec.get(b"seq", arena).expect("") {
                 // first, generate all the worlds from the operations
@@ -84,9 +87,9 @@ impl<'a> Matcher<'a> for ReadMatcher<'a> {
 }
 
 #[derive(Clone)]
-enum Reg<'a> {
+enum Reg<'p> {
     Hole,
-    Exp(Vec<String>, core::Tm<'a>),
+    Exp(Vec<String>, core::Tm<'p>),
 }
 
 fn flatten_regs<'a>(
@@ -421,17 +424,17 @@ pub fn infer_read_pattern<'a>(
 }
 
 #[derive(Clone)]
-pub enum OpTm<'a> {
+pub enum OpTm<'p> {
     Let {
         // the location to assign to
         loc: usize,
         // the
-        tm: LocTm<'a>,
+        tm: LocTm<'p>,
     },
     Restrict {
         // list of new binds to make
         ids: Vec<String>,
-        tm: core::Tm<'a>,
+        tm: core::Tm<'p>,
         // the location range to search between
         ran: Ran<usize>,
         // whether the ends are fixed
@@ -441,15 +444,18 @@ pub enum OpTm<'a> {
     },
 }
 
-impl<'a> OpTm<'a> {
-    pub fn eval(
+impl<'p> OpTm<'p> {
+    pub fn eval<'a>(
         &self,
         arena: &'a Arena,
         ctx: &Context<'a>,
         params: HashMap<String, Vec<&'a Val<'a>>>,
         param_indices: HashMap<String, usize>,
         error: f32,
-    ) -> Result<OpVal<'a>, EvalError> {
+    ) -> Result<OpVal<'a>, EvalError>
+    where
+        'p: 'a,
+    {
         match self {
             OpTm::Let { loc, tm } => Ok(OpVal::Let {
                 loc: *loc,
@@ -605,15 +611,18 @@ impl<'a> BindCtx<'a> {
     }
 }
 
-impl<'a> OpVal<'a> {
-    fn exec(
+impl<'p> OpVal<'p> {
+    fn exec<'a>(
         &self,
         arena: &'a Arena,
         env: &Env<&'a core::Val<'a>>,
         seq: &'a [u8],
         loc_ctx: &LocCtx,
         bind_ctx: &BindCtx<'a>,
-    ) -> Result<Vec<(BindCtx<'a>, LocCtx)>, core::EvalError> {
+    ) -> Result<Vec<(BindCtx<'a>, LocCtx)>, core::EvalError>
+    where
+        'p: 'a,
+    {
         match self {
             OpVal::Let { loc, tm } => {
                 let pos = eval_loc_tm(&arena, env, loc_ctx, tm)?;
@@ -653,16 +662,17 @@ impl<'a> OpVal<'a> {
                         //     .take(save.len())
                         //     .last();
 
-                        let combs = matches
+                        let combs: Vec<(BindCtx<'a>, LocCtx, u8)> = matches
                             .iter()
                             .combinations(save.len())
                             .map(|c| {
                                 (
-                                    local_binds
-                                        .iter()
-                                        .fold(bind_ctx.clone(), |old_bind_ctx, (id, val)| {
-                                            old_bind_ctx.with(*id, *val)
-                                        }),
+                                    local_binds.iter().fold(
+                                        bind_ctx.clone(),
+                                        |old_bind_ctx, (id, val)| {
+                                            old_bind_ctx.with(*id, arena.alloc(val.coerce(arena)))
+                                        },
+                                    ) as BindCtx<'a>,
                                     c.iter().enumerate().fold(
                                         loc_ctx.clone(),
                                         |old_loc_ctx, (i, mat)| {
@@ -670,8 +680,8 @@ impl<'a> OpVal<'a> {
                                                 .with(save.get(i).unwrap().start, mat.ran.start)
                                                 .with(save.get(i).unwrap().end, mat.ran.end)
                                         },
-                                    ),
-                                    c.iter().fold(0, |acc, mat| acc + mat.dist),
+                                    ) as LocCtx,
+                                    c.iter().fold(0, |acc, mat| acc + mat.dist) as u8,
                                 )
                             })
                             .collect_vec();
@@ -713,20 +723,20 @@ impl<'a> OpVal<'a> {
 }
 
 #[derive(Clone)]
-pub enum LocTm<'a> {
+pub enum LocTm<'p> {
     Var {
         loc: usize,
     },
     Offset {
-        loc_tm: Arc<LocTm<'a>>,
-        offset: core::Tm<'a>,
+        loc_tm: Arc<LocTm<'p>>,
+        offset: core::Tm<'p>,
     },
 }
-fn eval_loc_tm<'a>(
+fn eval_loc_tm<'p: 'a, 'a>(
     arena: &'a Arena,
     env: &Env<&'a core::Val<'a>>,
     loc_ctx: &LocCtx,
-    loc_tm: &LocTm<'a>,
+    loc_tm: &LocTm<'p>,
 ) -> Result<usize, core::EvalError> {
     match loc_tm {
         LocTm::Var { loc } => Ok(loc_ctx.get(loc)),

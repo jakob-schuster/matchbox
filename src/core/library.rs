@@ -47,11 +47,11 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
             core::TmData::NumTy,
             Arc::new(core::library::binary_plus)
                 as Arc<
-                    dyn Fn(
-                            &'a Arena,
+                    dyn for<'b> Fn(
+                            &'b Arena,
                             &Location,
-                            &[&'a core::Val<'a>],
-                        ) -> Result<&'a core::Val<'a>, EvalError>
+                            &[&'b core::Val<'b>],
+                        ) -> Result<&'b core::Val<'b>, EvalError>
                         + Send
                         + Sync,
                 >,
@@ -448,7 +448,7 @@ pub fn foreign<'a>(
     name: &str,
 ) -> Result<
     Arc<
-        dyn Fn(&'a Arena, &Location, &[&'a Val<'a>]) -> Result<&'a Val<'a>, EvalError>
+        dyn for<'b> Fn(&'b Arena, &Location, &[&'b Val<'b>]) -> Result<&'b Val<'b>, EvalError>
             + Send
             + Sync,
     >,

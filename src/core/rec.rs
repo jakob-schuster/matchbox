@@ -8,16 +8,26 @@ pub enum RecError {
     BadIndex(String),
 }
 
-pub trait Rec<'a>: Display + Send + Sync {
-    fn get(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError>;
-    fn all(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>>;
-    fn with(&self, key: &'a [u8], val: &'a Val<'a>, arena: &'a Arena) -> ConcreteRec<'a> {
+pub trait Rec<'p>: Display + Send + Sync {
+    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError>
+    where
+        'p: 'a;
+    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>>
+    where
+        'p: 'a;
+    fn with<'a>(&self, key: &'a [u8], val: &'a Val<'a>, arena: &'a Arena) -> ConcreteRec<'a>
+    where
+        'p: 'a,
+    {
         let mut map = self.all(arena);
         map.insert(key, val);
 
         ConcreteRec { map }
     }
-    fn with_all(&self, entries: &[(&'a [u8], &'a Val<'a>)], arena: &'a Arena) -> ConcreteRec<'a> {
+    fn with_all<'a>(&self, entries: &[(&'a [u8], &'a Val<'a>)], arena: &'a Arena) -> ConcreteRec<'a>
+    where
+        'p: 'a,
+    {
         let mut map = self.all(arena);
 
         for (key, val) in entries {
@@ -26,16 +36,28 @@ pub trait Rec<'a>: Display + Send + Sync {
 
         ConcreteRec { map }
     }
+
+    fn coerce<'a>(&self, arena: &'a Arena) -> &'a dyn Rec<'a>
+    where
+        'p: 'a,
+    {
+        arena.alloc(ConcreteRec {
+            map: self.all(arena),
+        })
+    }
 }
 
-pub struct ConcreteRec<'a> {
-    pub map: HashMap<&'a [u8], &'a Val<'a>>,
+pub struct ConcreteRec<'p> {
+    pub map: HashMap<&'p [u8], &'p Val<'p>>,
 }
 
-impl<'a: 'b, 'b: 'a> Rec<'a> for ConcreteRec<'b> {
-    fn get(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError> {
+impl<'p> Rec<'p> for ConcreteRec<'p> {
+    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError>
+    where
+        'p: 'a,
+    {
         match self.map.get(key) {
-            Some(val) => Ok(val),
+            Some(val) => Ok(arena.alloc(val.coerce(arena))),
             None => Err(InternalError {
                 message: format!(
                     "could not find field '{}'",
@@ -45,8 +67,19 @@ impl<'a: 'b, 'b: 'a> Rec<'a> for ConcreteRec<'b> {
         }
     }
 
-    fn all(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>> {
-        self.map.clone()
+    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>>
+    where
+        'p: 'a,
+    {
+        self.map
+            .iter()
+            .map(|(a, b)| {
+                (
+                    arena.alloc(a.to_vec()) as &'a [u8],
+                    arena.alloc(b.coerce(arena)) as &'a Val<'a>,
+                )
+            })
+            .collect()
     }
 }
 
@@ -68,8 +101,11 @@ pub struct FastaRead {
     pub read: bio::io::fasta::Record,
 }
 
-impl<'a> Rec<'a> for FastaRead {
-    fn get(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError> {
+impl<'p> Rec<'p> for FastaRead {
+    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError>
+    where
+        'p: 'a,
+    {
         match key {
             b"seq" => Ok(arena.alloc(Val::Str {
                 s: arena.alloc(self.read.seq().to_vec()),
@@ -87,7 +123,10 @@ impl<'a> Rec<'a> for FastaRead {
         }
     }
 
-    fn all(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>> {
+    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>>
+    where
+        'p: 'a,
+    {
         let mut map: HashMap<&'a [u8], &'a Val<'a>> = HashMap::new();
         let fields: Vec<&[u8]> = vec![b"seq", b"id", b"desc"];
 
@@ -109,8 +148,11 @@ pub struct FastqRead {
     pub read: bio::io::fastq::Record,
 }
 
-impl<'a> Rec<'a> for FastqRead {
-    fn get(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError> {
+impl<'p> Rec<'p> for FastqRead {
+    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError>
+    where
+        'p: 'a,
+    {
         match key {
             b"seq" => Ok(arena.alloc(Val::Str {
                 s: arena.alloc(self.read.seq().to_vec()),
@@ -131,7 +173,10 @@ impl<'a> Rec<'a> for FastqRead {
         }
     }
 
-    fn all(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>> {
+    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], &'a Val<'a>>
+    where
+        'p: 'a,
+    {
         let mut map: HashMap<&'a [u8], &'a Val<'a>> = HashMap::new();
         let fields: Vec<&[u8]> = vec![b"seq", b"id", b"desc", b"qual"];
 

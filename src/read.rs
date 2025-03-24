@@ -315,7 +315,7 @@ pub fn read_any<'p, 'a: 'p>(
     let (filetype, buffer) = get_filetype_and_buffer(filename).unwrap();
 
     match filetype {
-        FileType::Fasta => read_fa_new(buffer, prog, arena, output_handler),
+        FileType::Fasta => read_fa_multithreaded_new(buffer, prog, arena, output_handler),
         FileType::Fastq => read_fq_new(buffer, prog, arena, output_handler),
         _ => todo!(),
     }
@@ -366,6 +366,8 @@ pub fn read_fa_multithreaded_new<'p, 'a: 'p>(
 
     // let arena = Arena::new();
     for chunk in &input_records.chunks(10000) {
+        let mut effects = vec![];
+
         chunk
             .collect_vec()
             .into_par_iter()
@@ -378,8 +380,12 @@ pub fn read_fa_multithreaded_new<'p, 'a: 'p>(
                     effects
                 }
                 Err(_) => panic!("bad read?!"),
-            });
+            })
+            .collect_into_vec(&mut effects);
 
+        for effect in effects.iter().flatten() {
+            output_handler.handle(effect).unwrap();
+        }
         // match record {
         //     Ok(read) => {
         //         let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));

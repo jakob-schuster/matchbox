@@ -34,14 +34,17 @@ impl EvalError {
     }
 }
 
-pub type Prog<'a> = Located<ProgData<'a>>;
+pub type Prog<'p> = Located<ProgData<'p>>;
 #[derive(Clone)]
-pub struct ProgData<'a> {
-    pub stmt: Stmt<'a>,
+pub struct ProgData<'p> {
+    pub stmt: Stmt<'p>,
 }
 
-impl<'a> Prog<'a> {
-    pub fn eval(&self, read: &'a Val<'a>, arena: &'a Arena) -> Result<Vec<Effect>, EvalError> {
+impl<'p> Prog<'p> {
+    pub fn eval<'a>(&self, read: &'a Val<'a>, arena: &'a Arena) -> Result<Vec<Effect>, EvalError>
+    where
+        'p: 'a,
+    {
         eval_stmt(
             arena,
             &library::standard_library(arena, false).tms.with(read),
@@ -50,58 +53,58 @@ impl<'a> Prog<'a> {
     }
 }
 
-pub type Stmt<'a> = Located<StmtData<'a>>;
+pub type Stmt<'p> = Located<StmtData<'p>>;
 #[derive(Clone)]
-pub enum StmtData<'a> {
+pub enum StmtData<'p> {
     Let {
-        tm: Tm<'a>,
-        next: Arc<Stmt<'a>>,
+        tm: Tm<'p>,
+        next: Arc<Stmt<'p>>,
     },
     Out {
-        tm0: Tm<'a>,
-        tm1: Tm<'a>,
-        next: Arc<Stmt<'a>>,
+        tm0: Tm<'p>,
+        tm1: Tm<'p>,
+        next: Arc<Stmt<'p>>,
     },
     If {
-        branches: Vec<Branch<'a>>,
-        next: Arc<Stmt<'a>>,
+        branches: Vec<Branch<'p>>,
+        next: Arc<Stmt<'p>>,
     },
     End,
 }
 
-pub type Branch<'a> = Located<BranchData<'a>>;
+pub type Branch<'p> = Located<BranchData<'p>>;
 #[derive(Clone)]
-pub enum BranchData<'a> {
+pub enum BranchData<'p> {
     Bool {
-        tm: Tm<'a>,
-        stmt: Stmt<'a>,
+        tm: Tm<'p>,
+        stmt: Stmt<'p>,
     },
 
     Is {
-        tm: Tm<'a>,
-        branches: Vec<PatternBranch<'a>>,
+        tm: Tm<'p>,
+        branches: Vec<PatternBranch<'p>>,
     },
 }
 
-pub type PatternBranch<'a> = Located<PatternBranchData<'a>>;
+pub type PatternBranch<'p> = Located<PatternBranchData<'p>>;
 #[derive(Clone)]
-pub struct PatternBranchData<'a> {
-    pub matcher: Arc<dyn Matcher<'a> + 'a>,
-    pub stmt: Stmt<'a>,
+pub struct PatternBranchData<'p> {
+    pub matcher: Arc<dyn Matcher<'p> + 'p>,
+    pub stmt: Stmt<'p>,
 }
 
-pub fn eval_prog<'a>(
+pub fn eval_prog<'p: 'a, 'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
-    prog: &Prog<'a>,
+    prog: &Prog<'p>,
 ) -> Result<Vec<Effect>, EvalError> {
     eval_stmt(arena, env, &prog.data.stmt)
 }
 
-fn eval_stmt<'a>(
+fn eval_stmt<'p: 'a, 'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
-    stmt: &Stmt<'a>,
+    stmt: &Stmt<'p>,
 ) -> Result<Vec<Effect>, EvalError> {
     match &stmt.data {
         StmtData::Let { tm, next } => {
@@ -143,10 +146,10 @@ fn eval_stmt<'a>(
     }
 }
 
-fn eval_branch<'a>(
+fn eval_branch<'p: 'a, 'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
-    branch: &Branch<'a>,
+    branch: &Branch<'p>,
 ) -> Result<Option<Vec<Effect>>, EvalError> {
     match &branch.data {
         BranchData::Bool { tm, stmt } => match eval(arena, env, tm)? {
@@ -176,10 +179,10 @@ fn eval_branch<'a>(
     }
 }
 
-fn eval_pattern_branch<'a>(
+fn eval_pattern_branch<'p: 'a, 'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
-    branch: &PatternBranch<'a>,
+    branch: &PatternBranch<'p>,
     val: &'a Val<'a>,
 ) -> Result<Option<Vec<Effect>>, EvalError> {
     match &branch.data.matcher.evaluate(arena, env, val)?[..] {
@@ -272,10 +275,10 @@ pub enum TmData<'a> {
     },
 }
 
-pub fn eval<'a>(
+pub fn eval<'p: 'a, 'a>(
     arena: &'a Arena,
     env: &Env<&'a Val<'a>>,
-    tm: &Tm<'a>,
+    tm: &Tm<'p>,
 ) -> Result<&'a Val<'a>, EvalError> {
     match &tm.data {
         // look up the variable in the environment
@@ -468,7 +471,7 @@ pub enum Val<'a> {
     },
 }
 
-impl<'arena: 'a, 'a> Val<'a> {
+impl<'a> Val<'a> {
     pub fn equiv(&self, other: &Val<'a>) -> bool {
         // takes a field name, and looks it up in the list of fields,
         // returning the type if one is found
@@ -583,7 +586,7 @@ impl<'arena: 'a, 'a> Val<'a> {
         }
     }
 
-    pub fn eq(&self, arena: &'arena Arena, other: &Val<'a>) -> bool {
+    pub fn eq<'b, 'c>(&self, arena: &'b Arena, other: &Val<'c>) -> bool {
         match (self, other) {
             (Val::Univ, Val::Univ)
             | (Val::AnyTy, Val::AnyTy)
@@ -657,6 +660,61 @@ impl<'arena: 'a, 'a> Val<'a> {
 
             // all atomic combinations are equally precise (assuming they are equiv!)
             _ => self.clone(),
+        }
+    }
+
+    /// A clumsy function to move a value from one arena to another,
+    /// necessitated by ConcreteRec, which has its values from a static arena and then needs to produce values in the dynamic arena.
+    /// Probably shockingly inefficient and could be removed with better design.
+    fn coerce<'b>(&self, arena: &'b Arena) -> Val<'b>
+    where
+        'a: 'b,
+    {
+        match self {
+            Val::Univ => Val::Univ,
+            Val::AnyTy => Val::AnyTy,
+            Val::BoolTy => Val::BoolTy,
+            Val::Bool { b } => Val::Bool { b: *b },
+            Val::NumTy => Val::NumTy,
+            Val::Num { n } => Val::Num { n: *n },
+            Val::StrTy => Val::StrTy,
+            Val::Str { s } => Val::Str { s: s as &'b [u8] },
+            Val::ListTy { ty } => Val::ListTy {
+                ty: arena.alloc(ty.coerce(arena)),
+            },
+            Val::List { v } => Val::List {
+                v: v.iter()
+                    .map(|v| arena.alloc(v.coerce(arena)) as &Val<'b>)
+                    .collect::<Vec<_>>(),
+            },
+            Val::RecTy { fields } => Val::RecTy {
+                fields: fields
+                    .iter()
+                    .map(|a| {
+                        CoreRecField::new(a.name, arena.alloc(a.data.coerce(arena)) as &Val<'b>)
+                    })
+                    .collect(),
+            },
+            Val::RecWithTy { fields } => Val::RecWithTy {
+                fields: fields
+                    .iter()
+                    .map(|a| {
+                        CoreRecField::new(a.name, arena.alloc(a.data.coerce(arena)) as &Val<'b>)
+                    })
+                    .collect(),
+            },
+            Val::Rec(rec) => Val::Rec(rec.coerce(arena)),
+            Val::FunTy { args, body } => Val::FunTy {
+                args: args
+                    .iter()
+                    .map(|arg| arena.alloc(arg.coerce(arena)) as &Val<'b>)
+                    .collect(),
+                body: arena.alloc(body.coerce(arena)),
+            },
+            Val::Fun { data } => todo!(),
+            Val::FunForeign { f } => Val::FunForeign { f: f.clone() },
+            Val::FunReturnTyAwaiting { data } => todo!(),
+            Val::Neutral { neutral } => todo!(),
         }
     }
 }

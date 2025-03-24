@@ -8,7 +8,10 @@ use codespan_reporting::{
 };
 use output::OutputHandler;
 use parse::parse;
-use read::{read_any, read_fa_new, InputError, Reader};
+use read::{
+    get_extensions, get_filetype_and_buffer, read_any, read_fa_new, FileType, FileTypeError,
+    InputError, Reader,
+};
 use surface::elab_prog;
 use util::{Arena, Env};
 
@@ -32,7 +35,7 @@ fn main() {
 
     let code = read_code_from_script(&global_config.script)
         .map_err(|e| {
-            let file = SimpleFile::new("<code>", "");
+            let file = SimpleFile::new(format!("<{}>", global_config.script), "");
             let diagnostic = Diagnostic::error().with_message(e.to_string());
             term::emit(&mut writer, &config, &file, &diagnostic);
             exit(1)
@@ -42,7 +45,7 @@ fn main() {
 
     let prog = parse(&code, &global_config)
         .map_err(|e| {
-            let file = SimpleFile::new("<code>", code.clone());
+            let file = SimpleFile::new(format!("<{}>", global_config.script), code.clone());
             let diagnostic = Diagnostic::error()
                 .with_message(e.clone().message)
                 .with_labels(vec![Label::primary((), e.start..e.end)])
@@ -59,7 +62,7 @@ fn main() {
 
     let cprog = elab_prog(&arena, &ctx, &prog)
         .map_err(|e| {
-            let file = SimpleFile::new("<code>", code.clone());
+            let file = SimpleFile::new(format!("<{}>", global_config.script), code.clone());
             let diagnostic = Diagnostic::error()
                 .with_message(e.clone().message)
                 .with_labels(vec![Label::primary((), e.location.start..e.location.end)])
@@ -102,6 +105,32 @@ pub struct GlobalConfig {
 
 fn read_code_from_script(script_filename: &str) -> Result<String, InputError> {
     let mut code = String::new();
+
+    match &get_extensions(script_filename)[..] {
+        [.., last] => match FileType::try_from(*last) {
+            Ok(filetype) => match filetype {
+                FileType::Matchbox => {}
+                _ => {
+                    return Err(InputError::FileTypeError(FileTypeError {
+                        extension: last.to_string(),
+                        expected: Some("mb".to_string()),
+                    }))
+                }
+            },
+            Err(_) => {
+                return Err(InputError::FileTypeError(FileTypeError {
+                    extension: last.to_string(),
+                    expected: Some("mb".to_string()),
+                }))
+            }
+        },
+        [] => {
+            return Err(InputError::FileTypeError(FileTypeError {
+                extension: "".to_string(),
+                expected: Some("mb".to_string()),
+            }))
+        }
+    }
 
     File::open(script_filename)
         .map_err(|_| InputError::FileOpenError {

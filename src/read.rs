@@ -66,12 +66,21 @@ impl Display for InputError {
 
 #[derive(Debug)]
 pub struct FileTypeError {
-    extension: String,
+    pub extension: String,
+    pub expected: Option<String>,
 }
 
 impl Display for FileTypeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        format!("inappropriate file extension '{}'", self.extension).fmt(f)
+        match &self.expected {
+            Some(expected) => format!(
+                "inappropriate file extension '{}', expected '{}'",
+                self.extension, expected
+            )
+            .fmt(f),
+
+            None => format!("inappropriate file extension '{}'", self.extension).fmt(f),
+        }
     }
 }
 
@@ -80,6 +89,7 @@ pub enum FileType {
     Fastq,
     Sam,
     Bam,
+    Matchbox,
     List,
 }
 
@@ -100,16 +110,26 @@ impl TryFrom<&str> for FileType {
             "sam" => Ok(FileType::Sam),
             "bam" => Ok(FileType::Bam),
 
+            "mb" => Ok(FileType::Matchbox),
+
             _ => Err(FileTypeError {
                 extension: value.to_string(),
+                expected: None,
             }),
         }
     }
 }
 
+/// Given a filename, gets the list of file extensions.
+pub fn get_extensions(input_file: &str) -> Vec<&str> {
+    input_file.split('.').collect_vec()
+}
+
 /// Checks the arguments, and either opens a file or reads from stdin.
 /// Also returns the filetype.
-fn get_filetype_and_buffer(input_file: &str) -> Result<(FileType, Box<dyn BufRead>), InputError> {
+pub fn get_filetype_and_buffer(
+    input_file: &str,
+) -> Result<(FileType, Box<dyn BufRead>), InputError> {
     if input_file.eq("stdin") {
         // just read straight from stdin
         Ok((FileType::Fasta, Box::new(BufReader::new(stdin()))))
@@ -120,7 +140,7 @@ fn get_filetype_and_buffer(input_file: &str) -> Result<(FileType, Box<dyn BufRea
             filename: input_file.to_string(),
         })?;
 
-        match &input_file.split('.').collect_vec()[..] {
+        match &get_extensions(input_file)[..] {
             [.., ext, "gz"] => match FileType::try_from(*ext) {
                 Ok(filetype) => Ok((
                     filetype,

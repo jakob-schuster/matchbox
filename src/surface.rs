@@ -959,7 +959,6 @@ pub fn infer_tm<'a>(
                         _ => body,
                     };
 
-                    println!("body ty is {}", body_ty);
                     Ok((
                         core::Tm::new(
                             tm.location.clone(),
@@ -983,7 +982,7 @@ pub fn infer_tm<'a>(
                 core::Tm::new(tm.location.clone(), core::TmData::Var { index }),
                 ty,
             )),
-            None => Err(ElabError::new_unbound_name(&tm.location, &name)),
+            None => Err(ElabError::new_unbound_name(&tm.location, name)),
         },
         TmData::BinOp { tm0, tm1, op } => infer_bin_op(op, arena, ctx, &tm.location, tm0, tm1),
         TmData::UnOp { tm, op } => infer_un_op(op, arena, ctx, &tm.location, tm),

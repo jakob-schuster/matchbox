@@ -247,7 +247,7 @@ pub enum TmData<'a> {
     FunForeignLit {
         args: Vec<Tm<'a>>,
         body: Arc<
-            dyn Fn(&'a Arena, &Location, &[&'a Val<'a>]) -> Result<&'a Val<'a>, EvalError>
+            dyn for<'b> Fn(&'b Arena, &Location, &[&'b Val<'b>]) -> Result<&'b Val<'b>, EvalError>
                 + Send
                 + Sync,
         >,
@@ -451,7 +451,7 @@ pub enum Val<'a> {
     },
     FunForeign {
         f: Arc<
-            dyn Fn(&'a Arena, &Location, &[&'a Val<'a>]) -> Result<&'a Val<'a>, EvalError>
+            dyn for<'b> Fn(&'b Arena, &Location, &[&'b Val<'b>]) -> Result<&'b Val<'b>, EvalError>
                 + Send
                 + Sync,
         >,

@@ -12,22 +12,22 @@ use crate::{
 
 use super::Matcher;
 
-pub struct ReadMatcher<'a> {
+pub struct ReadMatcher<'p: 'a, 'a> {
     /// The search operations to perform
-    pub ops: Vec<OpVal<'a>>,
+    pub ops: Vec<OpVal<'p, 'a>>,
     /// The location ranges to bind at the end in each world
     pub binds: Vec<Ran<usize>>,
     /// The location to label to the end
     pub end: usize,
 }
 
-impl<'a> Matcher<'a> for ReadMatcher<'a> {
+impl<'p: 'a, 'a> Matcher<'p, 'a> for ReadMatcher<'p, 'a> {
     fn evaluate<'b>(
         &'b self,
         arena: &'a Arena,
-        env: &'b Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
+        env: &'b Env<&'a Val<'p, 'a>>,
+        val: &'a Val<'p, 'a>,
+    ) -> Result<Vec<Vec<&'a Val<'p, 'a>>>, EvalError> {
         if let Val::Rec(rec) = val {
             if let Val::Str { s: seq } = rec.get(b"seq", arena).expect("") {
                 // first, generate all the worlds from the operations
@@ -65,7 +65,7 @@ impl<'a> Matcher<'a> for ReadMatcher<'a> {
                                     arena,
                                 )));
 
-                                arena.alloc(sliced) as &'a Val<'a>
+                                arena.alloc(sliced) as &'a Val<'p, 'a>
                             }),
                         )
                         .collect::<Vec<_>>();
@@ -84,26 +84,26 @@ impl<'a> Matcher<'a> for ReadMatcher<'a> {
 }
 
 #[derive(Clone)]
-enum Reg<'a> {
+enum Reg<'p: 'a, 'a> {
     Hole,
-    Exp(Vec<String>, core::Tm<'a>),
+    Exp(Vec<String>, core::Tm<'p, 'a>),
 }
 
 fn flatten_regs<'a>(
     binds: &[String],
-    bind_tys: &HashMap<String, &'a core::Val<'a>>,
+    bind_tys: &HashMap<String, &'a core::Val<'a, 'a>>,
     i: usize,
     regs: Vec<&'a Region>,
-    sized_acc: Vec<(core::Tm<'a>, Ran<usize>)>,
+    sized_acc: Vec<(core::Tm<'a, 'a>, Ran<usize>)>,
     named_acc: Vec<(String, Ran<usize>)>,
-    regs_acc: Vec<(Reg<'a>, Ran<usize>)>,
+    regs_acc: Vec<(Reg<'a, 'a>, Ran<usize>)>,
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
 ) -> Result<
     (
-        Vec<(core::Tm<'a>, Ran<usize>)>,
+        Vec<(core::Tm<'a, 'a>, Ran<usize>)>,
         Vec<(String, Ran<usize>)>,
-        Vec<(Reg<'a>, Ran<usize>)>,
+        Vec<(Reg<'a, 'a>, Ran<usize>)>,
     ),
     ElabError,
 > {
@@ -209,11 +209,11 @@ fn flatten_regs<'a>(
 
 pub fn infer_read_pattern<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     regs: &'a [Region],
-    params: Vec<(String, &'a core::Val<'a>, &'a core::Val<'a>)>,
+    params: Vec<(String, &'a core::Val<'a, 'a>, &'a core::Val<'a, 'a>)>,
     error: f32,
-) -> Result<(ReadMatcher<'a>, Vec<String>), ElabError> {
+) -> Result<(ReadMatcher<'a, 'a>, Vec<String>), ElabError> {
     // first, separate all the regions out into
     // - a vec of hole/tm
     // - the list of named, sized, etc with location ranges
@@ -250,16 +250,16 @@ pub fn infer_read_pattern<'a>(
     let mut ops: Vec<OpTm> = vec![];
 
     fn check_all_fixed_lens<'a>(
-        ops: &Vec<OpTm<'a>>,
+        ops: &Vec<OpTm<'a, 'a>>,
         known: &mut Vec<usize>,
-        sized: &Vec<(core::Tm<'a>, Ran<usize>)>,
+        sized: &Vec<(core::Tm<'a, 'a>, Ran<usize>)>,
         arena: &'a Arena,
-    ) -> (Vec<usize>, Vec<OpTm<'a>>) {
+    ) -> (Vec<usize>, Vec<OpTm<'a, 'a>>) {
         fn learn_new_fixed_lens<'aa>(
             known: &mut Vec<usize>,
-            fixed_lens: &[(core::Tm<'aa>, Ran<usize>)],
+            fixed_lens: &[(core::Tm<'aa, 'aa>, Ran<usize>)],
             arena: &'aa Arena,
-        ) -> Vec<OpTm<'aa>> {
+        ) -> Vec<OpTm<'aa, 'aa>> {
             let mut ops = vec![];
             let mut new_known = known.clone();
 
@@ -421,17 +421,17 @@ pub fn infer_read_pattern<'a>(
 }
 
 #[derive(Clone)]
-pub enum OpTm<'a> {
+pub enum OpTm<'p: 'a, 'a> {
     Let {
         // the location to assign to
         loc: usize,
         // the
-        tm: LocTm<'a>,
+        tm: LocTm<'p, 'a>,
     },
     Restrict {
         // list of new binds to make
         ids: Vec<String>,
-        tm: core::Tm<'a>,
+        tm: core::Tm<'p, 'a>,
         // the location range to search between
         ran: Ran<usize>,
         // whether the ends are fixed
@@ -441,15 +441,15 @@ pub enum OpTm<'a> {
     },
 }
 
-impl<'a> OpTm<'a> {
+impl<'p: 'a, 'a> OpTm<'p, 'a> {
     pub fn eval(
         &self,
         arena: &'a Arena,
-        ctx: &Context<'a>,
-        params: HashMap<String, Vec<&'a Val<'a>>>,
+        ctx: &Context<'p, 'a>,
+        params: HashMap<String, Vec<&'a Val<'p, 'a>>>,
         param_indices: HashMap<String, usize>,
         error: f32,
-    ) -> Result<OpVal<'a>, EvalError> {
+    ) -> Result<OpVal<'p, 'a>, EvalError> {
         match self {
             OpTm::Let { loc, tm } => Ok(OpVal::Let {
                 loc: *loc,
@@ -487,19 +487,24 @@ impl<'a> OpTm<'a> {
 
                     let ctxs = match &new_binds[..] {
                         [first, rest @ ..] => {
-                            first.iter().flat_map(|first_val: &(&String, &Val<'a>)| {
-                                rest.iter().fold(
-                                    vec![vec![*first_val]],
-                                    |v: Vec<Vec<(&String, &Val<'a>)>>, bind| {
-                                        v.iter()
-                                            .cartesian_product(bind)
-                                            .map(|(v, new)| {
-                                                v.iter().chain([new]).cloned().collect::<Vec<_>>()
-                                            })
-                                            .collect::<Vec<_>>()
-                                    },
-                                )
-                            })
+                            first
+                                .iter()
+                                .flat_map(|first_val: &(&String, &Val<'p, 'a>)| {
+                                    rest.iter().fold(
+                                        vec![vec![*first_val]],
+                                        |v: Vec<Vec<(&String, &Val<'p, 'a>)>>, bind| {
+                                            v.iter()
+                                                .cartesian_product(bind)
+                                                .map(|(v, new)| {
+                                                    v.iter()
+                                                        .chain([new])
+                                                        .cloned()
+                                                        .collect::<Vec<_>>()
+                                                })
+                                                .collect::<Vec<_>>()
+                                        },
+                                    )
+                                })
                         }
 
                         // this can't happen
@@ -547,16 +552,16 @@ impl<'a> OpTm<'a> {
     }
 }
 
-pub enum OpVal<'a> {
+pub enum OpVal<'p: 'a, 'a> {
     Let {
         // the location to assign to
         loc: usize,
         // the
-        tm: LocTm<'a>,
+        tm: LocTm<'p, 'a>,
     },
     Restrict {
         // list of new binds to make
-        ctxs: Vec<(HashMap<usize, &'a Val<'a>>, Seq)>,
+        ctxs: Vec<(HashMap<usize, &'a Val<'p, 'a>>, Seq)>,
         // the location range to search between
         ran: Ran<usize>,
         // whether the ends are fixed
@@ -588,16 +593,16 @@ impl LocCtx {
 }
 
 #[derive(Clone, Default)]
-pub struct BindCtx<'a> {
-    map: HashMap<usize, &'a core::Val<'a>>,
+pub struct BindCtx<'p: 'a, 'a> {
+    map: HashMap<usize, &'a core::Val<'p, 'a>>,
 }
 
-impl<'a> BindCtx<'a> {
-    fn get(&self, id: &usize) -> Option<&'a core::Val<'a>> {
+impl<'p: 'a, 'a> BindCtx<'p, 'a> {
+    fn get(&self, id: &usize) -> Option<&'a core::Val<'p, 'a>> {
         self.map.get(id).map(|val| *val)
     }
 
-    fn with(&self, id: usize, val: &'a core::Val<'a>) -> BindCtx<'a> {
+    fn with(&self, id: usize, val: &'a core::Val<'p, 'a>) -> BindCtx<'p, 'a> {
         let mut map = self.map.clone();
         map.insert(id, val);
 
@@ -605,15 +610,15 @@ impl<'a> BindCtx<'a> {
     }
 }
 
-impl<'a> OpVal<'a> {
+impl<'p: 'a, 'a> OpVal<'p, 'a> {
     fn exec(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a core::Val<'a>>,
+        env: &Env<&'a core::Val<'p, 'a>>,
         seq: &'a [u8],
         loc_ctx: &LocCtx,
-        bind_ctx: &BindCtx<'a>,
-    ) -> Result<Vec<(BindCtx<'a>, LocCtx)>, core::EvalError> {
+        bind_ctx: &BindCtx<'p, 'a>,
+    ) -> Result<Vec<(BindCtx<'p, 'a>, LocCtx)>, core::EvalError> {
         match self {
             OpVal::Let { loc, tm } => {
                 let pos = eval_loc_tm(&arena, env, loc_ctx, tm)?;
@@ -713,20 +718,20 @@ impl<'a> OpVal<'a> {
 }
 
 #[derive(Clone)]
-pub enum LocTm<'a> {
+pub enum LocTm<'p: 'a, 'a> {
     Var {
         loc: usize,
     },
     Offset {
-        loc_tm: Arc<LocTm<'a>>,
-        offset: core::Tm<'a>,
+        loc_tm: Arc<LocTm<'p, 'a>>,
+        offset: core::Tm<'p, 'a>,
     },
 }
-fn eval_loc_tm<'a>(
+fn eval_loc_tm<'p: 'a, 'a>(
     arena: &'a Arena,
-    env: &Env<&'a core::Val<'a>>,
+    env: &Env<&'a core::Val<'p, 'a>>,
     loc_ctx: &LocCtx,
-    loc_tm: &LocTm<'a>,
+    loc_tm: &LocTm<'p, 'a>,
 ) -> Result<usize, core::EvalError> {
     match loc_tm {
         LocTm::Var { loc } => Ok(loc_ctx.get(loc)),
@@ -816,7 +821,7 @@ impl Mat {
     }
 }
 
-impl<'a> Display for OpTm<'a> {
+impl<'p: 'a, 'a> Display for OpTm<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             OpTm::Let { loc, tm } => format!("{} = {}", loc, tm).fmt(f),
@@ -839,7 +844,7 @@ impl<'a> Display for OpTm<'a> {
     }
 }
 
-impl<'a> Display for LocTm<'a> {
+impl<'p: 'a, 'a> Display for LocTm<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LocTm::Var { loc } => loc.fmt(f),
@@ -848,7 +853,7 @@ impl<'a> Display for LocTm<'a> {
     }
 }
 
-impl<'a> Display for Reg<'a> {
+impl<'p: 'a, 'a> Display for Reg<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Reg::Hole => "_".fmt(f),

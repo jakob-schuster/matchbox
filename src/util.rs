@@ -77,7 +77,7 @@ impl<'a, T: Display> Display for CoreRecField<'a, T> {
 
 #[derive(Clone)]
 pub struct Env<A> {
-    vec: Vec<A>,
+    pub vec: Vec<A>,
 }
 
 impl<A> Env<A> {

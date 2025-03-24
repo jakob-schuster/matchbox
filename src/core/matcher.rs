@@ -11,26 +11,26 @@ use crate::{
 use super::{eval, EvalError, Val};
 use std::{collections::HashMap, sync::Arc};
 
-pub trait Matcher<'a>: Send + Sync {
+pub trait Matcher<'p: 'a, 'a>: Send + Sync {
     fn evaluate<'b>(
         &'b self,
         arena: &'a Arena,
-        env: &'b Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>;
+        env: &'b Env<&'a Val<'p, 'a>>,
+        val: &'a Val<'p, 'a>,
+    ) -> Result<Vec<Vec<&'a Val<'p, 'a>>>, EvalError>;
 }
 
-pub struct Chain<'a> {
-    pub m1: Arc<dyn Matcher<'a> + 'a>,
-    pub m2: Arc<dyn Matcher<'a> + 'a>,
+pub struct Chain<'p: 'a, 'a> {
+    pub m1: Arc<dyn Matcher<'p, 'a> + 'a>,
+    pub m2: Arc<dyn Matcher<'p, 'a> + 'a>,
 }
-impl<'a> Matcher<'a> for Chain<'a> {
+impl<'p: 'a, 'a> Matcher<'p, 'a> for Chain<'p, 'a> {
     fn evaluate<'b>(
         &'b self,
         arena: &'a Arena,
-        env: &'b Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
+        env: &'b Env<&'a Val<'p, 'a>>,
+        val: &'a Val<'p, 'a>,
+    ) -> Result<Vec<Vec<&'a Val<'p, 'a>>>, EvalError> {
         let r1 = self.m1.evaluate(arena, env, val)?;
         let r2 = self.m2.evaluate(arena, env, val)?;
 
@@ -39,17 +39,17 @@ impl<'a> Matcher<'a> for Chain<'a> {
     }
 }
 
-pub struct FieldAccess<'a> {
+pub struct FieldAccess<'p: 'a, 'a> {
     pub name: String,
-    pub inner: Arc<dyn Matcher<'a> + 'a>,
+    pub inner: Arc<dyn Matcher<'p, 'a> + 'a>,
 }
-impl<'a> Matcher<'a> for FieldAccess<'a> {
+impl<'p: 'a, 'a> Matcher<'p, 'a> for FieldAccess<'p, 'a> {
     fn evaluate<'b>(
         &'b self,
         arena: &'a Arena,
-        env: &'b Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
+        env: &'b Env<&'a Val<'p, 'a>>,
+        val: &'a Val<'p, 'a>,
+    ) -> Result<Vec<Vec<&'a Val<'p, 'a>>>, EvalError> {
         match val {
             Val::Rec(rec) => match rec.get(self.name.as_bytes(), arena) {
                 Ok(field) => self.inner.evaluate(arena, env, &field),
@@ -63,47 +63,47 @@ impl<'a> Matcher<'a> for FieldAccess<'a> {
 }
 
 pub struct Succeed {}
-impl<'a> Matcher<'a> for Succeed {
+impl<'p: 'a, 'a> Matcher<'p, 'a> for Succeed {
     fn evaluate<'b>(
         &'b self,
         arena: &'a Arena,
-        env: &'b Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
+        env: &'b Env<&'a Val<'p, 'a>>,
+        val: &'a Val<'p, 'a>,
+    ) -> Result<Vec<Vec<&'a Val<'p, 'a>>>, EvalError> {
         // one world, with no binds
         Ok(vec![vec![]])
     }
 }
 
 pub struct Bind {}
-impl<'a> Matcher<'a> for Bind {
+impl<'p: 'a, 'a> Matcher<'p, 'a> for Bind {
     fn evaluate<'b>(
         &'b self,
         arena: &'a Arena,
-        env: &'b Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
+        env: &'b Env<&'a Val<'p, 'a>>,
+        val: &'a Val<'p, 'a>,
+    ) -> Result<Vec<Vec<&'a Val<'p, 'a>>>, EvalError> {
         Ok(vec![vec![val]])
     }
 }
 
-pub struct Equal<'a> {
-    pub val: &'a Val<'a>,
+pub struct Equal<'p: 'a, 'a> {
+    pub val: &'a Val<'p, 'a>,
 }
 
-impl<'a> Equal<'a> {
-    pub fn new(val: &'a Val<'a>) -> Equal<'a> {
+impl<'p: 'a, 'a> Equal<'p, 'a> {
+    pub fn new(val: &'a Val<'p, 'a>) -> Equal<'p, 'a> {
         Equal { val }
     }
 }
 
-impl<'a> Matcher<'a> for Equal<'a> {
+impl<'p: 'a, 'a> Matcher<'p, 'a> for Equal<'p, 'a> {
     fn evaluate<'b>(
         &'b self,
         arena: &'a Arena,
-        env: &'b Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError> {
+        env: &'b Env<&'a Val<'p, 'a>>,
+        val: &'a Val<'p, 'a>,
+    ) -> Result<Vec<Vec<&'a Val<'p, 'a>>>, EvalError> {
         if val.eq(arena, &self.val) {
             // one world, with no binds
             Ok(vec![vec![]])

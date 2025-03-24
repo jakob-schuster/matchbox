@@ -34,74 +34,71 @@ impl EvalError {
     }
 }
 
-pub type Prog<'a> = Located<ProgData<'a>>;
+pub type Prog<'p: 'a, 'a> = Located<ProgData<'p, 'a>>;
 #[derive(Clone)]
-pub struct ProgData<'a> {
-    pub stmt: Stmt<'a>,
+pub struct ProgData<'p: 'a, 'a> {
+    pub stmt: Stmt<'p, 'a>,
 }
 
-impl<'a> Prog<'a> {
-    pub fn eval(&self, read: &'a Val<'a>, arena: &'a Arena) -> Result<Vec<Effect>, EvalError> {
-        eval_stmt(
-            arena,
-            &library::standard_library(arena, false).tms.with(read),
-            &self.data.stmt,
-        )
+impl<'a, 'p: 'a> Prog<'p, 'a> {
+    pub fn eval(&self, read: &'a Val<'p, 'a>, arena: &'a Arena) -> Result<Vec<Effect>, EvalError> {
+        let new_env: Env<&'a Val<'p, 'a>> = todo!();
+        eval_stmt(arena, &new_env.with(read), &self.data.stmt)
     }
 }
 
-pub type Stmt<'a> = Located<StmtData<'a>>;
+pub type Stmt<'p: 'a, 'a> = Located<StmtData<'p, 'a>>;
 #[derive(Clone)]
-pub enum StmtData<'a> {
+pub enum StmtData<'p: 'a, 'a> {
     Let {
-        tm: Tm<'a>,
-        next: Arc<Stmt<'a>>,
+        tm: Tm<'p, 'a>,
+        next: Arc<Stmt<'p, 'a>>,
     },
     Out {
-        tm0: Tm<'a>,
-        tm1: Tm<'a>,
-        next: Arc<Stmt<'a>>,
+        tm0: Tm<'p, 'a>,
+        tm1: Tm<'p, 'a>,
+        next: Arc<Stmt<'p, 'a>>,
     },
     If {
-        branches: Vec<Branch<'a>>,
-        next: Arc<Stmt<'a>>,
+        branches: Vec<Branch<'p, 'a>>,
+        next: Arc<Stmt<'p, 'a>>,
     },
     End,
 }
 
-pub type Branch<'a> = Located<BranchData<'a>>;
+pub type Branch<'p: 'a, 'a> = Located<BranchData<'p, 'a>>;
 #[derive(Clone)]
-pub enum BranchData<'a> {
+pub enum BranchData<'p: 'a, 'a> {
     Bool {
-        tm: Tm<'a>,
-        stmt: Stmt<'a>,
+        tm: Tm<'p, 'a>,
+        stmt: Stmt<'p, 'a>,
     },
 
     Is {
-        tm: Tm<'a>,
-        branches: Vec<PatternBranch<'a>>,
+        tm: Tm<'p, 'a>,
+        branches: Vec<PatternBranch<'p, 'a>>,
     },
 }
 
-pub type PatternBranch<'a> = Located<PatternBranchData<'a>>;
+pub type PatternBranch<'p: 'a, 'a> = Located<PatternBranchData<'p, 'a>>;
 #[derive(Clone)]
-pub struct PatternBranchData<'a> {
-    pub matcher: Arc<dyn Matcher<'a> + 'a>,
-    pub stmt: Stmt<'a>,
+pub struct PatternBranchData<'p: 'a, 'a> {
+    pub matcher: Arc<dyn Matcher<'p, 'a> + 'a>,
+    pub stmt: Stmt<'p, 'a>,
 }
 
-pub fn eval_prog<'a>(
+pub fn eval_prog<'p: 'a, 'a>(
     arena: &'a Arena,
-    env: &Env<&'a Val<'a>>,
-    prog: &Prog<'a>,
+    env: &Env<&'a Val<'p, 'a>>,
+    prog: &Prog<'p, 'a>,
 ) -> Result<Vec<Effect>, EvalError> {
     eval_stmt(arena, env, &prog.data.stmt)
 }
 
-fn eval_stmt<'a>(
+fn eval_stmt<'p: 'a, 'a>(
     arena: &'a Arena,
-    env: &Env<&'a Val<'a>>,
-    stmt: &Stmt<'a>,
+    env: &Env<&'a Val<'p, 'a>>,
+    stmt: &Stmt<'p, 'a>,
 ) -> Result<Vec<Effect>, EvalError> {
     match &stmt.data {
         StmtData::Let { tm, next } => {
@@ -143,10 +140,10 @@ fn eval_stmt<'a>(
     }
 }
 
-fn eval_branch<'a>(
+fn eval_branch<'p: 'a, 'a>(
     arena: &'a Arena,
-    env: &Env<&'a Val<'a>>,
-    branch: &Branch<'a>,
+    env: &Env<&'a Val<'p, 'a>>,
+    branch: &Branch<'p, 'a>,
 ) -> Result<Option<Vec<Effect>>, EvalError> {
     match &branch.data {
         BranchData::Bool { tm, stmt } => match eval(arena, env, tm)? {
@@ -176,11 +173,11 @@ fn eval_branch<'a>(
     }
 }
 
-fn eval_pattern_branch<'a>(
+fn eval_pattern_branch<'p: 'a, 'a>(
     arena: &'a Arena,
-    env: &Env<&'a Val<'a>>,
-    branch: &PatternBranch<'a>,
-    val: &'a Val<'a>,
+    env: &Env<&'a Val<'p, 'a>>,
+    branch: &PatternBranch<'p, 'a>,
+    val: &'a Val<'p, 'a>,
 ) -> Result<Option<Vec<Effect>>, EvalError> {
     match &branch.data.matcher.evaluate(arena, env, val)?[..] {
         [] => Ok(None),
@@ -202,9 +199,9 @@ fn eval_pattern_branch<'a>(
     }
 }
 
-pub type Tm<'a> = Located<TmData<'a>>;
+pub type Tm<'p: 'a, 'a> = Located<TmData<'p, 'a>>;
 #[derive(Clone)]
-pub enum TmData<'a> {
+pub enum TmData<'p: 'a, 'a> {
     Var {
         index: usize,
     },
@@ -229,54 +226,54 @@ pub enum TmData<'a> {
 
     // list types
     ListTy {
-        ty: Arc<Tm<'a>>,
+        ty: Arc<Tm<'p, 'a>>,
     },
     ListLit {
-        tms: Vec<Tm<'a>>,
+        tms: Vec<Tm<'p, 'a>>,
     },
 
     FunTy {
-        args: Vec<Tm<'a>>,
-        body: Arc<Tm<'a>>,
+        args: Vec<Tm<'p, 'a>>,
+        body: Arc<Tm<'p, 'a>>,
     },
     // can't remember why we need args still...
     FunLit {
-        args: Vec<Tm<'a>>,
-        body: Arc<Tm<'a>>,
+        args: Vec<Tm<'p, 'a>>,
+        body: Arc<Tm<'p, 'a>>,
     },
     FunForeignLit {
-        args: Vec<Tm<'a>>,
+        args: Vec<Tm<'p, 'a>>,
         body: Arc<
-            dyn Fn(&'a Arena, &Location, &[&'a Val<'a>]) -> Result<&'a Val<'a>, EvalError>
+            dyn Fn(&'a Arena, &Location, &[&'a Val<'p, 'a>]) -> Result<&'a Val<'p, 'a>, EvalError>
                 + Send
                 + Sync,
         >,
     },
     FunApp {
-        head: Arc<Tm<'a>>,
-        args: Vec<Tm<'a>>,
+        head: Arc<Tm<'p, 'a>>,
+        args: Vec<Tm<'p, 'a>>,
     },
 
     RecTy {
-        fields: Vec<CoreRecField<'a, Tm<'a>>>,
+        fields: Vec<CoreRecField<'a, Tm<'p, 'a>>>,
     },
     RecWithTy {
-        fields: Vec<CoreRecField<'a, &'a Tm<'a>>>,
+        fields: Vec<CoreRecField<'a, &'a Tm<'p, 'a>>>,
     },
     RecLit {
-        fields: Vec<CoreRecField<'a, Tm<'a>>>,
+        fields: Vec<CoreRecField<'a, Tm<'p, 'a>>>,
     },
     RecProj {
-        tm: Arc<Tm<'a>>,
+        tm: Arc<Tm<'p, 'a>>,
         name: &'a [u8],
     },
 }
 
-pub fn eval<'a>(
+pub fn eval<'p: 'a, 'a>(
     arena: &'a Arena,
-    env: &Env<&'a Val<'a>>,
-    tm: &Tm<'a>,
-) -> Result<&'a Val<'a>, EvalError> {
+    env: &Env<&'a Val<'p, 'a>>,
+    tm: &Tm<'p, 'a>,
+) -> Result<&'a Val<'p, 'a>, EvalError> {
     match &tm.data {
         // look up the variable in the environment
         TmData::Var { index } => Ok(env.get_index(*index)),
@@ -357,7 +354,7 @@ pub fn eval<'a>(
                     .map(|field| {
                         Ok((
                             field.name,
-                            arena.alloc(eval(arena, env, &field.data)?) as &Val<'a>,
+                            arena.alloc(eval(arena, env, &field.data)?) as &Val<'p, 'a>,
                         ))
                     })
                     .collect::<Result<HashMap<_, _>, EvalError>>()?,
@@ -383,13 +380,17 @@ pub fn eval<'a>(
 
 /// Function type that explicitly captures its environment.
 #[derive(Clone)]
-pub struct FunData<'a> {
-    pub env: Env<&'a Val<'a>>,
-    pub body: Tm<'a>,
+pub struct FunData<'p: 'a, 'a> {
+    pub env: Env<&'a Val<'p, 'a>>,
+    pub body: Tm<'p, 'a>,
 }
 
-impl<'a> FunData<'a> {
-    pub fn app(&self, arena: &'a Arena, args: &[&'a Val<'a>]) -> Result<&'a Val<'a>, EvalError> {
+impl<'p: 'a, 'a> FunData<'p, 'a> {
+    pub fn app(
+        &self,
+        arena: &'a Arena,
+        args: &[&'a Val<'p, 'a>],
+    ) -> Result<&'a Val<'p, 'a>, EvalError> {
         let new_env = args
             .iter()
             .fold(self.env.clone(), |env0, arg| env0.with(arg));
@@ -399,7 +400,7 @@ impl<'a> FunData<'a> {
 }
 
 #[derive(Clone)]
-pub enum Val<'a> {
+pub enum Val<'p: 'a, 'a> {
     /// Atomic values
     Univ,
     AnyTy,
@@ -420,38 +421,38 @@ pub enum Val<'a> {
     },
 
     ListTy {
-        ty: &'a Val<'a>,
+        ty: &'a Val<'p, 'a>,
     },
     List {
-        v: Vec<&'a Val<'a>>,
+        v: Vec<&'a Val<'p, 'a>>,
     },
 
     /// Record values; can have any backend that implements the trait.
     /// This allows us to have some Record values that merely wrap the
     /// structures provided by readers.
     RecTy {
-        fields: Vec<CoreRecField<'a, &'a Val<'a>>>,
+        fields: Vec<CoreRecField<'a, &'a Val<'p, 'a>>>,
     },
     // A record type which requires certain fields;
     // other fields can also be harmlessly present
     RecWithTy {
-        fields: Vec<CoreRecField<'a, &'a Val<'a>>>,
+        fields: Vec<CoreRecField<'a, &'a Val<'p, 'a>>>,
     },
-    Rec(&'a dyn Rec<'a>),
+    Rec(&'a dyn Rec<'p, 'a>),
 
     /// Function value; defunctionalised, carries the context it needs
     /// and the Rust function it will execute, which takes this carried
     /// context and any arguments.
     FunTy {
-        args: Vec<&'a Val<'a>>,
-        body: &'a Val<'a>,
+        args: Vec<&'a Val<'p, 'a>>,
+        body: &'a Val<'p, 'a>,
     },
     Fun {
-        data: FunData<'a>,
+        data: FunData<'p, 'a>,
     },
     FunForeign {
         f: Arc<
-            dyn Fn(&'a Arena, &Location, &[&'a Val<'a>]) -> Result<&'a Val<'a>, EvalError>
+            dyn Fn(&'a Arena, &Location, &[&'a Val<'p, 'a>]) -> Result<&'a Val<'p, 'a>, EvalError>
                 + Send
                 + Sync,
         >,
@@ -460,19 +461,19 @@ pub enum Val<'a> {
     /// which can only be elaborated when the function is actually applied.
     /// Should probably come back and clean all of this up conceptually.
     FunReturnTyAwaiting {
-        data: FunData<'a>, // expected_ty: Arc<Val<'a>>,
+        data: FunData<'p, 'a>, // expected_ty: Arc<Val<'a>>,
     },
 
     Neutral {
-        neutral: Neutral<'a>,
+        neutral: Neutral<'p, 'a>,
     },
 }
 
-impl<'arena: 'a, 'a> Val<'a> {
-    pub fn equiv(&self, other: &Val<'a>) -> bool {
+impl<'p: 'a, 'arena: 'a, 'a> Val<'p, 'a> {
+    pub fn equiv(&self, other: &Val<'p, 'a>) -> bool {
         // takes a field name, and looks it up in the list of fields,
         // returning the type if one is found
-        let get = |fields: &[CoreRecField<&Val<'a>>], name: &[u8]| -> Option<Val<'a>> {
+        let get = |fields: &[CoreRecField<&Val<'p, 'a>>], name: &[u8]| -> Option<Val<'p, 'a>> {
             let mut out = None;
             for field in fields {
                 if field.name.eq(name) {
@@ -583,7 +584,7 @@ impl<'arena: 'a, 'a> Val<'a> {
         }
     }
 
-    pub fn eq(&self, arena: &'arena Arena, other: &Val<'a>) -> bool {
+    pub fn eq(&self, arena: &'arena Arena, other: &Val<'p, 'a>) -> bool {
         match (self, other) {
             (Val::Univ, Val::Univ)
             | (Val::AnyTy, Val::AnyTy)
@@ -615,18 +616,19 @@ impl<'arena: 'a, 'a> Val<'a> {
         }
     }
 
-    pub fn most_precise(&self, arena: &'a Arena, other: &Val<'a>) -> Val<'a> {
+    pub fn most_precise(&self, arena: &'a Arena, other: &Val<'p, 'a>) -> Val<'p, 'a> {
         // takes a field name, and looks it up in the list of fields,
         // returning the type if one is found
-        let get = |fields: &[CoreRecField<&'a Val<'a>>], name: &[u8]| -> Option<&'a Val<'a>> {
-            let mut out = None;
-            for field in fields {
-                if field.name.eq(name) {
-                    out = Some(field.data)
+        let get =
+            |fields: &[CoreRecField<&'a Val<'p, 'a>>], name: &[u8]| -> Option<&'a Val<'p, 'a>> {
+                let mut out = None;
+                for field in fields {
+                    if field.name.eq(name) {
+                        out = Some(field.data)
+                    }
                 }
-            }
-            out
-        };
+                out
+            };
 
         match (self, other) {
             // if either type is Any, the other type is assumed more precise
@@ -644,7 +646,7 @@ impl<'arena: 'a, 'a> Val<'a> {
                             // when both Recs contain the field name, take the most precise definition
                             (Some(ty1), Some(ty2)) => CoreRecField::new(
                                 name,
-                                arena.alloc(ty1.most_precise(arena, &ty2)) as &Val<'a>,
+                                arena.alloc(ty1.most_precise(arena, &ty2)) as &Val<'p, 'a>,
                             ),
                             // this should never happen
                             _ => panic!(
@@ -662,26 +664,26 @@ impl<'arena: 'a, 'a> Val<'a> {
 }
 
 #[derive(Clone)]
-pub enum Neutral<'a> {
+pub enum Neutral<'p: 'a, 'a> {
     Var {
         level: usize,
     },
     FunApp {
-        head: Arc<Val<'a>>,
-        args: Vec<Val<'a>>,
+        head: Arc<Val<'p, 'a>>,
+        args: Vec<Val<'p, 'a>>,
     },
     RecProj {
-        tm: Arc<Val<'a>>,
+        tm: Arc<Val<'p, 'a>>,
         name: String,
     },
 }
 
-pub fn app<'a>(
+pub fn app<'p: 'a, 'a>(
     arena: &'a Arena,
     location: &Location,
-    head: &'a Val<'a>,
-    args: Vec<&'a Val<'a>>,
-) -> Result<&'a Val<'a>, EvalError> {
+    head: &'a Val<'p, 'a>,
+    args: Vec<&'a Val<'p, 'a>>,
+) -> Result<&'a Val<'p, 'a>, EvalError> {
     match head {
         Val::Fun { data } => {
             data.app(arena, &args)
@@ -704,7 +706,7 @@ pub fn app<'a>(
     }
 }
 
-pub fn make_portable<'a>(arena: &'a Arena, val: &'a Val<'a>) -> PortableVal {
+pub fn make_portable<'p: 'a, 'a>(arena: &'a Arena, val: &'a Val<'p, 'a>) -> PortableVal {
     match val {
         Val::Univ => PortableVal::Univ,
 
@@ -830,13 +832,13 @@ pub struct Effect {
     pub handler: PortableVal,
 }
 
-impl<'a> Display for Prog<'a> {
+impl<'p: 'a, 'a> Display for Prog<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.data.stmt.fmt(f)
     }
 }
 
-impl<'a> Display for StmtData<'a> {
+impl<'p: 'a, 'a> Display for StmtData<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StmtData::Let { tm, next } => format!("push {}; {}", tm, next).fmt(f),
@@ -852,7 +854,7 @@ impl<'a> Display for StmtData<'a> {
     }
 }
 
-impl<'a> Display for BranchData<'a> {
+impl<'p: 'a, 'a> Display for BranchData<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BranchData::Bool { tm, stmt } => format!("{} => {}", tm, stmt).fmt(f),
@@ -866,13 +868,13 @@ impl<'a> Display for BranchData<'a> {
     }
 }
 
-impl<'a> Display for PatternBranchData<'a> {
+impl<'p: 'a, 'a> Display for PatternBranchData<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         format!("#matcher => {}", self.stmt).fmt(f)
     }
 }
 
-impl<'a> Display for TmData<'a> {
+impl<'p: 'a, 'a> Display for TmData<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TmData::Var { index } => format!("#[{}]", index).fmt(f),
@@ -955,7 +957,7 @@ impl<'a> Display for TmData<'a> {
     }
 }
 
-impl<'a> Display for Val<'a> {
+impl<'p: 'a, 'a> Display for Val<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Val::Univ => "Type".fmt(f),
@@ -1007,7 +1009,7 @@ impl<'a> Display for Val<'a> {
     }
 }
 
-impl<'a> Display for FunData<'a> {
+impl<'p: 'a, 'a> Display for FunData<'p, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         format!("{} :: {}", self.body, self.env).fmt(f)
     }

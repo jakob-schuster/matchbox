@@ -274,17 +274,17 @@ pub enum StrLitRegionData {
 }
 
 #[derive(Clone, Default)]
-pub struct Context<'a> {
+pub struct Context<'p: 'a, 'a> {
     size: usize,
     names: Env<String>,
-    tys: Env<&'a core::Val<'a>>,
-    pub tms: Env<&'a core::Val<'a>>,
+    tys: Env<&'a core::Val<'p, 'a>>,
+    pub tms: Env<&'a core::Val<'p, 'a>>,
 }
 
-impl<'a> Context<'a> {
+impl<'p: 'a, 'a> Context<'p, 'a> {
     /// Returns the next variable that will be bound in the context after
     /// calling bind_def or bind_param
-    pub fn next_var(&self, arena: &'a Arena) -> &'a core::Val<'a> {
+    pub fn next_var(&self, arena: &'a Arena) -> &'a core::Val<'p, 'a> {
         arena.alloc(core::Val::Neutral {
             neutral: core::Neutral::Var { level: self.size },
         })
@@ -294,9 +294,9 @@ impl<'a> Context<'a> {
     pub fn bind_def(
         &self,
         name: String,
-        ty: &'a core::Val<'a>,
-        tm: &'a core::Val<'a>,
-    ) -> Context<'a> {
+        ty: &'a core::Val<'p, 'a>,
+        tm: &'a core::Val<'p, 'a>,
+    ) -> Context<'p, 'a> {
         Context {
             size: self.size + 1,
             names: self.names.with(name),
@@ -306,12 +306,17 @@ impl<'a> Context<'a> {
     }
 
     /// Binds a parameter in the context
-    pub fn bind_param(&self, name: String, ty: &'a core::Val<'a>, arena: &'a Arena) -> Context<'a> {
+    pub fn bind_param(
+        &self,
+        name: String,
+        ty: &'a core::Val<'p, 'a>,
+        arena: &'a Arena,
+    ) -> Context<'p, 'a> {
         self.bind_def(name, ty, self.next_var(arena))
     }
 
     /// Looks up a name in the context
-    pub fn lookup(&self, name: String) -> Option<(usize, &'a core::Val<'a>)> {
+    pub fn lookup(&self, name: String) -> Option<(usize, &'a core::Val<'p, 'a>)> {
         // Find the index of most recent binding in the context identified by
         // name, starting from the most recent binding. This gives us the
         // de Bruijn index of the variable.
@@ -324,9 +329,9 @@ impl<'a> Context<'a> {
 
 pub fn elab_prog<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     prog: &'a Prog,
-) -> Result<core::Prog<'a>, ElabError> {
+) -> Result<core::Prog<'a, 'a>, ElabError> {
     Ok(core::Prog::new(
         prog.location.clone(),
         core::ProgData {
@@ -342,10 +347,10 @@ pub fn elab_prog<'a>(
 
 fn elab_stmt<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     stmt: &'a Stmt,
     rest: &[&'a Stmt],
-) -> Result<core::Stmt<'a>, ElabError> {
+) -> Result<core::Stmt<'a, 'a>, ElabError> {
     match &stmt.data {
         // fold across all the statements, ending the block with an End
         StmtData::Group { stmts } => match &stmts[..] {
@@ -446,9 +451,9 @@ fn elab_stmt<'a>(
 
 fn elab_branch<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     branch: &'a Branch,
-) -> Result<core::Branch<'a>, ElabError> {
+) -> Result<core::Branch<'a, 'a>, ElabError> {
     match &branch.data {
         BranchData::Bool { tm, stmt } => {
             let (ctm, ty) = infer_tm(arena, ctx, tm)?;
@@ -498,10 +503,10 @@ fn elab_branch<'a>(
 
 fn infer_pattern_branch<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     branch: &'a PatternBranch,
-    ty: &'a core::Val<'a>,
-) -> Result<(core::PatternBranch<'a>, core::Val<'a>), ElabError> {
+    ty: &'a core::Val<'a, 'a>,
+) -> Result<(core::PatternBranch<'a, 'a>, core::Val<'a, 'a>), ElabError> {
     // just check the type of the pattern itself
     let (matcher, ty1, bind_tys) = infer_pattern(arena, ctx, &branch.data.pat, ty)?;
     // make sure that it aligns with the type that you're putting in
@@ -528,14 +533,14 @@ fn infer_pattern_branch<'a>(
 
 fn infer_pattern<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     pattern: &'a Pattern,
-    ty: &'a core::Val<'a>,
+    ty: &'a core::Val<'a, 'a>,
 ) -> Result<
     (
-        Arc<dyn core::matcher::Matcher<'a> + 'a>,
-        core::Val<'a>,
-        Vec<(String, &'a core::Val<'a>)>,
+        Arc<dyn core::matcher::Matcher<'a, 'a> + 'a>,
+        core::Val<'a, 'a>,
+        Vec<(String, &'a core::Val<'a, 'a>)>,
     ),
     ElabError,
 > {
@@ -577,7 +582,7 @@ fn infer_pattern<'a>(
         PatternData::RecLit { fields } => {
             // for each field, infer the pattern
             let (matcher, tys, names): (
-                Arc<dyn core::matcher::Matcher<'a> + 'a>,
+                Arc<dyn core::matcher::Matcher<'a, 'a> + 'a>,
                 Vec<CoreRecField<&'a core::Val>>,
                 Vec<(String, &core::Val)>,
             ) = fields.iter().try_fold(
@@ -592,7 +597,7 @@ fn infer_pattern<'a>(
                     let mut tys1 = tys.clone();
                     tys1.push(CoreRecField::new(
                         arena.alloc(field.name.as_bytes().to_vec()),
-                        arena.alloc(ty1) as &core::Val<'a>,
+                        arena.alloc(ty1) as &core::Val<'a, 'a>,
                     ));
 
                     let names = names.iter().chain(&names1).cloned().collect::<Vec<_>>();
@@ -659,7 +664,7 @@ fn infer_pattern<'a>(
                 Arc::new(matcher),
                 core::Val::RecWithTy {
                     fields: vec![CoreRecField::new(
-                        *arena.alloc(b"seq") as &[u8],
+                        arena.alloc(b"seq".to_vec()) as &[u8],
                         arena.alloc(core::Val::StrTy),
                     )],
                 },
@@ -671,8 +676,8 @@ fn infer_pattern<'a>(
 
 fn equate_ty<'a>(
     location: &Location,
-    ty1: &core::Val<'a>,
-    ty2: &core::Val<'a>,
+    ty1: &core::Val<'a, 'a>,
+    ty2: &core::Val<'a, 'a>,
 ) -> Result<(), ElabError> {
     if ty1.equiv(ty2) {
         Ok(())
@@ -686,10 +691,10 @@ fn equate_ty<'a>(
 
 pub fn check_tm<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     tm: &'a Tm,
-    expected_ty: &core::Val<'a>,
-) -> Result<core::Tm<'a>, ElabError> {
+    expected_ty: &core::Val<'a, 'a>,
+) -> Result<core::Tm<'a, 'a>, ElabError> {
     match (&tm.data, expected_ty) {
         (_, _) => {
             let (tm1, ty1) = infer_tm(arena, ctx, tm)?;
@@ -701,9 +706,9 @@ pub fn check_tm<'a>(
 
 pub fn infer_tm<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     tm: &'a Tm,
-) -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
+) -> Result<(core::Tm<'a, 'a>, &'a core::Val<'a, 'a>), ElabError> {
     match &tm.data {
         TmData::BoolLit { b } => Ok((
             core::Tm::new(tm.location.clone(), core::TmData::BoolLit { b: *b }),
@@ -747,7 +752,7 @@ pub fn infer_tm<'a>(
                 tms.push(CoreRecField::new(field.name.as_bytes(), tm));
                 tys.push(CoreRecField::new(
                     field.name.as_bytes(),
-                    arena.alloc(ty) as &core::Val<'a>,
+                    arena.alloc(ty) as &core::Val<'a, 'a>,
                 ));
             }
 
@@ -1000,39 +1005,40 @@ pub fn infer_tm<'a>(
 fn infer_bin_op<'a>(
     bin_op: &BinOp,
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     location: &Location,
     tm0: &'a Tm,
     tm1: &'a Tm,
-) -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
-    let non_parametric_operator = |ty0: &core::Val<'a>,
-                                   ty1: &core::Val<'a>,
-                                   name: &str|
-     -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
-        let ctm0 = check_tm(arena, ctx, tm0, ty0)?;
-        let ctm1 = check_tm(arena, ctx, tm1, ty1)?;
+) -> Result<(core::Tm<'a, 'a>, &'a core::Val<'a, 'a>), ElabError> {
+    let non_parametric_operator =
+        |ty0: &core::Val<'a, 'a>,
+         ty1: &core::Val<'a, 'a>,
+         name: &str|
+         -> Result<(core::Tm<'a, 'a>, &'a core::Val<'a, 'a>), ElabError> {
+            let ctm0 = check_tm(arena, ctx, tm0, ty0)?;
+            let ctm1 = check_tm(arena, ctx, tm1, ty1)?;
 
-        match ctx.lookup(name.to_string()) {
-            Some((index, ty)) => match ty {
-                core::Val::FunTy { args, body } => Ok((
-                    core::Tm::new(
-                        location.clone(),
-                        core::TmData::FunApp {
-                            head: Arc::new(core::Tm::new(
-                                location.clone(),
-                                core::TmData::Var { index },
-                            )),
-                            args: vec![ctm0, ctm1],
-                        },
-                    ),
-                    body,
-                )),
+            match ctx.lookup(name.to_string()) {
+                Some((index, ty)) => match ty {
+                    core::Val::FunTy { args, body } => Ok((
+                        core::Tm::new(
+                            location.clone(),
+                            core::TmData::FunApp {
+                                head: Arc::new(core::Tm::new(
+                                    location.clone(),
+                                    core::TmData::Var { index },
+                                )),
+                                args: vec![ctm0, ctm1],
+                            },
+                        ),
+                        body,
+                    )),
 
-                _ => panic!("operator has non-function type?!"),
-            },
-            None => Err(ElabError::new_unbound_name(location, &name)),
-        }
-    };
+                    _ => panic!("operator has non-function type?!"),
+                },
+                None => Err(ElabError::new_unbound_name(location, &name)),
+            }
+        };
 
     match bin_op {
         BinOp::Plus => non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_plus"),
@@ -1078,12 +1084,14 @@ fn infer_bin_op<'a>(
 fn infer_un_op<'a>(
     un_op: &UnOp,
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     location: &Location,
     tm: &'a Tm,
-) -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
+) -> Result<(core::Tm<'a, 'a>, &'a core::Val<'a, 'a>), ElabError> {
     let non_parametric_operator =
-        |ty0: &core::Val<'a>, name: &str| -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
+        |ty0: &core::Val<'a, 'a>,
+         name: &str|
+         -> Result<(core::Tm<'a, 'a>, &'a core::Val<'a, 'a>), ElabError> {
             let ctm0 = check_tm(arena, ctx, tm, ty0)?;
 
             match ctx.lookup(name.to_string()) {
@@ -1159,10 +1167,10 @@ fn infer_un_op<'a>(
 
 fn elab_str_lit_regs<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     location: &Location,
     regs: &'a [StrLitRegion],
-) -> Result<core::Tm<'a>, ElabError> {
+) -> Result<core::Tm<'a, 'a>, ElabError> {
     match regs {
         [reg, rest @ ..] => {
             match rest {
@@ -1205,9 +1213,9 @@ fn elab_str_lit_regs<'a>(
 
 fn elab_str_lit_reg<'a>(
     arena: &'a Arena,
-    ctx: &Context<'a>,
+    ctx: &Context<'a, 'a>,
     reg: &'a StrLitRegion,
-) -> Result<core::Tm<'a>, ElabError> {
+) -> Result<core::Tm<'a, 'a>, ElabError> {
     match &reg.data {
         StrLitRegionData::Str { s } => Ok(core::Tm::new(
             reg.location.clone(),

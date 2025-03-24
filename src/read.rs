@@ -13,35 +13,14 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use crate::{
     core::{
         self,
+        library::standard_library,
         rec::{self, ConcreteRec, FastaRead, Rec},
-        Effect, Val,
+        Effect, PortableVal, Prog, Val,
     },
     output::OutputHandler,
-    util::Arena,
+    surface::Context,
+    util::{Arena, Env},
 };
-
-fn main() {
-    let prog = Prog { data: () };
-
-    let filename = "test.fa";
-    let mut global_data = ();
-
-    read(filename, |val| prog.eval(val), |a, b| (), &mut global_data);
-}
-
-struct Prog {
-    data: (),
-}
-
-impl Prog {
-    fn eval<'a>(&self, val: Val<'a>) -> Vec<Effect> {
-        // first, create a context with val assigned
-
-        // then, execute the program in that context to get all the effects
-
-        todo!()
-    }
-}
 
 #[derive(Debug)]
 pub enum InputError {
@@ -259,9 +238,9 @@ impl Reader {
     }
 
     /// Maps a function across all the reads in the input.
-    pub fn map<'a, T: Send, R>(
+    pub fn map<'p: 'a, 'a, T: Send, R>(
         self,
-        local_fn: impl Fn(Val<'a>, &'a Arena) -> T + Sync,
+        local_fn: impl Fn(Val<'p, 'a>, &'a Arena) -> T + Sync,
         global_fn: impl Fn(T, &mut R),
         global_data: &mut R,
     ) {
@@ -308,7 +287,7 @@ impl Reader {
 
 pub fn read_any<'p, 'a: 'p>(
     filename: &str,
-    prog: &core::Prog<'p>,
+    prog: &core::Prog<'p, 'a>,
     arena: &'p Arena,
     output_handler: &mut OutputHandler,
 ) {
@@ -323,31 +302,23 @@ pub fn read_any<'p, 'a: 'p>(
 
 pub fn read_fa_new<'p, 'a: 'p>(
     buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
+    prog: &core::Prog<'p, 'a>,
     arena: &'p Arena,
     output_handler: &mut OutputHandler,
 ) {
     let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
 
+    let ctx = standard_library(arena, false);
     // let arena = Arena::new();
     for record in input_records {
         match record {
             Ok(read) => {
                 let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
-                let effects = prog.eval(arena.alloc(val), &arena).expect("");
+                // let effects = prog.eval(arena.alloc(val), &arena, &ctx.tms).expect("");
 
-                // println!(
-                //     "{}",
-                //     effects
-                //         .iter()
-                //         .map(|a| a.to_string())
-                //         .collect::<Vec<_>>()
-                //         .join(", ")
-                // );
-
-                for effect in &effects {
-                    output_handler.handle(effect);
-                }
+                // for effect in &effects {
+                //     output_handler.handle(effect);
+                // }
             }
             Err(_) => panic!("bad read?!"),
         }
@@ -356,73 +327,83 @@ pub fn read_fa_new<'p, 'a: 'p>(
     output_handler.finish();
 }
 
-// pub fn read_fa_multithreaded_new<'p, 'a: 'p>(
-//     buffer: Box<dyn BufRead>,
-//     prog: &core::Prog<'p>,
-//     arena: &'p Arena,
-//     output_handler: &mut OutputHandler,
-// ) {
-//     let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
+pub fn read_fa_multithreaded_new<'p: 'a, 'a>(
+    buffer: Box<dyn BufRead>,
+    prog: &core::Prog<'p, 'a>,
+    // arena: &'p Arena,
+    output_handler: &mut OutputHandler,
+) {
+    let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
+    // let env: Env<&'a Val<'p, 'a>> = standard_library(&arena, false).tms;
 
-//     // let arena = Arena::new();
-//     for chunk in &input_records.chunks(10000) {
-//         chunk
-//             .collect_vec()
-//             .into_par_iter()
-//             .map(|record| match record {
-//                 Ok(read) => {
-//                     let arena = Arena::new();
-//                     let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
-//                     let effects = prog.eval(arena.alloc(val), &arena).expect("");
+    // let arena = Arena::new();
+    for chunk in &input_records.chunks(10000) {
+        chunk
+            .collect_vec()
+            .into_par_iter()
+            .map(|record| match record {
+                Ok(read) => {
+                    let arena = Arena::new();
+                    let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
 
-//                     effects
-//                 }
-//                 Err(_) => panic!("bad read?!"),
-//             });
+                    // ()
 
-//         // match record {
-//         //     Ok(read) => {
-//         //         let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
-//         //         let effects = prog.eval(arena.alloc(val), &arena).expect("");
+                    get_portable_val_from_val(prog, &val)
 
-//         //         // println!(
-//         //         //     "{}",
-//         //         //     effects
-//         //         //         .iter()
-//         //         //         .map(|a| a.to_string())
-//         //         //         .collect::<Vec<_>>()
-//         //         //         .join(", ")
-//         //         // );
+                    // let effects = prog.eval(arena.alloc(val), &arena).expect("");
+                    // effects
+                }
+                Err(_) => panic!("bad read?!"),
+            });
 
-//         //         for effect in &effects {
-//         //             output_handler.handle(effect);
-//         //         }
-//         //     }
-//         //     Err(_) => panic!("bad read?!"),
-//         // }
-//     }
+        // match record {
+        //     Ok(read) => {
+        //         let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
+        //         let effects = prog.eval(arena.alloc(val), &arena).expect("");
 
-//     output_handler.finish();
-// }
+        //         // println!(
+        //         //     "{}",
+        //         //     effects
+        //         //         .iter()
+        //         //         .map(|a| a.to_string())
+        //         //         .collect::<Vec<_>>()
+        //         //         .join(", ")
+        //         // );
+
+        //         for effect in &effects {
+        //             output_handler.handle(effect);
+        //         }
+        //     }
+        //     Err(_) => panic!("bad read?!"),
+        // }
+    }
+
+    output_handler.finish();
+}
+
+fn get_portable_val_from_val<'a, 'b>(prog: &Prog<'b, 'a>, val: &Val<'b, 'a>) -> PortableVal {
+    todo!()
+}
 
 pub fn read_fq_new<'p, 'a: 'p>(
     buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
+    prog: &core::Prog<'p, 'a>,
     arena: &'p Arena,
     output_handler: &mut OutputHandler,
 ) {
     let input_records = bio::io::fastq::Reader::from_bufread(buffer).records();
+    // let ctx = standard_library(arena, false);
 
     // let arena = Arena::new();
     for record in input_records {
         match record {
             Ok(read) => {
                 let val = core::Val::Rec(arena.alloc(rec::FastqRead { read }));
-                let effects = prog.eval(arena.alloc(val), &arena).expect("");
+                // let effects = prog.eval(arena.alloc(val), &arena, &ctx.tms).expect("");
 
-                for effect in &effects {
-                    output_handler.handle(effect);
-                }
+                // for effect in &effects {
+                //     output_handler.handle(effect);
+                // }
             }
             Err(_) => panic!("bad read?!"),
         }
@@ -431,9 +412,9 @@ pub fn read_fq_new<'p, 'a: 'p>(
     output_handler.finish();
 }
 
-pub fn read_fa<'a, T: Send, R>(
+pub fn read_fa<'p: 'a, 'a, T: Send, R>(
     filename: &str,
-    local_fn: impl Fn(Val<'a>) -> T + Sync,
+    local_fn: impl Fn(Val<'p, 'a>) -> T + Sync,
     global_fn: impl Fn(T, &mut R),
     global_data: &mut R,
 ) {
@@ -460,9 +441,9 @@ pub fn read_fa<'a, T: Send, R>(
     }
 }
 
-fn read<'a, T: Send, R>(
+fn read<'p: 'a, 'a, T: Send, R>(
     filename: &str,
-    local_fn: impl Fn(Val<'a>) -> T + Sync,
+    local_fn: impl Fn(Val<'p, 'a>) -> T + Sync,
     global_fn: impl Fn(T, &mut R),
     global_data: &mut R,
 ) {

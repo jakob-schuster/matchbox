@@ -33,6 +33,11 @@ fn main() {
 
     let global_config = GlobalConfig::parse();
 
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(global_config.threads)
+        .build_global()
+        .unwrap();
+
     let code = read_code_from_script(&global_config.script)
         .map_err(|e| {
             let file = SimpleFile::new(format!("<{}>", global_config.script), "");

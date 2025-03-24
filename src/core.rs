@@ -711,6 +711,8 @@ impl<'a> Val<'a> {
                     .collect(),
                 body: arena.alloc(body.coerce(arena)),
             },
+
+            // WARN these really need to be implemented
             Val::Fun { data } => todo!(),
             Val::FunForeign { f } => Val::FunForeign { f: f.clone() },
             Val::FunReturnTyAwaiting { data } => todo!(),

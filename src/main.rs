@@ -1,4 +1,4 @@
-use core::{eval, make_portable, EvalError};
+use core::{make_portable, EvalError};
 use std::{fmt::Debug, fs::File, io::Read, process::exit};
 
 use codespan_reporting::{

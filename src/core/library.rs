@@ -25,18 +25,12 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
     let mut ctx = entries
         .iter()
         .try_fold(Context::default(), |ctx, (name, ty, tm)| {
-            let ty1 = core::eval(
-                arena,
-                &ctx.tms,
-                &Env::default(),
-                arena.alloc(core::Tm::new(Location::new(0, 0), ty.clone())),
-            )?;
-            let tm1 = core::eval(
-                arena,
-                &ctx.tms,
-                &Env::default(),
-                arena.alloc(core::Tm::new(Location::new(0, 0), tm.clone())),
-            )?;
+            let ty1 = arena
+                .alloc(core::Tm::new(Location::new(0, 0), ty.clone()))
+                .eval(arena, &ctx.tms, &Env::default())?;
+            let tm1 = arena
+                .alloc(core::Tm::new(Location::new(0, 0), tm.clone()))
+                .eval(arena, &ctx.tms, &Env::default())?;
 
             Ok::<Context, EvalError>(ctx.bind_def(name.to_string(), ty1, tm1))
         })
@@ -395,20 +389,14 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
         let args = args
             .iter()
             .map(|arg| {
-                core::eval(
-                    arena,
-                    &ctx0.tms,
-                    &Env::default(),
-                    arena.alloc(core::Tm::new(Location::new(0, 0), arg.clone())),
-                )
+                arena
+                    .alloc(core::Tm::new(Location::new(0, 0), arg.clone()))
+                    .eval(arena, &ctx0.tms, &Env::default())
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let body = core::eval(
-            arena,
-            &ctx0.tms,
-            &Env::default(),
-            arena.alloc(core::Tm::new(Location::new(0, 0), return_ty.clone())),
-        )?;
+        let body = arena
+            .alloc(core::Tm::new(Location::new(0, 0), return_ty.clone()))
+            .eval(arena, &ctx0.tms, &Env::default())?;
 
         Ok(ctx0.bind_def(
             name.to_string(),
@@ -422,24 +410,20 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
     if with_read {
         ctx = ctx.bind_param(
             "read".to_string(),
-            core::eval(
-                arena,
-                &ctx.tms,
-                &Env::default(),
-                &core::Tm::new(
-                    Location::new(0, 0),
-                    core::TmData::FunApp {
-                        head: Arc::new(core::Tm::new(
-                            Location::new(0, 0),
-                            core::TmData::FunForeignLit {
-                                args: vec![],
-                                body: Arc::new(core::library::read_ty),
-                            },
-                        )),
-                        args: vec![],
-                    },
-                ),
+            &core::Tm::new(
+                Location::new(0, 0),
+                core::TmData::FunApp {
+                    head: Arc::new(core::Tm::new(
+                        Location::new(0, 0),
+                        core::TmData::FunForeignLit {
+                            args: vec![],
+                            body: Arc::new(core::library::read_ty),
+                        },
+                    )),
+                    args: vec![],
+                },
             )
+            .eval(arena, &ctx.tms, &Env::default())
             .expect("could not evaluate standard library!"),
             arena,
         );

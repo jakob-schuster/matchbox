@@ -471,7 +471,7 @@ impl<'p> OpTm<'p> {
             } => {
                 if ids.is_empty() {
                     // special case - just wrap up the one value
-                    let val = core::eval(arena, &ctx.tms, &Env::default(), tm)?;
+                    let val = tm.eval(arena, &ctx.tms, &Env::default())?;
 
                     match &val {
                         Val::Str { s } => Ok(OpVal::Restrict {
@@ -519,7 +519,7 @@ impl<'p> OpTm<'p> {
                             ctx0.bind_def((*name).clone(), &core::Val::StrTy, val)
                         });
 
-                        let val = core::eval(arena, &new_ctx.tms, &Env::default(), tm)?;
+                        let val = tm.eval(arena, &new_ctx.tms, &Env::default())?;
 
                         match val {
                             Val::Str { s } => Ok((
@@ -625,7 +625,7 @@ impl<'p> OpVal<'p> {
     {
         match self {
             OpVal::Let { loc, tm } => {
-                let pos = eval_loc_tm(&arena, env, loc_ctx, tm)?;
+                let pos = tm.eval(&arena, env, loc_ctx)?;
                 Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos))])
             }
             OpVal::Restrict {
@@ -732,21 +732,27 @@ pub enum LocTm<'p> {
         offset: core::Tm<'p>,
     },
 }
-fn eval_loc_tm<'p: 'a, 'a>(
-    arena: &'a Arena,
-    env: &Env<&'a core::Val<'a>>,
-    loc_ctx: &LocCtx,
-    loc_tm: &LocTm<'p>,
-) -> Result<usize, core::EvalError> {
-    match loc_tm {
-        LocTm::Var { loc } => Ok(loc_ctx.get(loc)),
-        LocTm::Offset { loc_tm, offset } => {
-            if let core::Val::Num { n } = core::eval(arena, env, &Env::default(), offset)? {
-                let i = n.round() as i32;
 
-                Ok((eval_loc_tm(arena, env, loc_ctx, loc_tm)? as i32 + i) as usize)
-            } else {
-                panic!("sized read pattern wasn't numeric type?!")
+impl<'p> LocTm<'p> {
+    fn eval<'a>(
+        &self,
+        arena: &'a Arena,
+        env: &Env<&'a core::Val<'a>>,
+        loc_ctx: &LocCtx,
+    ) -> Result<usize, core::EvalError>
+    where
+        'p: 'a,
+    {
+        match self {
+            LocTm::Var { loc } => Ok(loc_ctx.get(loc)),
+            LocTm::Offset { loc_tm, offset } => {
+                if let core::Val::Num { n } = offset.eval(arena, env, &Env::default())? {
+                    let i = n.round() as i32;
+
+                    Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 + i) as usize)
+                } else {
+                    panic!("sized read pattern wasn't numeric type?!")
+                }
             }
         }
     }

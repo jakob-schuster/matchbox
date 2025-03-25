@@ -8,7 +8,7 @@ use crate::{
     util::{Arena, Env, Ran},
 };
 
-use super::{eval, EvalError, Val};
+use super::{EvalError, Val};
 use std::{collections::HashMap, sync::Arc};
 
 pub trait Matcher<'p>: Send + Sync {

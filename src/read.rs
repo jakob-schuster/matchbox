@@ -149,7 +149,7 @@ pub fn read_any<'p, 'a: 'p>(
     match filetype {
         FileType::Fasta => read_fa_multithreaded(buffer, prog, env, output_handler),
         FileType::Fastq => read_fq(buffer, prog, env, output_handler),
-        _ => todo!(),
+        _ => panic!("unexpected filetype?!"),
     }
 }
 
@@ -169,7 +169,7 @@ pub fn read_fa<'p, 'a: 'p>(
                 let effects = prog.eval(&arena, env, arena.alloc(val)).expect("");
 
                 for effect in &effects {
-                    output_handler.handle(effect);
+                    output_handler.handle(effect).unwrap();
                 }
             }
             Err(_) => panic!("bad read?!"),

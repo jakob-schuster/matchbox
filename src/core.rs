@@ -40,20 +40,6 @@ pub struct ProgData<'p> {
     pub stmt: Stmt<'p>,
 }
 
-impl<'p> Prog<'p> {
-    pub fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<&'p Val<'p>>,
-        read: &'a Val<'a>,
-    ) -> Result<Vec<Effect>, EvalError>
-    where
-        'p: 'a,
-    {
-        eval_stmt(arena, env, &Env::default().with(read), &self.data.stmt)
-    }
-}
-
 pub type Stmt<'p> = Located<StmtData<'p>>;
 #[derive(Clone)]
 pub enum StmtData<'p> {
@@ -94,111 +80,139 @@ pub struct PatternBranchData<'p> {
     pub stmt: Stmt<'p>,
 }
 
-fn eval_stmt<'p: 'a, 'a>(
-    arena: &'a Arena,
-    global_env: &Env<&'p Val<'p>>,
-    env: &Env<&'a Val<'a>>,
-    stmt: &Stmt<'p>,
-) -> Result<Vec<Effect>, EvalError> {
-    match &stmt.data {
-        StmtData::Let { tm, next } => {
-            // evaluate the term
-            let val = eval(arena, global_env, env, tm)?;
-            // and then evaluate the statement with that binding
-            eval_stmt(arena, global_env, &env.with(val), next)
-        }
-        StmtData::Out { tm0, tm1, next } => {
-            let val0 = eval(arena, global_env, env, tm0)?;
-            let val1 = eval(arena, global_env, env, tm1)?;
+impl<'p> Prog<'p> {
+    pub fn eval<'a>(
+        &self,
+        arena: &'a Arena,
+        env: &Env<&'p Val<'p>>,
+        read: &'a Val<'a>,
+    ) -> Result<Vec<Effect>, EvalError>
+    where
+        'p: 'a,
+    {
+        self.data.stmt.eval(arena, env, &Env::default().with(read))
+    }
+}
 
-            // export the values to be portable
-            Ok([Effect {
-                val: make_portable(arena, val0),
-                handler: make_portable(arena, val1),
-            }]
-            .into_iter()
-            .chain(eval_stmt(arena, global_env, env, next)?)
-            .collect::<Vec<_>>())
+impl<'p> Stmt<'p> {
+    pub fn eval<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<&'p Val<'p>>,
+        env: &Env<&'a Val<'a>>,
+    ) -> Result<Vec<Effect>, EvalError>
+    where
+        'p: 'a,
+    {
+        match &self.data {
+            StmtData::Let { tm, next } => {
+                // evaluate the term
+                let val = tm.eval(arena, global_env, env)?;
+                // and then evaluate the statement with that binding
+                next.eval(arena, global_env, &env.with(val))
+            }
+            StmtData::Out { tm0, tm1, next } => {
+                let val0 = tm0.eval(arena, global_env, env)?;
+                let val1 = tm1.eval(arena, global_env, env)?;
+
+                // export the values to be portable
+                Ok([Effect {
+                    val: make_portable(arena, val0),
+                    handler: make_portable(arena, val1),
+                }]
+                .into_iter()
+                .chain(next.eval(arena, global_env, env)?)
+                .collect::<Vec<_>>())
+            }
+            StmtData::If { branches, next } => {
+                let vec: Vec<Effect> = {
+                    for branch in branches {
+                        if let Some(vec) = branch.eval(arena, global_env, env)? {
+                            return Ok(vec);
+                        }
+                    }
+
+                    Ok(vec![])
+                }?;
+
+                Ok(vec
+                    .into_iter()
+                    .chain(next.eval(arena, global_env, env)?)
+                    .collect::<Vec<_>>())
+            }
+            StmtData::End => Ok(vec![]),
         }
-        StmtData::If { branches, next } => {
-            let vec: Vec<Effect> = {
+    }
+}
+
+impl<'p> Branch<'p> {
+    pub fn eval<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<&'p Val<'p>>,
+        env: &Env<&'a Val<'a>>,
+    ) -> Result<Option<Vec<Effect>>, EvalError>
+    where
+        'p: 'a,
+    {
+        match &self.data {
+            BranchData::Bool { tm, stmt } => match tm.eval(arena, global_env, env)? {
+                Val::Bool { b } => match b {
+                    true => Ok(Some(stmt.eval(arena, global_env, env)?)),
+                    false => Ok(None),
+                },
+                _ => Err(EvalError::from_internal(
+                    InternalError {
+                        message: "expected bool in branch?!".to_string(),
+                    },
+                    tm.location.clone(),
+                )),
+            },
+            BranchData::Is { tm, branches } => {
+                let val = tm.eval(arena, global_env, env)?;
+
                 for branch in branches {
-                    if let Some(vec) = eval_branch(arena, global_env, env, branch)? {
-                        return Ok(vec);
+                    if let Some(vec) = branch.eval(arena, global_env, env, val)? {
+                        return Ok(Some(vec));
                     }
                 }
 
-                Ok(vec![])
-            }?;
-
-            Ok(vec
-                .into_iter()
-                .chain(eval_stmt(arena, global_env, env, next)?)
-                .collect::<Vec<_>>())
-        }
-        StmtData::End => Ok(vec![]),
-    }
-}
-
-fn eval_branch<'p: 'a, 'a>(
-    arena: &'a Arena,
-    global_env: &Env<&'p Val<'p>>,
-    env: &Env<&'a Val<'a>>,
-    branch: &Branch<'p>,
-) -> Result<Option<Vec<Effect>>, EvalError> {
-    match &branch.data {
-        BranchData::Bool { tm, stmt } => match eval(arena, global_env, env, tm)? {
-            Val::Bool { b } => match b {
-                true => Ok(Some(eval_stmt(arena, global_env, env, stmt)?)),
-                false => Ok(None),
-            },
-            _ => Err(EvalError::from_internal(
-                InternalError {
-                    message: "expected bool in branch?!".to_string(),
-                },
-                tm.location.clone(),
-            )),
-        },
-        BranchData::Is { tm, branches } => {
-            let val = eval(arena, global_env, env, tm)?;
-
-            for branch in branches {
-                if let Some(vec) = eval_pattern_branch(arena, global_env, env, branch, val)? {
-                    return Ok(Some(vec));
-                }
+                // if no branch in the is has matched, continue on with the branches
+                Ok(None)
             }
-
-            // if no branch in the is has matched, continue on with the branches
-            Ok(None)
         }
     }
 }
 
-fn eval_pattern_branch<'p: 'a, 'a>(
-    arena: &'a Arena,
-    global_env: &Env<&'p Val<'p>>,
-    env: &Env<&'a Val<'a>>,
-    branch: &PatternBranch<'p>,
-    val: &'a Val<'a>,
-) -> Result<Option<Vec<Effect>>, EvalError> {
-    match &branch.data.matcher.evaluate(arena, env, val)?[..] {
-        [] => Ok(None),
-        bind_options => Ok(Some(
-            bind_options
-                .iter()
-                .map(|binds| {
-                    eval_stmt(
-                        arena,
-                        global_env,
-                        &binds.iter().fold(env.clone(), |env0, bind| env0.with(bind)),
-                        &branch.data.stmt,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>(),
-        )),
+impl<'p> PatternBranch<'p> {
+    pub fn eval<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<&'p Val<'p>>,
+        env: &Env<&'a Val<'a>>,
+        val: &'a Val<'a>,
+    ) -> Result<Option<Vec<Effect>>, EvalError>
+    where
+        'p: 'a,
+    {
+        match &self.data.matcher.evaluate(arena, env, val)?[..] {
+            [] => Ok(None),
+            bind_options => Ok(Some(
+                bind_options
+                    .iter()
+                    .map(|binds| {
+                        self.data.stmt.eval(
+                            arena,
+                            global_env,
+                            &binds.iter().fold(env.clone(), |env0, bind| env0.with(bind)),
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>(),
+            )),
+        }
     }
 }
 
@@ -272,124 +286,129 @@ pub enum TmData<'a> {
     },
 }
 
-pub fn eval<'p: 'a, 'a>(
-    arena: &'a Arena,
-    global_env: &Env<&'p Val<'p>>,
-    env: &Env<&'a Val<'a>>,
-    tm: &Tm<'p>,
-) -> Result<&'a Val<'a>, EvalError> {
-    match &tm.data {
-        // look up the variable in the environment
-        TmData::Var { index } => {
-            Ok(if *index < env.iter().len() {
-                env.get_index(*index)
-            } else {
-                // WARN clumsy and wasteful coercion
-                arena.alloc(
-                    global_env
-                        .get_index(*index - env.iter().len())
-                        .coerce(arena),
-                )
-            })
-        }
-
-        TmData::Univ => Ok(arena.alloc(Val::Univ)),
-        TmData::AnyTy => Ok(arena.alloc(Val::AnyTy)),
-
-        TmData::BoolTy => Ok(arena.alloc(Val::BoolTy)),
-        TmData::BoolLit { b } => Ok(arena.alloc(Val::Bool { b: *b })),
-        TmData::NumTy => Ok(arena.alloc(Val::NumTy)),
-        TmData::NumLit { n } => Ok(arena.alloc(Val::Num { n: n.clone() })),
-        TmData::StrTy => Ok(arena.alloc(Val::StrTy)),
-        TmData::StrLit { s } => Ok(arena.alloc(Val::Str { s: s })),
-
-        TmData::FunTy { args, body } => Ok(arena.alloc(Val::FunTy {
-            args: args
-                .iter()
-                .map(|arg| eval(arena, global_env, env, arg))
-                .collect::<Result<Vec<_>, EvalError>>()?,
-            body: eval(arena, global_env, env, body)?,
-        })),
-        TmData::FunLit { args, body } => Ok(arena.alloc(Val::Fun {
-            data: FunData {
-                env: env.clone(),
-                body: body.as_ref().clone(),
-            },
-        })),
-        TmData::FunForeignLit { args, body } => {
-            Ok(arena.alloc(Val::FunForeign { f: body.clone() }))
-        }
-        TmData::FunApp { head, args } => app(
-            arena,
-            &tm.location,
-            eval(arena, global_env, env, head)?,
-            args.iter()
-                .map(|arg| eval(arena, global_env, env, arg))
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-
-        TmData::ListTy { ty } => Ok(arena.alloc(Val::ListTy {
-            ty: eval(arena, global_env, env, ty)?,
-        })),
-        TmData::ListLit { tms } => Ok(arena.alloc(Val::List {
-            v: tms
-                .iter()
-                .map(|tm| eval(arena, global_env, env, tm))
-                .collect::<Result<Vec<_>, _>>()?,
-        })),
-
-        TmData::RecTy { fields } => Ok(arena.alloc(Val::RecTy {
-            fields: fields
-                .iter()
-                .map(|field| {
-                    Ok(CoreRecField::new(
-                        field.name,
-                        eval(arena, global_env, env, &field.data)?,
-                    ))
+impl<'p> Tm<'p> {
+    pub fn eval<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<&'p Val<'p>>,
+        env: &Env<&'a Val<'a>>,
+    ) -> Result<&'a Val<'a>, EvalError>
+    where
+        'p: 'a,
+    {
+        match &self.data {
+            // look up the variable in the environment
+            TmData::Var { index } => {
+                Ok(if *index < env.iter().len() {
+                    env.get_index(*index)
+                } else {
+                    // WARN clumsy and wasteful coercion
+                    arena.alloc(
+                        global_env
+                            .get_index(*index - env.iter().len())
+                            .coerce(arena),
+                    )
                 })
-                .collect::<Result<Vec<_>, EvalError>>()?,
-        })),
-        TmData::RecWithTy { fields } => Ok(arena.alloc(Val::RecWithTy {
-            fields: fields
-                .iter()
-                .map(|field| {
-                    Ok(CoreRecField::new(
-                        field.name,
-                        eval(arena, global_env, env, &field.data)?,
-                    ))
-                })
-                .collect::<Result<Vec<_>, EvalError>>()?,
-        })),
+            }
 
-        // allocate a RecLit as a ConcreteRec
-        TmData::RecLit { fields } => Ok(arena.alloc(Val::Rec(
-            arena.alloc(ConcreteRec {
-                map: fields
+            TmData::Univ => Ok(arena.alloc(Val::Univ)),
+            TmData::AnyTy => Ok(arena.alloc(Val::AnyTy)),
+
+            TmData::BoolTy => Ok(arena.alloc(Val::BoolTy)),
+            TmData::BoolLit { b } => Ok(arena.alloc(Val::Bool { b: *b })),
+            TmData::NumTy => Ok(arena.alloc(Val::NumTy)),
+            TmData::NumLit { n } => Ok(arena.alloc(Val::Num { n: n.clone() })),
+            TmData::StrTy => Ok(arena.alloc(Val::StrTy)),
+            TmData::StrLit { s } => Ok(arena.alloc(Val::Str { s: s })),
+
+            TmData::FunTy { args, body } => Ok(arena.alloc(Val::FunTy {
+                args: args
+                    .iter()
+                    .map(|arg| arg.eval(arena, global_env, env))
+                    .collect::<Result<Vec<_>, EvalError>>()?,
+                body: body.eval(arena, global_env, env)?,
+            })),
+            TmData::FunLit { args, body } => Ok(arena.alloc(Val::Fun {
+                data: FunData {
+                    env: env.clone(),
+                    body: body.as_ref().clone(),
+                },
+            })),
+            TmData::FunForeignLit { args, body } => {
+                Ok(arena.alloc(Val::FunForeign { f: body.clone() }))
+            }
+            TmData::FunApp { head, args } => app(
+                arena,
+                &self.location,
+                head.eval(arena, global_env, env)?,
+                args.iter()
+                    .map(|arg| arg.eval(arena, global_env, env))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+
+            TmData::ListTy { ty } => Ok(arena.alloc(Val::ListTy {
+                ty: ty.eval(arena, global_env, env)?,
+            })),
+            TmData::ListLit { tms } => Ok(arena.alloc(Val::List {
+                v: tms
+                    .iter()
+                    .map(|tm| tm.eval(arena, global_env, env))
+                    .collect::<Result<Vec<_>, _>>()?,
+            })),
+
+            TmData::RecTy { fields } => Ok(arena.alloc(Val::RecTy {
+                fields: fields
                     .iter()
                     .map(|field| {
-                        Ok((
+                        Ok(CoreRecField::new(
                             field.name,
-                            arena.alloc(eval(arena, global_env, env, &field.data)?) as &Val<'a>,
+                            field.data.eval(arena, global_env, env)?,
                         ))
                     })
-                    .collect::<Result<HashMap<_, _>, EvalError>>()?,
-            }),
-        ))),
-        TmData::RecProj { tm: head_tm, name } => match eval(arena, global_env, env, head_tm)? {
-            Val::Rec(r) => {
-                let e = r
-                    .get(name, arena)
-                    .map_err(|e| EvalError::from_internal(e, tm.location.clone()))?;
+                    .collect::<Result<Vec<_>, EvalError>>()?,
+            })),
+            TmData::RecWithTy { fields } => Ok(arena.alloc(Val::RecWithTy {
+                fields: fields
+                    .iter()
+                    .map(|field| {
+                        Ok(CoreRecField::new(
+                            field.name,
+                            field.data.eval(arena, global_env, env)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, EvalError>>()?,
+            })),
 
-                Ok(e)
-            }
-            _ => Err(EvalError::from_internal(
-                InternalError {
-                    message: "trying to access field of non-record value?!".to_string(),
-                },
-                tm.location.clone(),
-            )),
-        },
+            // allocate a RecLit as a ConcreteRec
+            TmData::RecLit { fields } => Ok(arena.alloc(Val::Rec(
+                arena.alloc(ConcreteRec {
+                    map: fields
+                        .iter()
+                        .map(|field| {
+                            Ok((
+                                field.name,
+                                arena.alloc(field.data.eval(arena, global_env, env)?) as &Val<'a>,
+                            ))
+                        })
+                        .collect::<Result<HashMap<_, _>, EvalError>>()?,
+                }),
+            ))),
+            TmData::RecProj { tm: head_tm, name } => match head_tm.eval(arena, global_env, env)? {
+                Val::Rec(r) => {
+                    let e = r
+                        .get(name, arena)
+                        .map_err(|e| EvalError::from_internal(e, self.location.clone()))?;
+
+                    Ok(e)
+                }
+                _ => Err(EvalError::from_internal(
+                    InternalError {
+                        message: "trying to access field of non-record value?!".to_string(),
+                    },
+                    self.location.clone(),
+                )),
+            },
+        }
     }
 }
 
@@ -406,7 +425,7 @@ impl<'a> FunData<'a> {
             .iter()
             .fold(self.env.clone(), |env0, arg| env0.with(arg));
 
-        eval(arena, &Env::default(), &new_env, &self.body)
+        self.body.eval(arena, &Env::default(), &new_env)
     }
 }
 

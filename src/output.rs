@@ -64,7 +64,8 @@ impl<'a> OutputHandler<'a> {
         }
     }
 
-    pub fn finish(&self) {
+    pub fn finish(&mut self) {
+        self.stdout_handler.finish();
         self.counts_handler.print();
         self.average_handler.print();
     }
@@ -92,6 +93,11 @@ impl<'a> BufferedStdoutHandler<'a> {
             self.vec = vec![];
         }
     }
+
+    pub fn finish(&mut self) {
+        self.stdout.write_all(self.vec.join("\n").as_bytes());
+        self.vec = vec![];
+    }
 }
 
 /// Naive stdout handler; simply prints to stdout with println!
@@ -105,6 +111,8 @@ impl StdoutHandler {
     pub fn handle(&mut self, val: &PortableVal) {
         println!("{}", val);
     }
+
+    pub fn finish(&mut self) {}
 }
 
 enum FileType {

@@ -275,45 +275,21 @@ pub fn infer_read_pattern<'a>(
                     (true, false) => {
                         ops.push(OpTm::Let {
                             loc: ran.end,
-                            tm: LocTm::Offset {
+                            tm: LocTm::Plus {
                                 loc_tm: Arc::new(LocTm::Var { loc: ran.start }),
                                 offset: expr_num.clone(),
                             },
                         });
                         new_known.push(ran.end);
                     }
-
                     (false, true) => {
                         ops.push(OpTm::Let {
                             loc: ran.start,
-                            tm: LocTm::Offset {
+                            tm: LocTm::Minus {
                                 loc_tm: Arc::new(LocTm::Var { loc: ran.end }),
-                                offset: core::Tm::new(
-                                    expr_num.location.clone(),
-                                    core::TmData::FunApp {
-                                        head: Arc::new(
-                                            check_tm(
-                                                arena,
-                                                &core::library::standard_library(arena, true),
-                                                arena.alloc(surface::Tm::new(
-                                                    expr_num.location.clone(),
-                                                    surface::TmData::Name {
-                                                        name: "unary_minus".to_string(),
-                                                    },
-                                                )),
-                                                &core::Val::FunTy {
-                                                    args: vec![&core::Val::NumTy],
-                                                    body: &core::Val::NumTy,
-                                                },
-                                            )
-                                            .expect("couldn't find unary minus operation?!"),
-                                        ),
-                                        args: vec![expr_num.clone()],
-                                    },
-                                ),
+                                offset: expr_num.clone(),
                             },
                         });
-
                         new_known.push(ran.start);
                     }
 
@@ -331,6 +307,7 @@ pub fn infer_read_pattern<'a>(
         let mut known = known.clone();
 
         let mut ops_new = ops.clone();
+        println!("about to go into learn_new_fixed_lens()");
         ops_new.extend(learn_new_fixed_lens(&mut known, sized, arena));
         // WARN have changed this -- see if it works
         while !ops.len().eq(&ops_new.len()) {
@@ -407,6 +384,7 @@ pub fn infer_read_pattern<'a>(
         .map(|(i, name)| (name.clone(), i))
         .collect::<HashMap<_, _>>();
 
+    println!("{}", ops.iter().map(|op| op.to_string()).join(","));
     let final_ops = ops
         .iter()
         .map(|op| op.eval(arena, ctx, param_vals.clone(), param_indices.clone(), error))
@@ -600,7 +578,7 @@ pub struct BindCtx<'a> {
 
 impl<'a> BindCtx<'a> {
     fn get(&self, id: &usize) -> Option<&'a core::Val<'a>> {
-        self.map.get(id).map(|val| *val)
+        self.map.get(id).copied()
     }
 
     fn with(&self, id: usize, val: &'a core::Val<'a>) -> BindCtx<'a> {
@@ -727,7 +705,11 @@ pub enum LocTm<'p> {
     Var {
         loc: usize,
     },
-    Offset {
+    Plus {
+        loc_tm: Arc<LocTm<'p>>,
+        offset: core::Tm<'p>,
+    },
+    Minus {
         loc_tm: Arc<LocTm<'p>>,
         offset: core::Tm<'p>,
     },
@@ -745,11 +727,20 @@ impl<'p> LocTm<'p> {
     {
         match self {
             LocTm::Var { loc } => Ok(loc_ctx.get(loc)),
-            LocTm::Offset { loc_tm, offset } => {
+            LocTm::Plus { loc_tm, offset } => {
                 if let core::Val::Num { n } = offset.eval(arena, env, &Env::default())? {
                     let i = n.round() as i32;
 
                     Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 + i) as usize)
+                } else {
+                    panic!("sized read pattern wasn't numeric type?!")
+                }
+            }
+            LocTm::Minus { loc_tm, offset } => {
+                if let core::Val::Num { n } = offset.eval(arena, env, &Env::default())? {
+                    let i = n.round() as i32;
+
+                    Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 - i) as usize)
                 } else {
                     panic!("sized read pattern wasn't numeric type?!")
                 }
@@ -859,7 +850,8 @@ impl<'a> Display for LocTm<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LocTm::Var { loc } => loc.fmt(f),
-            LocTm::Offset { loc_tm, offset } => format!("{} + {}", loc_tm, offset).fmt(f),
+            LocTm::Plus { loc_tm, offset } => format!("{} + {}", loc_tm, offset).fmt(f),
+            LocTm::Minus { loc_tm, offset } => format!("{} - {}", loc_tm, offset).fmt(f),
         }
     }
 }

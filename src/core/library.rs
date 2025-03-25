@@ -185,6 +185,12 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
             Arc::new(core::library::translate),
         ),
         (
+            "str_concat",
+            vec![core::TmData::StrTy, core::TmData::StrTy],
+            core::TmData::StrTy,
+            Arc::new(core::library::str_concat),
+        ),
+        (
             "concat",
             vec![
                 core::TmData::RecWithTy {
@@ -382,6 +388,12 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
             vec![core::TmData::StrTy, core::TmData::StrTy],
             core::TmData::NumTy,
             Arc::new(core::library::contains),
+        ),
+        (
+            "to_str",
+            vec![core::TmData::AnyTy],
+            core::TmData::StrTy,
+            Arc::new(core::library::to_str),
         ),
     ]
     .into_iter()
@@ -875,6 +887,22 @@ pub fn concat<'a>(
                 _ => Ok(arena.alloc(Val::Rec(arena.alloc(read1.with(b"seq", new_seq, arena))))),
             }
         }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+pub fn str_concat<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[&'a Val<'a>],
+) -> Result<&'a Val<'a>, EvalError> {
+    match vtms {
+        [Val::Str { s: s0 }, Val::Str { s: s1 }] => Ok(arena.alloc(Val::Str {
+            s: &arena.alloc((*s0).iter().chain(*s1).cloned().collect::<Vec<_>>())[..],
+        })),
 
         _ => Err(EvalError::new(
             &location,
@@ -1409,6 +1437,26 @@ pub fn distance<'a>(
             let distance = bio::alignment::distance::levenshtein(s0, s1);
             Ok(arena.alloc(Val::Num { n: distance as f32 }))
         }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn to_str<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[&'a Val<'a>],
+) -> Result<&'a Val<'a>, EvalError> {
+    match vtms {
+        // string types pass straight through to reduce allocations
+        [v @ Val::Str { .. }] => Ok(v),
+        // all else is turned into a string and then allocated
+        [v] => Ok(arena.alloc(Val::Str {
+            s: arena.alloc(v.to_string()).as_bytes(),
+        })),
 
         _ => Err(EvalError::new(
             &location,

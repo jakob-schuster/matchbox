@@ -109,6 +109,8 @@ fn run(code: &str, global_config: &GlobalConfig) {
         // should never unwrap, because program terminates
         .unwrap();
 
+    println!("{}", core_prog);
+
     // create an output handler, to receive output effects
     let mut output_handler = OutputHandler::new();
 

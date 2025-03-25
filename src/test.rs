@@ -149,7 +149,7 @@ fn elab_assignment_pass3() {
 
 #[test]
 fn elab_assignment_pass4() {
-    insta::assert_snapshot!(elab_test(r"a = 1; b = a + 10 * 10"), @"push 1; push (#[40])(#[0], (#[39])(10, 10));")
+    insta::assert_snapshot!(elab_test(r"a = 1; b = a + 10 * 10"), @"push 1; push (#[42])(#[0], (#[41])(10, 10));")
 }
 
 #[test]
@@ -164,15 +164,15 @@ fn eval_pattern_pass1() {
 
 #[test]
 fn eval_pattern_pass2() {
-    insta::assert_snapshot!(eval_one_fasta_read_test(r"if read is [_ GGGG rest:|3| _] => {rest.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC"), @"CCCCCCCCCCCC |> { output = stats }")
+    insta::assert_snapshot!(eval_one_fasta_read_test(r"if read is [_ GGGG rest:|3| _] => {rest.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC"), @"CCC |> { output = stats }")
 }
 
 #[test]
 fn eval_pattern_pass3() {
-    insta::assert_snapshot!(eval_one_fasta_read_test(r"if read is [first:|3| _] => {first.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC"), @"CCCCCCCCCCCC |> { output = stats }")
+    insta::assert_snapshot!(eval_one_fasta_read_test(r"if read is [first:|3| _] => {first.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC"), @"AAA |> { output = stats }")
 }
 
 #[test]
 fn eval_pattern_pass4() {
-    insta::assert_snapshot!(eval_one_fasta_read_test(r"if read is [_ last:|3|] => {last.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC"), @"CCCCCCCCCCCC |> { output = stats }")
+    insta::assert_snapshot!(eval_one_fasta_read_test(r"if read is [_ last:|3|] => {last.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC"), @"CCC |> { output = stats }")
 }

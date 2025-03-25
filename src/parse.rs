@@ -187,7 +187,7 @@ peg::parser! {
             // numeric literals
             / n:num_val() { TmData::NumLit { n } }
             // string literals
-            / "'" regs:list(<str_lit_region()>, <""()>) "'" { TmData::StrLit { regs } }
+            / "'" regs:whitespace_sensitive_list(<str_lit_region()>, <""()>) "'" { TmData::StrLit { regs } }
             // nucleotide sequence literals
             / s:located(<['G'|'T'|'A'|'C']+>) &[c if !c.is_alphanumeric() && c != '_'] { TmData::StrLit { regs: vec![StrLitRegion::new(s.location, StrLitRegionData::Str { s: s.data.into_iter().map(|c| c as u8).collect() })] } }
 

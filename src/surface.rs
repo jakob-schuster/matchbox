@@ -1189,7 +1189,13 @@ fn elab_str_lit_regs<'a>(
                                     name: "str_concat".to_string(),
                                 },
                             )),
-                            &core::Val::StrTy,
+                            &core::Val::FunTy {
+                                args: vec![
+                                    arena.alloc(core::Val::StrTy),
+                                    arena.alloc(core::Val::StrTy),
+                                ],
+                                body: arena.alloc(core::Val::StrTy),
+                            },
                         )?),
                         args: vec![
                             elab_str_lit_reg(arena, ctx, reg)?,

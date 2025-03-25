@@ -1,27 +1,28 @@
 use parser::{prog, tm};
 
-use crate::{surface::*, util, GlobalConfig};
+use crate::{
+    surface::*,
+    util::{self, Location},
+    GlobalConfig,
+};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
-    pub start: usize,
-    pub end: usize,
+    pub location: Location,
     pub message: String,
 }
 
 pub fn parse(string: &str, global_config: &GlobalConfig) -> Result<Prog, ParseError> {
     prog(string, global_config).map_err(|e| ParseError {
-        start: e.location.offset,
-        end: e.location.offset + 1,
+        location: Location::new(e.location.offset, e.location.offset + 1),
         message: "Parse error".to_string(),
     })
 }
 
 pub fn parse_tm(string: &str, global_config: &GlobalConfig) -> Result<Tm, ParseError> {
     tm(string, global_config).map_err(|e| ParseError {
-        start: e.location.offset,
-        end: e.location.offset + 1,
+        location: Location::new(e.location.offset, e.location.offset + 1),
         message: "Parse error".to_string(),
     })
 }

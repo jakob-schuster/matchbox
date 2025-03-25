@@ -17,7 +17,7 @@ use crate::{
         Effect, Val,
     },
     output::OutputHandler,
-    util::Arena,
+    util::{Arena, Env},
 };
 
 fn main() {
@@ -310,13 +310,14 @@ pub fn read_any<'p, 'a: 'p>(
     filename: &str,
     prog: &core::Prog<'p>,
     arena: &'p Arena,
+    env: &Env<&'p Val<'p>>,
     output_handler: &mut OutputHandler,
 ) {
     let (filetype, buffer) = get_filetype_and_buffer(filename).unwrap();
 
     match filetype {
-        FileType::Fasta => read_fa_multithreaded_new(buffer, prog, arena, output_handler),
-        FileType::Fastq => read_fq_new(buffer, prog, arena, output_handler),
+        FileType::Fasta => read_fa_multithreaded_new(buffer, prog, arena, env, output_handler),
+        FileType::Fastq => read_fq_new(buffer, prog, arena, env, output_handler),
         _ => todo!(),
     }
 }
@@ -325,6 +326,7 @@ pub fn read_fa_new<'p, 'a: 'p>(
     buffer: Box<dyn BufRead>,
     prog: &core::Prog<'p>,
     arena: &'p Arena,
+    env: &Env<&'p Val<'p>>,
     output_handler: &mut OutputHandler,
 ) {
     let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
@@ -334,7 +336,7 @@ pub fn read_fa_new<'p, 'a: 'p>(
         match record {
             Ok(read) => {
                 let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
-                let effects = prog.eval(arena.alloc(val), &arena).expect("");
+                let effects = prog.eval(&arena, env, arena.alloc(val)).expect("");
 
                 // println!(
                 //     "{}",
@@ -360,6 +362,7 @@ pub fn read_fa_multithreaded_new<'p, 'a: 'p>(
     buffer: Box<dyn BufRead>,
     prog: &core::Prog<'p>,
     arena: &'p Arena,
+    env: &Env<&'p Val<'p>>,
     output_handler: &mut OutputHandler,
 ) {
     let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
@@ -375,7 +378,7 @@ pub fn read_fa_multithreaded_new<'p, 'a: 'p>(
                 Ok(read) => {
                     let arena = Arena::new();
                     let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
-                    let effects = prog.eval(arena.alloc(val), &arena).expect("");
+                    let effects = prog.eval(&arena, env, arena.alloc(val));
 
                     effects
                 }
@@ -383,8 +386,10 @@ pub fn read_fa_multithreaded_new<'p, 'a: 'p>(
             })
             .collect_into_vec(&mut effects);
 
-        for effect in effects.iter().flatten() {
-            output_handler.handle(effect).unwrap();
+        for result_effects in &effects {
+            for effect in result_effects.as_ref().expect("") {
+                output_handler.handle(effect).unwrap();
+            }
         }
         // match record {
         //     Ok(read) => {
@@ -415,6 +420,7 @@ pub fn read_fq_new<'p, 'a: 'p>(
     buffer: Box<dyn BufRead>,
     prog: &core::Prog<'p>,
     arena: &'p Arena,
+    env: &Env<&'p Val<'p>>,
     output_handler: &mut OutputHandler,
 ) {
     let input_records = bio::io::fastq::Reader::from_bufread(buffer).records();
@@ -423,10 +429,10 @@ pub fn read_fq_new<'p, 'a: 'p>(
     for record in input_records {
         match record {
             Ok(read) => {
-                let val = core::Val::Rec(arena.alloc(rec::FastqRead { read }));
-                let effects = prog.eval(arena.alloc(val), &arena).expect("");
+                let val = arena.alloc(core::Val::Rec(arena.alloc(rec::FastqRead { read })));
+                let effects = prog.eval(&arena, env, val);
 
-                for effect in &effects {
+                for effect in &effects.expect("") {
                     output_handler.handle(effect);
                 }
             }

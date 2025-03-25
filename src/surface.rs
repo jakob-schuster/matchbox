@@ -372,7 +372,7 @@ fn elab_stmt<'a>(
             let new_ctx = ctx.bind_def(
                 name.clone(),
                 ty,
-                eval(arena, &ctx.tms, &ctm).map_err(ElabError::from_eval_error)?,
+                eval(arena, &ctx.tms, &Env::default(), &ctm).map_err(ElabError::from_eval_error)?,
             );
 
             match rest {
@@ -622,7 +622,8 @@ fn infer_pattern<'a>(
                 .iter()
                 .map(|param| {
                     let (ctm, cty) = infer_tm(arena, ctx, &param.data.tm)?;
-                    let vtm = eval(arena, &ctx.tms, &ctm).map_err(ElabError::from_eval_error)?;
+                    let vtm = eval(arena, &ctx.tms, &Env::default(), &ctm)
+                        .map_err(ElabError::from_eval_error)?;
 
                     match cty {
                         core::Val::ListTy { ty } => Ok((param.data.name.clone(), vtm, *ty)),
@@ -811,7 +812,7 @@ pub fn infer_tm<'a>(
             let arg_vals = arg_tms
                 .clone()
                 .iter()
-                .map(|arg| core::eval(arena, &ctx.tms, arg))
+                .map(|arg| core::eval(arena, &ctx.tms, &Env::default(), arg))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(ElabError::from_eval_error)?;
 
@@ -821,8 +822,8 @@ pub fn infer_tm<'a>(
                 .iter()
                 .try_fold(ctx.clone(), |ctx0, (name, ty)| {
                     // evaluate the type
-                    let val =
-                        core::eval(arena, &ctx.tms, ty).map_err(ElabError::from_eval_error)?;
+                    let val = core::eval(arena, &ctx.tms, &Env::default(), ty)
+                        .map_err(ElabError::from_eval_error)?;
                     // bind it in the context
                     Ok(ctx0.bind_param(name.clone(), val, arena))
                 })?;
@@ -859,7 +860,7 @@ pub fn infer_tm<'a>(
             let arg_vals = arg_tms
                 .clone()
                 .iter()
-                .map(|arg| core::eval(arena, &ctx.tms, arg))
+                .map(|arg| core::eval(arena, &ctx.tms, &Env::default(), arg))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(ElabError::from_eval_error)?;
 
@@ -869,8 +870,8 @@ pub fn infer_tm<'a>(
                 .iter()
                 .try_fold(ctx.clone(), |ctx0, (name, ty)| {
                     // evaluate the type
-                    let val =
-                        core::eval(arena, &ctx.tms, ty).map_err(ElabError::from_eval_error)?;
+                    let val = core::eval(arena, &ctx.tms, &Env::default(), ty)
+                        .map_err(ElabError::from_eval_error)?;
                     // bind it in the context
                     Ok(ctx0.bind_param(name.clone(), val, arena))
                 })?;
@@ -879,7 +880,8 @@ pub fn infer_tm<'a>(
             // (note that this might be FunReturnTyAwaiting, as it's all inferred;
             // that only happens in the return type of foreign functions, which ar specified)
             let ty = check_tm(arena, &new_ctx, ty, &core::Val::Univ)?;
-            let val = core::eval(arena, &new_ctx.tms, &ty).map_err(ElabError::from_eval_error)?;
+            let val = core::eval(arena, &new_ctx.tms, &Env::default(), &ty)
+                .map_err(ElabError::from_eval_error)?;
             let final_ty = match val {
                 core::Val::Neutral { neutral } => {
                     // if it's neutral, we need to create a val that is just a function frome some arguments
@@ -945,7 +947,7 @@ pub fn infer_tm<'a>(
                         core::Val::FunReturnTyAwaiting { data } => {
                             let arg_vals = arg_tms
                                 .iter()
-                                .map(|arg| core::eval(arena, &ctx.tms, arg))
+                                .map(|arg| core::eval(arena, &ctx.tms, &Env::default(), arg))
                                 .collect::<Result<Vec<_>, _>>()
                                 .map_err(ElabError::from_eval_error)?;
 

@@ -41,15 +41,16 @@ pub struct ProgData<'p> {
 }
 
 impl<'p> Prog<'p> {
-    pub fn eval<'a>(&self, read: &'a Val<'a>, arena: &'a Arena) -> Result<Vec<Effect>, EvalError>
+    pub fn eval<'a>(
+        &self,
+        arena: &'a Arena,
+        env: &Env<&'p Val<'p>>,
+        read: &'a Val<'a>,
+    ) -> Result<Vec<Effect>, EvalError>
     where
         'p: 'a,
     {
-        eval_stmt(
-            arena,
-            &library::standard_library(arena, false).tms.with(read),
-            &self.data.stmt,
-        )
+        eval_stmt(arena, env, &Env::default().with(read), &self.data.stmt)
     }
 }
 
@@ -93,29 +94,22 @@ pub struct PatternBranchData<'p> {
     pub stmt: Stmt<'p>,
 }
 
-pub fn eval_prog<'p: 'a, 'a>(
-    arena: &'a Arena,
-    env: &Env<&'a Val<'a>>,
-    prog: &Prog<'p>,
-) -> Result<Vec<Effect>, EvalError> {
-    eval_stmt(arena, env, &prog.data.stmt)
-}
-
 fn eval_stmt<'p: 'a, 'a>(
     arena: &'a Arena,
+    global_env: &Env<&'p Val<'p>>,
     env: &Env<&'a Val<'a>>,
     stmt: &Stmt<'p>,
 ) -> Result<Vec<Effect>, EvalError> {
     match &stmt.data {
         StmtData::Let { tm, next } => {
             // evaluate the term
-            let val = eval(arena, env, tm)?;
+            let val = eval(arena, global_env, env, tm)?;
             // and then evaluate the statement with that binding
-            eval_stmt(arena, &env.with(val), next)
+            eval_stmt(arena, global_env, &env.with(val), next)
         }
         StmtData::Out { tm0, tm1, next } => {
-            let val0 = eval(arena, env, tm0)?;
-            let val1 = eval(arena, env, tm1)?;
+            let val0 = eval(arena, global_env, env, tm0)?;
+            let val1 = eval(arena, global_env, env, tm1)?;
 
             // export the values to be portable
             Ok([Effect {
@@ -123,13 +117,13 @@ fn eval_stmt<'p: 'a, 'a>(
                 handler: make_portable(arena, val1),
             }]
             .into_iter()
-            .chain(eval_stmt(arena, env, next)?)
+            .chain(eval_stmt(arena, global_env, env, next)?)
             .collect::<Vec<_>>())
         }
         StmtData::If { branches, next } => {
             let vec: Vec<Effect> = {
                 for branch in branches {
-                    if let Some(vec) = eval_branch(arena, env, branch)? {
+                    if let Some(vec) = eval_branch(arena, global_env, env, branch)? {
                         return Ok(vec);
                     }
                 }
@@ -139,7 +133,7 @@ fn eval_stmt<'p: 'a, 'a>(
 
             Ok(vec
                 .into_iter()
-                .chain(eval_stmt(arena, env, next)?)
+                .chain(eval_stmt(arena, global_env, env, next)?)
                 .collect::<Vec<_>>())
         }
         StmtData::End => Ok(vec![]),
@@ -148,13 +142,14 @@ fn eval_stmt<'p: 'a, 'a>(
 
 fn eval_branch<'p: 'a, 'a>(
     arena: &'a Arena,
+    global_env: &Env<&'p Val<'p>>,
     env: &Env<&'a Val<'a>>,
     branch: &Branch<'p>,
 ) -> Result<Option<Vec<Effect>>, EvalError> {
     match &branch.data {
-        BranchData::Bool { tm, stmt } => match eval(arena, env, tm)? {
+        BranchData::Bool { tm, stmt } => match eval(arena, global_env, env, tm)? {
             Val::Bool { b } => match b {
-                true => Ok(Some(eval_stmt(arena, env, stmt)?)),
+                true => Ok(Some(eval_stmt(arena, global_env, env, stmt)?)),
                 false => Ok(None),
             },
             _ => Err(EvalError::from_internal(
@@ -165,10 +160,10 @@ fn eval_branch<'p: 'a, 'a>(
             )),
         },
         BranchData::Is { tm, branches } => {
-            let val = eval(arena, env, tm)?;
+            let val = eval(arena, global_env, env, tm)?;
 
             for branch in branches {
-                if let Some(vec) = eval_pattern_branch(arena, env, branch, val)? {
+                if let Some(vec) = eval_pattern_branch(arena, global_env, env, branch, val)? {
                     return Ok(Some(vec));
                 }
             }
@@ -181,6 +176,7 @@ fn eval_branch<'p: 'a, 'a>(
 
 fn eval_pattern_branch<'p: 'a, 'a>(
     arena: &'a Arena,
+    global_env: &Env<&'p Val<'p>>,
     env: &Env<&'a Val<'a>>,
     branch: &PatternBranch<'p>,
     val: &'a Val<'a>,
@@ -193,6 +189,7 @@ fn eval_pattern_branch<'p: 'a, 'a>(
                 .map(|binds| {
                     eval_stmt(
                         arena,
+                        global_env,
                         &binds.iter().fold(env.clone(), |env0, bind| env0.with(bind)),
                         &branch.data.stmt,
                     )
@@ -277,12 +274,24 @@ pub enum TmData<'a> {
 
 pub fn eval<'p: 'a, 'a>(
     arena: &'a Arena,
+    global_env: &Env<&'p Val<'p>>,
     env: &Env<&'a Val<'a>>,
     tm: &Tm<'p>,
 ) -> Result<&'a Val<'a>, EvalError> {
     match &tm.data {
         // look up the variable in the environment
-        TmData::Var { index } => Ok(env.get_index(*index)),
+        TmData::Var { index } => {
+            Ok(if *index < env.iter().len() {
+                env.get_index(*index)
+            } else {
+                // WARN clumsy and wasteful coercion
+                arena.alloc(
+                    global_env
+                        .get_index(*index - env.iter().len())
+                        .coerce(arena),
+                )
+            })
+        }
 
         TmData::Univ => Ok(arena.alloc(Val::Univ)),
         TmData::AnyTy => Ok(arena.alloc(Val::AnyTy)),
@@ -297,9 +306,9 @@ pub fn eval<'p: 'a, 'a>(
         TmData::FunTy { args, body } => Ok(arena.alloc(Val::FunTy {
             args: args
                 .iter()
-                .map(|arg| eval(arena, env, arg))
+                .map(|arg| eval(arena, global_env, env, arg))
                 .collect::<Result<Vec<_>, EvalError>>()?,
-            body: eval(arena, env, body)?,
+            body: eval(arena, global_env, env, body)?,
         })),
         TmData::FunLit { args, body } => Ok(arena.alloc(Val::Fun {
             data: FunData {
@@ -313,19 +322,19 @@ pub fn eval<'p: 'a, 'a>(
         TmData::FunApp { head, args } => app(
             arena,
             &tm.location,
-            eval(arena, env, head)?,
+            eval(arena, global_env, env, head)?,
             args.iter()
-                .map(|arg| eval(arena, env, arg))
+                .map(|arg| eval(arena, global_env, env, arg))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
 
         TmData::ListTy { ty } => Ok(arena.alloc(Val::ListTy {
-            ty: eval(arena, env, ty)?,
+            ty: eval(arena, global_env, env, ty)?,
         })),
         TmData::ListLit { tms } => Ok(arena.alloc(Val::List {
             v: tms
                 .iter()
-                .map(|tm| eval(arena, env, tm))
+                .map(|tm| eval(arena, global_env, env, tm))
                 .collect::<Result<Vec<_>, _>>()?,
         })),
 
@@ -335,7 +344,7 @@ pub fn eval<'p: 'a, 'a>(
                 .map(|field| {
                     Ok(CoreRecField::new(
                         field.name,
-                        eval(arena, env, &field.data)?,
+                        eval(arena, global_env, env, &field.data)?,
                     ))
                 })
                 .collect::<Result<Vec<_>, EvalError>>()?,
@@ -346,7 +355,7 @@ pub fn eval<'p: 'a, 'a>(
                 .map(|field| {
                     Ok(CoreRecField::new(
                         field.name,
-                        eval(arena, env, &field.data)?,
+                        eval(arena, global_env, env, &field.data)?,
                     ))
                 })
                 .collect::<Result<Vec<_>, EvalError>>()?,
@@ -360,13 +369,13 @@ pub fn eval<'p: 'a, 'a>(
                     .map(|field| {
                         Ok((
                             field.name,
-                            arena.alloc(eval(arena, env, &field.data)?) as &Val<'a>,
+                            arena.alloc(eval(arena, global_env, env, &field.data)?) as &Val<'a>,
                         ))
                     })
                     .collect::<Result<HashMap<_, _>, EvalError>>()?,
             }),
         ))),
-        TmData::RecProj { tm: head_tm, name } => match eval(arena, env, head_tm)? {
+        TmData::RecProj { tm: head_tm, name } => match eval(arena, global_env, env, head_tm)? {
             Val::Rec(r) => {
                 let e = r
                     .get(name, arena)
@@ -397,7 +406,7 @@ impl<'a> FunData<'a> {
             .iter()
             .fold(self.env.clone(), |env0, arg| env0.with(arg));
 
-        eval(arena, &new_env, &self.body)
+        eval(arena, &Env::default(), &new_env, &self.body)
     }
 }
 
@@ -716,7 +725,10 @@ impl<'a> Val<'a> {
             Val::Fun { data } => todo!(),
             Val::FunForeign { f } => Val::FunForeign { f: f.clone() },
             Val::FunReturnTyAwaiting { data } => todo!(),
-            Val::Neutral { neutral } => todo!(),
+            Val::Neutral { neutral } => {
+                println!("{}", neutral);
+                todo!()
+            }
         }
     }
 }
@@ -1062,7 +1074,25 @@ impl<'a> Display for Val<'a> {
             Val::Fun { data } => format!("#func({})", data).fmt(f),
             Val::FunForeign { .. } => "#func(foreign)".fmt(f),
             Val::FunReturnTyAwaiting { data } => format!("#awaiting({})", data).fmt(f),
-            Val::Neutral { neutral } => "#neutral".fmt(f),
+            Val::Neutral { neutral } => format!("#neutral({})", neutral).fmt(f),
+        }
+    }
+}
+
+impl<'a> Display for Neutral<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Neutral::Var { level } => format!("#[{}]", level).fmt(f),
+            Neutral::FunApp { head, args } => format!(
+                "({})({})",
+                head,
+                args.iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .fmt(f),
+            Neutral::RecProj { tm, name } => format!("{}.{}", tm, name).fmt(f),
         }
     }
 }

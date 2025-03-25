@@ -4,7 +4,7 @@ use crate::{
     core,
     myers::VarMyers,
     surface::Context,
-    util::{self, bytes_to_string, Arena, CoreRecField, Location},
+    util::{self, bytes_to_string, Arena, CoreRecField, Env, Location},
 };
 use std::{collections::HashMap, io::Read, path::Path, sync::Arc};
 
@@ -28,11 +28,13 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
             let ty1 = core::eval(
                 arena,
                 &ctx.tms,
+                &Env::default(),
                 arena.alloc(core::Tm::new(Location::new(0, 0), ty.clone())),
             )?;
             let tm1 = core::eval(
                 arena,
                 &ctx.tms,
+                &Env::default(),
                 arena.alloc(core::Tm::new(Location::new(0, 0), tm.clone())),
             )?;
 
@@ -396,6 +398,7 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
                 core::eval(
                     arena,
                     &ctx0.tms,
+                    &Env::default(),
                     arena.alloc(core::Tm::new(Location::new(0, 0), arg.clone())),
                 )
             })
@@ -403,6 +406,7 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
         let body = core::eval(
             arena,
             &ctx0.tms,
+            &Env::default(),
             arena.alloc(core::Tm::new(Location::new(0, 0), return_ty.clone())),
         )?;
 
@@ -421,6 +425,7 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
             core::eval(
                 arena,
                 &ctx.tms,
+                &Env::default(),
                 &core::Tm::new(
                     Location::new(0, 0),
                     core::TmData::FunApp {

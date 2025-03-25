@@ -471,7 +471,7 @@ impl<'p> OpTm<'p> {
             } => {
                 if ids.is_empty() {
                     // special case - just wrap up the one value
-                    let val = core::eval(arena, &ctx.tms, tm)?;
+                    let val = core::eval(arena, &ctx.tms, &Env::default(), tm)?;
 
                     match &val {
                         Val::Str { s } => Ok(OpVal::Restrict {
@@ -519,7 +519,7 @@ impl<'p> OpTm<'p> {
                             ctx0.bind_def((*name).clone(), &core::Val::StrTy, val)
                         });
 
-                        let val = core::eval(arena, &new_ctx.tms, tm)?;
+                        let val = core::eval(arena, &new_ctx.tms, &Env::default(), tm)?;
 
                         match val {
                             Val::Str { s } => Ok((
@@ -741,7 +741,7 @@ fn eval_loc_tm<'p: 'a, 'a>(
     match loc_tm {
         LocTm::Var { loc } => Ok(loc_ctx.get(loc)),
         LocTm::Offset { loc_tm, offset } => {
-            if let core::Val::Num { n } = core::eval(arena, env, offset)? {
+            if let core::Val::Num { n } = core::eval(arena, env, &Env::default(), offset)? {
                 let i = n.round() as i32;
 
                 Ok((eval_loc_tm(arena, env, loc_ctx, loc_tm)? as i32 + i) as usize)

@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufWriter, Write},
+    io::{stdout, BufWriter, Stdout, StdoutLock, Write},
     os::unix::ffi::OsStrExt,
     path::Path,
 };
@@ -11,15 +11,23 @@ use itertools::Itertools;
 use crate::core::{Effect, InternalError, PortableVal};
 use crate::util::bytes_to_string;
 
-#[derive(Default)]
-pub struct OutputHandler {
-    stdout_handler: StdoutHandler,
+pub struct OutputHandler<'a> {
+    stdout_handler: BufferedStdoutHandler<'a>,
     counts_handler: CountsHandler,
     average_handler: AverageHandler,
     file_handler: FileHandler,
 }
 
-impl OutputHandler {
+impl<'a> OutputHandler<'a> {
+    pub fn new() -> OutputHandler<'a> {
+        OutputHandler {
+            stdout_handler: BufferedStdoutHandler::new(),
+            counts_handler: CountsHandler::default(),
+            average_handler: AverageHandler::default(),
+            file_handler: FileHandler::default(),
+        }
+    }
+
     pub fn handle(&mut self, eff: &Effect) -> Result<(), InternalError> {
         match &eff.handler {
             PortableVal::Rec { fields } => {
@@ -62,11 +70,40 @@ impl OutputHandler {
     }
 }
 
-#[derive(Default)]
+struct BufferedStdoutHandler<'a> {
+    stdout: BufWriter<StdoutLock<'a>>,
+    vec: Vec<String>,
+    buffer_size: usize,
+}
+impl<'a> BufferedStdoutHandler<'a> {
+    pub fn new() -> BufferedStdoutHandler<'a> {
+        BufferedStdoutHandler {
+            stdout: BufWriter::new(stdout().lock()),
+            vec: vec![],
+            buffer_size: 1000000,
+        }
+    }
+
+    pub fn handle(&mut self, val: &PortableVal) {
+        self.vec.push(val.to_string());
+
+        if self.vec.len() > self.buffer_size {
+            self.stdout.write_all(self.vec.join("\n").as_bytes());
+            self.vec = vec![];
+        }
+    }
+}
+
+/// Naive stdout handler; simply prints to stdout with println!
+/// Included for benchmarking purposes
 struct StdoutHandler {}
 impl StdoutHandler {
-    pub fn handle(&self, val: &PortableVal) {
-        println!("{}", val)
+    pub fn new() -> StdoutHandler {
+        StdoutHandler {}
+    }
+
+    pub fn handle(&mut self, val: &PortableVal) {
+        println!("{}", val);
     }
 }
 

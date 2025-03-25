@@ -1,4 +1,4 @@
-use core::{eval, eval_prog, make_portable};
+use core::{eval, make_portable};
 use std::{fmt::Debug, fs::File, io::Read, process::exit};
 
 use codespan_reporting::{
@@ -80,11 +80,12 @@ fn main() {
         // should never unwrap, because program terminates
         .unwrap();
 
-    println!("{}", cprog);
-    let mut output_handler = OutputHandler::default();
+    // println!("{}", cprog);
+    let mut output_handler = OutputHandler::new();
 
+    let env = core::library::standard_library(&arena, false).tms;
     if let Some(reads_filename) = global_config.reads {
-        read_any(&reads_filename, &cprog, &arena, &mut output_handler);
+        read_any(&reads_filename, &cprog, &arena, &env, &mut output_handler);
     } else {
         panic!("can't handle stdin reads yet!")
     }

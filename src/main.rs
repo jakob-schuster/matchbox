@@ -20,6 +20,7 @@ mod output;
 mod parse;
 mod read;
 mod surface;
+mod test;
 mod util;
 mod visit;
 
@@ -31,6 +32,42 @@ fn main() {
 
     // execute the matchbox script
     run_script(&global_config)
+}
+
+/// The global configuration options, accessible as command line parameters.
+#[derive(Parser)]
+pub struct GlobalConfig {
+    /// Default error rate permitted when searching for sequences. Given as a proportion of total search sequence length.
+    #[arg(short, long, default_value_t = 0.2)]
+    error: f32,
+
+    /// Number of threads to use when processing reads.
+    #[arg(short, long, default_value_t = 1)]
+    threads: usize,
+
+    /// Matchbox script to execute.
+    #[arg(short, long)]
+    script: String,
+
+    /// Reads. Accepts FASTA/FASTQ files.
+    #[arg()]
+    reads: Option<String>,
+
+    /// Paired reads. Accepts FASTA/FASTQ files.
+    #[arg(short, long)]
+    paired_with: Option<String>,
+}
+
+impl GlobalConfig {
+    pub fn default() -> GlobalConfig {
+        GlobalConfig {
+            error: 0.2,
+            threads: 1,
+            script: "".to_string(),
+            reads: None,
+            paired_with: None,
+        }
+    }
 }
 
 /// Given the global config,
@@ -86,30 +123,10 @@ fn run(code: &str, global_config: &GlobalConfig) {
     }
 }
 
-/// The global configuration options, accessible as command line parameters.
-#[derive(Parser)]
-pub struct GlobalConfig {
-    /// Default error rate permitted when searching for sequences. Given as a proportion of total search sequence length.
-    #[arg(short, long, default_value_t = 0.2)]
-    error: f32,
-
-    /// Number of threads to use when processing reads.
-    #[arg(short, long, default_value_t = 1)]
-    threads: usize,
-
-    /// Matchbox script to execute.
-    #[arg(short, long)]
-    script: String,
-
-    /// Reads. Accepts FASTA/FASTQ files.
-    #[arg()]
-    reads: Option<String>,
-
-    /// Paired reads. Accepts FASTA/FASTQ files.
-    #[arg(short, long)]
-    paired_with: Option<String>,
-}
-
+/// Given the name of a matchbox script,
+/// opens the file and returns the code from inside, or an input error.
+/// Returns errors when the filetype is not '.mb',
+/// or when the file can't be opened.
 fn read_code_from_script(script_filename: &str) -> Result<String, InputError> {
     let mut code = String::new();
 
@@ -149,6 +166,8 @@ fn read_code_from_script(script_filename: &str) -> Result<String, InputError> {
     Ok(code)
 }
 
+/// A simple wrapper around the various error types,
+/// so that they can all be universally printed with codespan.
 struct GenericError {
     pub location: Option<Location>,
     pub message: String,
@@ -210,6 +229,3 @@ impl From<EvalError> for GenericError {
         }
     }
 }
-
-#[cfg(test)]
-mod test {}

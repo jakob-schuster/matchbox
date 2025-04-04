@@ -178,12 +178,22 @@ pub enum TmData {
     RecTy {
         fields: Vec<RecField<Tm>>,
     },
+    RecWithTy {
+        fields: Vec<RecField<Tm>>,
+    },
     RecLit {
         fields: Vec<RecField<Tm>>,
     },
     RecProj {
         tm: Rc<Tm>,
         name: String,
+    },
+
+    ListTy {
+        tm: Rc<Tm>,
+    },
+    ListLit {
+        tms: Vec<Tm>,
     },
 
     FunTy {
@@ -259,6 +269,7 @@ pub enum BinOp {
     Times,
     Division,
     Modulo,
+    Exponent,
 }
 
 #[derive(Clone, Debug)]
@@ -273,7 +284,7 @@ pub enum StrLitRegionData {
     Tm { tm: Tm },
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Context<'a> {
     size: usize,
     names: Env<String>,
@@ -305,6 +316,22 @@ impl<'a> Context<'a> {
         }
     }
 
+    pub fn unbind_def(&self, name: &str) -> Context<'a> {
+        // name must be present
+        let (index, _) = self
+            .names
+            .iter()
+            .find_position(|name0| (*name0).eq(name))
+            .unwrap();
+
+        Context {
+            size: self.size - 1,
+            names: self.names.without(index),
+            tys: self.tys.without(index),
+            tms: self.tms.without(index),
+        }
+    }
+
     /// Binds a parameter in the context
     pub fn bind_param(&self, name: String, ty: &'a core::Val<'a>, arena: &'a Arena) -> Context<'a> {
         self.bind_def(name, ty, self.next_var(arena))
@@ -319,6 +346,33 @@ impl<'a> Context<'a> {
         let val = self.tys.get_index(index);
 
         Some((index, val))
+    }
+
+    /// Binds the read to a parameter in the context
+    pub fn bind_read(&self, arena: &'a Arena) -> Context<'a> {
+        self.bind_param(
+            "read".to_string(),
+            core::Tm::new(
+                Location::new(0, 0),
+                core::TmData::FunApp {
+                    head: Arc::new(core::Tm::new(
+                        Location::new(0, 0),
+                        core::TmData::FunForeignLit {
+                            args: vec![],
+                            body: Arc::new(core::library::read_ty),
+                            body_ty: Arc::new(core::Tm::new(
+                                Location::new(0, 0),
+                                core::TmData::Univ,
+                            )),
+                        },
+                    )),
+                    args: vec![],
+                },
+            )
+            .eval(arena, &self.tms, &Env::default())
+            .expect("could not evaluate standard library!"),
+            arena,
+        )
     }
 }
 
@@ -348,6 +402,8 @@ fn elab_stmt<'a>(
 ) -> Result<core::Stmt<'a>, ElabError> {
     match &stmt.data {
         // fold across all the statements, ending the block with an End
+        // WARN it looks like anything that comes after the group keeps all the binds from the group
+        // this needs fixing
         StmtData::Group { stmts } => match &stmts[..] {
             [first_stmt, rest_stmts @ ..] => elab_stmt(
                 arena,
@@ -364,7 +420,6 @@ fn elab_stmt<'a>(
             },
         },
 
-        // todo: i don't think this works, because you're not actually making the bind
         StmtData::Let { name, tm } => {
             let (ctm, ty) = infer_tm(arena, ctx, tm)?;
 
@@ -441,6 +496,56 @@ fn elab_stmt<'a>(
                     next: Arc::new(elab_stmt(arena, ctx, next, rest)?),
                 },
             )),
+        },
+    }
+}
+
+pub fn elab_prog_for_ctx<'a>(
+    arena: &'a Arena,
+    ctx: &Context<'a>,
+    prog: &'a Prog,
+) -> Result<Context<'a>, ElabError> {
+    match &prog.data.stmts[..] {
+        [first, rest @ ..] => elab_stmt_for_ctx(arena, ctx, first, &rest.iter().collect_vec()),
+        [] => Ok(ctx.clone()),
+    }
+}
+
+/// Elaborate a statement, but just return the context generated
+/// This is for processing the standard library, and any other modules that
+/// need to be read prior to reading the user's code.
+fn elab_stmt_for_ctx<'a>(
+    arena: &'a Arena,
+    ctx: &Context<'a>,
+    stmt: &'a Stmt,
+    rest: &[&'a Stmt],
+) -> Result<Context<'a>, ElabError> {
+    match &stmt.data {
+        // any time a let is encountered, make the bind and carry it through to the next statements
+        StmtData::Let { name, tm } => {
+            let (ctm, ty) = infer_tm(arena, ctx, tm)?;
+
+            // now we evaluate the terms as best we can, in case we need them at the static stage (we probably will)
+            let new_ctx = ctx.bind_def(
+                name.clone(),
+                ty,
+                ctm.eval(arena, &ctx.tms, &Env::default())
+                    .map_err(ElabError::from_eval_error)?,
+            );
+
+            match rest {
+                [] => Ok(new_ctx),
+
+                [next, rest @ ..] => elab_stmt_for_ctx(arena, &new_ctx, next, rest),
+            }
+        }
+
+        // for any of the other stmt types,
+        // there's no chance of making a binding at this level
+        // so we can just move on
+        _ => match rest {
+            [next, rest @ ..] => elab_stmt_for_ctx(arena, ctx, next, rest),
+            [] => Ok(ctx.clone()),
         },
     }
 }
@@ -740,6 +845,23 @@ pub fn infer_tm<'a>(
             ),
             arena.alloc(core::Val::Univ),
         )),
+        TmData::RecWithTy { fields } => Ok((
+            core::Tm::new(
+                tm.location.clone(),
+                core::TmData::RecWithTy {
+                    fields: fields
+                        .iter()
+                        .map(|field| {
+                            Ok(crate::util::CoreRecField::new(
+                                field.name.as_bytes(),
+                                check_tm(arena, ctx, &field.data, &core::Val::Univ)?,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, ElabError>>()?,
+                },
+            ),
+            arena.alloc(core::Val::Univ),
+        )),
         TmData::RecLit { fields } => {
             let mut tms = vec![];
             let mut tys = vec![];
@@ -785,6 +907,44 @@ pub fn infer_tm<'a>(
                 )),
             }
         }
+
+        TmData::ListTy { tm } => Ok((
+            core::Tm::new(
+                tm.location.clone(),
+                core::TmData::ListTy {
+                    ty: Arc::new(check_tm(arena, ctx, tm, &core::Val::Univ)?),
+                },
+            ),
+            arena.alloc(core::Val::Univ),
+        )),
+        TmData::ListLit { tms } => {
+            // infer the type of each tm
+            let tms_and_tys = tms
+                .iter()
+                .map(|tm| infer_tm(arena, ctx, tm))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // make sure that the types are all equivalent, and find the most precise type
+            let inner_ty = tms_and_tys
+                .iter()
+                .try_fold(core::Val::AnyTy, |ty0, (_, ty1)| {
+                    // first make sure the types are equivalent
+                    equate_ty(&tm.location, &ty0, ty1)?;
+
+                    // then return the most precise type
+                    Ok(ty0.most_precise(arena, ty1))
+                })?;
+
+            let core_tms = tms_and_tys.into_iter().map(|(tm, _)| tm).collect();
+
+            Ok((
+                core::Tm::new(tm.location.clone(), core::TmData::ListLit { tms: core_tms }),
+                arena.alloc(core::Val::ListTy {
+                    ty: arena.alloc(inner_ty),
+                }),
+            ))
+        }
+
         TmData::FunTy { args, body } => Ok((
             core::Tm::new(
                 tm.location.clone(),
@@ -881,25 +1041,24 @@ pub fn infer_tm<'a>(
                 })?;
 
             // then, get the type of the body
-            // (note that this might be FunReturnTyAwaiting, as it's all inferred;
-            // that only happens in the return type of foreign functions, which ar specified)
+            // (note that this might be FunReturnTyAwaiting, as it may include parameters)
+            println!("about to do the thing in {:?}", new_ctx);
             let ty = check_tm(arena, &new_ctx, ty, &core::Val::Univ)?;
             let val = ty
                 .eval(arena, &new_ctx.tms, &Env::default())
                 .map_err(ElabError::from_eval_error)?;
-            let final_ty = match val {
-                core::Val::Neutral { neutral } => {
-                    // if it's neutral, we need to create a val that is just a function frome some arguments
-                    // to a new val (which we expect to be concrete)
-                    arena.alloc(core::Val::FunReturnTyAwaiting {
-                        data: core::FunData {
-                            env: ctx.tms.clone(),
-                            body: ty,
-                        },
-                    })
-                }
+            let final_ty = if val.is_neutral() {
+                // if it's neutral, we throw it away - need to create a val that is just a function frome some arguments
+                // to a new val (which we expect to be concrete)
+                arena.alloc(core::Val::FunReturnTyAwaiting {
+                    data: core::FunData {
+                        env: ctx.tms.clone(),
+                        body: ty.clone(),
+                    },
+                })
+            } else {
                 // otherwise just send through whatever the value is
-                _ => val,
+                val
             };
 
             Ok((
@@ -907,17 +1066,58 @@ pub fn infer_tm<'a>(
                     tm.location.clone(),
                     core::TmData::FunForeignLit {
                         args: arg_tms,
+                        body_ty: Arc::new(ty),
                         body: library::foreign(&tm.location, name)
                             .map_err(ElabError::from_eval_error)?,
                     },
                 ),
-                final_ty,
+                arena.alloc(core::Val::FunTy {
+                    args: arg_vals,
+                    body: final_ty,
+                }),
             ))
         }
         TmData::FunApp { head, args } => {
             let (head_tm, head_ty) = infer_tm(arena, ctx, head)?;
 
             match head_ty {
+                core::Val::FunForeign {
+                    args: args_ty,
+                    body_ty,
+                    body,
+                } => {
+                    // first make sure the argument lists are the same length
+                    if !args.len().eq(&args_ty.len()) {
+                        return Err(ElabError::new(
+                            &tm.location,
+                            &format!(
+                                "function was given {} arguments, expected {}",
+                                args.len(),
+                                args_ty.len()
+                            ),
+                        ));
+                    }
+
+                    let arg_tms = args
+                        .iter()
+                        .zip(args_ty)
+                        .map(|(arg, arg_ty)| {
+                            let arg_tm = check_tm(arena, ctx, arg, arg_ty)?;
+                            Ok(arg_tm)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    Ok((
+                        core::Tm::new(
+                            tm.location.clone(),
+                            core::TmData::FunApp {
+                                head: Arc::new(head_tm),
+                                args: arg_tms,
+                            },
+                        ),
+                        body_ty,
+                    ))
+                }
                 core::Val::FunTy {
                     args: args_ty,
                     body,
@@ -980,7 +1180,10 @@ pub fn infer_tm<'a>(
                 // todo: add more info to this error message
                 _ => Err(ElabError::new(
                     &tm.location,
-                    "trying to apply something as a function when it's not",
+                    &format!(
+                        "trying to apply something as a function when it's {}",
+                        head_ty
+                    ),
                 )),
             }
         }
@@ -1078,6 +1281,9 @@ fn infer_bin_op<'a>(
         }
         BinOp::Modulo => {
             non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_modulo")
+        }
+        BinOp::Exponent => {
+            non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_exponent")
         }
     }
 }
@@ -1228,22 +1434,26 @@ fn elab_str_lit_reg<'a>(
         )),
         StrLitRegionData::Tm { tm } => {
             // formatting a string is sugar for adding implicit type conversion
-            let wrapped_tm = Tm::new(
+            Ok(core::Tm::new(
                 reg.location.clone(),
-                TmData::FunApp {
-                    head: Rc::new(Tm::new(
-                        reg.location.clone(),
-                        TmData::Name {
-                            name: "to_str".to_string(),
+                core::TmData::FunApp {
+                    head: Arc::new(check_tm(
+                        arena,
+                        ctx,
+                        arena.alloc(Tm::new(
+                            reg.location.clone(),
+                            TmData::Name {
+                                name: "to_str".to_string(),
+                            },
+                        )),
+                        &core::Val::FunTy {
+                            args: vec![arena.alloc(core::Val::AnyTy)],
+                            body: arena.alloc(core::Val::StrTy),
                         },
-                    )),
-                    args: vec![tm.clone()],
+                    )?),
+                    args: vec![check_tm(arena, ctx, tm, &core::Val::AnyTy)?],
                 },
-            );
-
-            // is this arena allocation a bit rogue? this is not what this arena was meant for...
-            // should one arena have one distinct semantic content?
-            check_tm(arena, ctx, arena.alloc(wrapped_tm), &core::Val::StrTy)
+            ))
         }
     }
 }

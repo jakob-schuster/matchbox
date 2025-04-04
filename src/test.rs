@@ -44,7 +44,7 @@ fn elab_test(code: &str) -> String {
     // establish a global-level arena and context,
     // for values allocated during elaboration
     let arena = Arena::new();
-    let ctx = core::library::standard_library(&arena, true);
+    let ctx = core::library::standard_library(&arena).bind_read(&arena);
 
     // elaborate to a core program
     let core_prog = elab_prog(&arena, &ctx, &prog)
@@ -71,7 +71,7 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> String {
     // establish a global-level arena and context,
     // for values allocated during elaboration
     let arena = Arena::new();
-    let ctx = core::library::standard_library(&arena, true);
+    let ctx = core::library::standard_library(&arena).bind_read(&arena);
 
     // elaborate to a core program
     let core_prog = elab_prog(&arena, &ctx, &prog)
@@ -80,32 +80,30 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> String {
         .unwrap();
 
     // create a toy read
-    let read = core::Val::Rec(
-        arena.alloc(ConcreteRec {
-            map: [
-                (
-                    b"seq" as &[u8],
-                    arena.alloc(core::Val::Str {
-                        s: arena.alloc(seq.to_vec()),
-                    }) as &Val,
-                ),
-                (
-                    b"id" as &[u8],
-                    arena.alloc(core::Val::Str {
-                        s: arena.alloc(b"read1".to_vec()),
-                    }) as &Val,
-                ),
-                (
-                    b"desc" as &[u8],
-                    arena.alloc(core::Val::Str {
-                        s: arena.alloc(b"".to_vec()),
-                    }) as &Val,
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        }),
-    );
+    let read = core::Val::Rec(arena.alloc(ConcreteRec {
+        map: todo!(), // [
+                      //     (
+                      //         b"seq" as &[u8],
+                      //         arena.alloc(core::Val::Str {
+                      //             s: arena.alloc(seq.to_vec()),
+                      //         }) as &Val,
+                      //     ),
+                      //     (
+                      //         b"id" as &[u8],
+                      //         arena.alloc(core::Val::Str {
+                      //             s: arena.alloc(b"read1".to_vec()),
+                      //         }) as &Val,
+                      //     ),
+                      //     (
+                      //         b"desc" as &[u8],
+                      //         arena.alloc(core::Val::Str {
+                      //             s: arena.alloc(b"".to_vec()),
+                      //         }) as &Val,
+                      //     ),
+                      // ]
+                      // .into_iter()
+                      // .collect(),
+    }));
 
     // evaluate the program
     core_prog
@@ -155,6 +153,11 @@ fn elab_assignment_pass4() {
 #[test]
 fn eval_read_name_pass1() {
     insta::assert_snapshot!(eval_one_fasta_read_test(r"read.id |> stdout()", b"AAAAAAAAAGGGGCCCCCCCCCCCC"), @"read1 |> { output = stats }")
+}
+
+#[test]
+fn eval_assignment_pass1() {
+    insta::assert_snapshot!(eval_one_fasta_read_test(r"a = 'hello'; b = 10; c = '{a} and {b}'; c |> stdout()", b"AAAAAAAAAGGGGCCCCCCCCCCCC"), @"CCCCCCCCCCCC |> { output = stats }")
 }
 
 #[test]

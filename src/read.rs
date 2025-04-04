@@ -147,7 +147,7 @@ pub fn read_any<'p, 'a: 'p>(
     let (filetype, buffer) = get_filetype_and_buffer(filename).unwrap();
 
     match filetype {
-        FileType::Fasta => read_fa_multithreaded(buffer, prog, env, output_handler),
+        FileType::Fasta => read_fa(buffer, prog, env, output_handler),
         FileType::Fastq => read_fq(buffer, prog, env, output_handler),
         _ => panic!("unexpected filetype?!"),
     }
@@ -161,16 +161,18 @@ pub fn read_fa<'p, 'a: 'p>(
 ) {
     let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
 
-    let arena = Arena::new();
     for record in input_records {
         match record {
             Ok(read) => {
-                let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
-                let effects = prog.eval(&arena, env, arena.alloc(val)).expect("");
+                let mut arena = Arena::new();
+                let val = arena.alloc(core::Val::Rec(arena.alloc(rec::FastaRead { read: &read })));
+                let effects = prog.eval(&arena, env, val).expect("");
 
                 for effect in &effects {
                     output_handler.handle(effect).unwrap();
                 }
+
+                arena.reset();
             }
             Err(_) => panic!("bad read?!"),
         }
@@ -196,7 +198,7 @@ pub fn read_fa_multithreaded<'p, 'a: 'p>(
             .map(|record| match record {
                 Ok(read) => {
                     let arena = Arena::new();
-                    let val = core::Val::Rec(arena.alloc(rec::FastaRead { read }));
+                    let val = core::Val::Rec(arena.alloc(rec::FastaRead { read: &read }));
                     let effects = prog.eval(&arena, env, arena.alloc(val));
 
                     effects
@@ -223,10 +225,10 @@ pub fn read_fq<'p, 'a: 'p>(
 ) {
     let input_records = bio::io::fastq::Reader::from_bufread(buffer).records();
 
-    let arena = Arena::new();
     for record in input_records {
         match record {
             Ok(read) => {
+                let arena = Arena::new();
                 let val = arena.alloc(core::Val::Rec(arena.alloc(rec::FastqRead { read })));
                 let effects = prog.eval(&arena, env, val);
 

@@ -45,6 +45,13 @@ pub trait Rec<'p>: Display + Send + Sync {
             map: self.all(arena),
         })
     }
+
+    fn is_neutral(&self) -> bool {
+        // this is a bit unhinged but we can just make a quick arena for this,
+        // since we're just returning a bool out
+        let arena = Arena::new();
+        self.all(&arena).iter().any(|(_, val)| val.is_neutral())
+    }
 }
 
 pub struct ConcreteRec<'p> {
@@ -97,11 +104,11 @@ impl<'a> Display for ConcreteRec<'a> {
     }
 }
 
-pub struct FastaRead {
-    pub read: bio::io::fasta::Record,
+pub struct FastaRead<'a> {
+    pub read: &'a bio::io::fasta::Record,
 }
 
-impl<'p> Rec<'p> for FastaRead {
+impl<'p, 'b> Rec<'p> for FastaRead<'b> {
     fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError>
     where
         'p: 'a,
@@ -138,9 +145,12 @@ impl<'p> Rec<'p> for FastaRead {
     }
 }
 
-impl Display for FastaRead {
+impl<'a> Display for FastaRead<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        // note: this seems highly wasteful
+        let arena = Arena::new();
+        let map = self.all(&arena);
+        ConcreteRec { map }.fmt(f)
     }
 }
 

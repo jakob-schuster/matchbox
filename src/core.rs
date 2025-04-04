@@ -260,6 +260,7 @@ pub enum TmData<'a> {
     },
     FunForeignLit {
         args: Vec<Tm<'a>>,
+        body_ty: Arc<Tm<'a>>,
         body: Arc<
             dyn for<'b> Fn(&'b Arena, &Location, &[&'b Val<'b>]) -> Result<&'b Val<'b>, EvalError>
                 + Send
@@ -275,7 +276,7 @@ pub enum TmData<'a> {
         fields: Vec<CoreRecField<'a, Tm<'a>>>,
     },
     RecWithTy {
-        fields: Vec<CoreRecField<'a, &'a Tm<'a>>>,
+        fields: Vec<CoreRecField<'a, Tm<'a>>>,
     },
     RecLit {
         fields: Vec<CoreRecField<'a, Tm<'a>>>,
@@ -334,8 +335,29 @@ impl<'p> Tm<'p> {
                     body: body.as_ref().clone(),
                 },
             })),
-            TmData::FunForeignLit { args, body } => {
-                Ok(arena.alloc(Val::FunForeign { f: body.clone() }))
+            TmData::FunForeignLit {
+                args,
+                body_ty,
+                body,
+            } => {
+                let args = args
+                    .iter()
+                    .map(|arg| arg.eval(arena, global_env, env))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let smaller_env = args.iter().fold(env.clone(), |env0, _| {
+                    env0.with(arena.alloc(Val::Neutral {
+                        neutral: Neutral::Var {
+                            level: env0.iter().len(),
+                        },
+                    }))
+                });
+
+                Ok(arena.alloc(Val::FunForeign {
+                    args,
+                    body_ty: body_ty.eval(arena, global_env, &smaller_env)?,
+                    body: body.clone(),
+                }))
             }
             TmData::FunApp { head, args } => app(
                 arena,
@@ -481,7 +503,9 @@ pub enum Val<'a> {
         data: FunData<'a>,
     },
     FunForeign {
-        f: Arc<
+        args: Vec<&'a Val<'a>>,
+        body_ty: &'a Val<'a>,
+        body: Arc<
             dyn for<'b> Fn(&'b Arena, &Location, &[&'b Val<'b>]) -> Result<&'b Val<'b>, EvalError>
                 + Send
                 + Sync,
@@ -742,12 +766,43 @@ impl<'a> Val<'a> {
 
             // WARN these really need to be implemented
             Val::Fun { data } => todo!(),
-            Val::FunForeign { f } => Val::FunForeign { f: f.clone() },
+            Val::FunForeign {
+                body: f,
+                args,
+                body_ty,
+            } => Val::FunForeign {
+                body: f.clone(),
+                args: args
+                    .iter()
+                    .map(|val| arena.alloc(val.coerce(arena)) as &Val<'b>)
+                    .collect::<Vec<_>>(),
+                body_ty: arena.alloc(body_ty.coerce(arena)),
+            },
             Val::FunReturnTyAwaiting { data } => todo!(),
-            Val::Neutral { neutral } => {
-                println!("{}", neutral);
-                todo!()
+            Val::Neutral { neutral } => Val::Neutral {
+                neutral: neutral.coerce(arena),
+            },
+        }
+    }
+
+    pub fn is_neutral(&self) -> bool {
+        match self {
+            Val::Neutral { neutral } => true,
+
+            Val::ListTy { ty } => ty.is_neutral(),
+            Val::List { v } => v.iter().any(|val| val.is_neutral()),
+            Val::RecTy { fields } => fields.iter().any(|field| field.data.is_neutral()),
+            Val::RecWithTy { fields } => fields.iter().any(|field| field.data.is_neutral()),
+            Val::Rec(rec) => rec.is_neutral(),
+            Val::FunTy { args, body } => {
+                args.iter().any(|arg| arg.is_neutral()) || body.is_neutral()
             }
+            Val::FunForeign {
+                args,
+                body_ty,
+                body,
+            } => args.iter().any(|arg| arg.is_neutral()) || body_ty.is_neutral(),
+            _ => false,
         }
     }
 }
@@ -767,31 +822,64 @@ pub enum Neutral<'a> {
     },
 }
 
+impl<'a> Neutral<'a> {
+    fn coerce<'b>(&self, arena: &'b Arena) -> Neutral<'b>
+    where
+        'a: 'b,
+    {
+        match self {
+            Neutral::Var { level } => Neutral::Var { level: *level },
+            Neutral::FunApp { head, args } => Neutral::FunApp {
+                head: Arc::new(head.coerce(arena)),
+                args: args.iter().map(|arg| arg.coerce(arena)).collect(),
+            },
+            Neutral::RecProj { tm, name } => Neutral::RecProj {
+                tm: Arc::new(tm.coerce(arena)),
+                name: name.clone(),
+            },
+        }
+    }
+}
+
 pub fn app<'a>(
     arena: &'a Arena,
     location: &Location,
     head: &'a Val<'a>,
     args: Vec<&'a Val<'a>>,
 ) -> Result<&'a Val<'a>, EvalError> {
-    match head {
-        Val::Fun { data } => {
-            data.app(arena, &args)
+    fn is_neutral(v: &Val) -> bool {
+        matches!(v, Val::Neutral { .. })
+    }
 
-            // eval(
-            //     arena,
-            //     // expensive?
-            //     &args.iter().fold(env.clone(), |env0, arg| env0.with(arg)),
-            //     body,
-            // )
-        }
-        Val::FunForeign { f } => f(arena, location, &args),
-        _ => Err(EvalError::from_internal(
-            InternalError {
-                message: "invalid function application".to_string(),
+    // catch if anything's neutral
+    if is_neutral(head) || args.iter().any(|arg| is_neutral(arg)) {
+        Ok(arena.alloc(Val::Neutral {
+            neutral: Neutral::FunApp {
+                head: Arc::new(head.clone()),
+                args: args.into_iter().cloned().collect(),
             },
-            location.clone(),
-        )),
-        Val::FunReturnTyAwaiting { data } => data.app(arena, &args),
+        }) as &Val<'a>)
+    } else {
+        match head {
+            Val::Fun { data } => {
+                data.app(arena, &args)
+
+                // eval(
+                //     arena,
+                //     // expensive?
+                //     &args.iter().fold(env.clone(), |env0, arg| env0.with(arg)),
+                //     body,
+                // )
+            }
+            Val::FunForeign { body: f, .. } => f(arena, location, &args),
+            Val::FunReturnTyAwaiting { data } => data.app(arena, &args),
+            _ => Err(EvalError::from_internal(
+                InternalError {
+                    message: format!("trying to apply '{}' as a function?!", head),
+                },
+                location.clone(),
+            )),
+        }
     }
 }
 
@@ -842,7 +930,7 @@ pub fn make_portable<'a>(arena: &'a Arena, val: &'a Val<'a>) -> PortableVal {
         Val::Fun { .. } => PortableVal::Fun {
             s: "#fun".to_string(),
         },
-        Val::FunForeign { f } => PortableVal::Fun {
+        Val::FunForeign { body: f, .. } => PortableVal::Fun {
             s: "#fun-foreign".to_string(),
         },
 
@@ -993,12 +1081,17 @@ impl<'a> Display for TmData<'a> {
                 body
             )
             .fmt(f),
-            TmData::FunForeignLit { args, body } => format!(
-                "({}) => #foreign",
+            TmData::FunForeignLit {
+                args,
+                body,
+                body_ty,
+            } => format!(
+                "({}): {} => #foreign",
                 args.iter()
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", "),
+                body_ty
             )
             .fmt(f),
             TmData::FunApp { head, args } => format!(
@@ -1043,6 +1136,12 @@ impl<'a> Display for TmData<'a> {
                 format!("{}.{}", tm, util::bytes_to_string(name).unwrap()).fmt(f)
             }
         }
+    }
+}
+
+impl<'a> std::fmt::Debug for Val<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.to_string(), f)
     }
 }
 

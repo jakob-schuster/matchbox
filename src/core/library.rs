@@ -13,7 +13,7 @@ use super::{
     EvalError, Val,
 };
 
-pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
+pub fn standard_library<'a>(arena: &'a Arena) -> Context<'a> {
     let entries = vec![
         ("Type", core::TmData::Univ, core::TmData::Univ),
         ("Any", core::TmData::Univ, core::TmData::AnyTy),
@@ -22,7 +22,7 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
         ("Str", core::TmData::Univ, core::TmData::StrTy),
     ];
 
-    let mut ctx = entries
+    let ctx = entries
         .iter()
         .try_fold(Context::default(), |ctx, (name, ty, tm)| {
             let ty1 = arena
@@ -35,411 +35,6 @@ pub fn standard_library<'a>(arena: &'a Arena, with_read: bool) -> Context<'a> {
             Ok::<Context, EvalError>(ctx.bind_def(name.to_string(), ty1, tm1))
         })
         .expect("could not evaluate standard library!");
-
-    ctx = vec![
-        (
-            "binary_plus",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::binary_plus)
-                as Arc<
-                    dyn for<'b> Fn(
-                            &'b Arena,
-                            &Location,
-                            &[&'b core::Val<'b>],
-                        ) -> Result<&'b core::Val<'b>, EvalError>
-                        + Send
-                        + Sync,
-                >,
-        ),
-        (
-            "binary_times",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::binary_times),
-        ),
-        (
-            "binary_division",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::binary_division),
-        ),
-        (
-            "binary_modulo",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::binary_modulo),
-        ),
-        (
-            "binary_exponent",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::binary_exponent),
-        ),
-        (
-            "binary_minus",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::binary_minus),
-        ),
-        (
-            "binary_equal",
-            vec![core::TmData::AnyTy, core::TmData::AnyTy],
-            core::TmData::BoolTy,
-            Arc::new(core::library::binary_equal),
-        ),
-        (
-            "binary_not_equal",
-            vec![core::TmData::AnyTy, core::TmData::AnyTy],
-            core::TmData::BoolTy,
-            Arc::new(core::library::binary_not_equal),
-        ),
-        (
-            "binary_less_than",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::BoolTy,
-            Arc::new(core::library::binary_less_than),
-        ),
-        (
-            "binary_greater_than",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::BoolTy,
-            Arc::new(core::library::binary_greater_than),
-        ),
-        (
-            "binary_less_than_or_equal",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::BoolTy,
-            Arc::new(core::library::binary_less_than_or_equal),
-        ),
-        (
-            "binary_greater_than_or_equal",
-            vec![core::TmData::NumTy, core::TmData::NumTy],
-            core::TmData::BoolTy,
-            Arc::new(core::library::binary_greater_than_or_equal),
-        ),
-        (
-            "binary_and",
-            vec![core::TmData::BoolTy, core::TmData::BoolTy],
-            core::TmData::BoolTy,
-            Arc::new(core::library::binary_and),
-        ),
-        (
-            "binary_or",
-            vec![core::TmData::BoolTy, core::TmData::BoolTy],
-            core::TmData::BoolTy,
-            Arc::new(core::library::binary_or),
-        ),
-        (
-            "unary_minus",
-            vec![core::TmData::NumTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::unary_minus),
-        ),
-        (
-            "unary_reverse_complement",
-            vec![core::TmData::StrTy],
-            core::TmData::StrTy,
-            Arc::new(core::library::unary_reverse_complement),
-        ),
-        (
-            "read_ty",
-            vec![],
-            core::TmData::Univ,
-            Arc::new(core::library::read_ty),
-        ),
-        (
-            "len",
-            vec![core::TmData::StrTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::len),
-        ),
-        (
-            "slice",
-            vec![
-                core::TmData::StrTy,
-                core::TmData::NumTy,
-                core::TmData::NumTy,
-            ],
-            core::TmData::StrTy,
-            Arc::new(core::library::slice),
-        ),
-        (
-            "tag",
-            vec![
-                core::TmData::RecWithTy {
-                    fields: vec![CoreRecField::new(
-                        b"desc",
-                        arena.alloc(core::Tm::new(Location::new(0, 0), core::TmData::StrTy)),
-                    )],
-                },
-                core::TmData::StrTy,
-            ],
-            core::TmData::Univ,
-            Arc::new(core::library::tag),
-        ),
-        (
-            "translate",
-            vec![core::TmData::StrTy],
-            core::TmData::StrTy,
-            Arc::new(core::library::translate),
-        ),
-        (
-            "str_concat",
-            vec![core::TmData::StrTy, core::TmData::StrTy],
-            core::TmData::StrTy,
-            Arc::new(core::library::str_concat),
-        ),
-        (
-            "concat",
-            vec![
-                core::TmData::RecWithTy {
-                    fields: vec![CoreRecField::new(
-                        b"seq",
-                        arena.alloc(core::Tm::new(Location::new(0, 0), core::TmData::StrTy)),
-                    )],
-                },
-                core::TmData::RecWithTy {
-                    fields: vec![CoreRecField::new(
-                        b"seq",
-                        arena.alloc(core::Tm::new(Location::new(0, 0), core::TmData::StrTy)),
-                    )],
-                },
-            ],
-            core::TmData::RecWithTy {
-                fields: vec![CoreRecField::new(
-                    b"seq",
-                    arena.alloc(core::Tm::new(Location::new(0, 0), core::TmData::StrTy)),
-                )],
-            },
-            Arc::new(core::library::concat),
-        ),
-        (
-            "csv_ty",
-            vec![core::TmData::StrTy],
-            core::TmData::Univ,
-            Arc::new(core::library::csv_ty),
-        ),
-        (
-            "csv",
-            vec![core::TmData::StrTy],
-            // TODO come back and fix this
-            // this is the whole reason we did dependent types
-            core::TmData::ListTy {
-                ty: Arc::new(core::Tm::new(Location::new(0, 0), core::TmData::AnyTy)),
-            },
-            Arc::new(core::library::csv),
-        ),
-        (
-            "tsv_ty",
-            vec![core::TmData::StrTy],
-            core::TmData::Univ,
-            Arc::new(core::library::tsv_ty),
-        ),
-        (
-            "tsv",
-            vec![core::TmData::StrTy],
-            // TODO come back and fix this
-            // this is the whole reason we did dependent types
-            core::TmData::ListTy {
-                ty: Arc::new(core::Tm::new(Location::new(0, 0), core::TmData::AnyTy)),
-            },
-            Arc::new(core::library::tsv),
-        ),
-        (
-            "fasta",
-            vec![core::TmData::StrTy],
-            core::TmData::RecTy {
-                fields: vec![
-                    CoreRecField::new(
-                        b"seq",
-                        core::Tm::new(Location::new(0, 0), core::TmData::StrTy),
-                    ),
-                    CoreRecField::new(
-                        b"id",
-                        core::Tm::new(Location::new(0, 0), core::TmData::StrTy),
-                    ),
-                    CoreRecField::new(
-                        b"desc",
-                        core::Tm::new(Location::new(0, 0), core::TmData::StrTy),
-                    ),
-                ],
-            },
-            Arc::new(core::library::fasta),
-        ),
-        (
-            "find_first",
-            vec![core::TmData::StrTy, core::TmData::StrTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::find_first),
-        ),
-        (
-            "find_last",
-            vec![core::TmData::StrTy, core::TmData::StrTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::find_last),
-        ),
-        (
-            "to_upper",
-            vec![core::TmData::StrTy],
-            core::TmData::StrTy,
-            Arc::new(core::library::to_upper),
-        ),
-        (
-            "to_lower",
-            vec![core::TmData::StrTy],
-            core::TmData::StrTy,
-            Arc::new(core::library::to_lower),
-        ),
-        (
-            "describe",
-            vec![
-                core::TmData::RecWithTy {
-                    fields: vec![CoreRecField::new(
-                        b"seq",
-                        arena.alloc(core::Tm::new(Location::new(0, 0), core::TmData::StrTy)),
-                    )],
-                },
-                core::TmData::RecWithTy { fields: vec![] },
-                core::TmData::NumTy,
-            ],
-            core::TmData::Univ,
-            Arc::new(core::library::describe),
-        ),
-        (
-            "stdout",
-            vec![],
-            core::TmData::RecTy {
-                fields: vec![CoreRecField::new(
-                    b"output",
-                    core::Tm::new(Location::new(0, 0), core::TmData::StrTy),
-                )],
-            },
-            Arc::new(core::library::stdout),
-        ),
-        (
-            "stats",
-            vec![],
-            core::TmData::RecTy {
-                fields: vec![CoreRecField::new(
-                    b"output",
-                    core::Tm::new(Location::new(0, 0), core::TmData::StrTy),
-                )],
-            },
-            Arc::new(core::library::stats),
-        ),
-        (
-            "file",
-            vec![core::TmData::StrTy],
-            core::TmData::RecTy {
-                fields: vec![
-                    CoreRecField::new(
-                        b"output",
-                        core::Tm::new(Location::new(0, 0), core::TmData::StrTy),
-                    ),
-                    CoreRecField::new(
-                        b"filename",
-                        core::Tm::new(Location::new(0, 0), core::TmData::StrTy),
-                    ),
-                ],
-            },
-            Arc::new(core::library::file),
-        ),
-        (
-            "average",
-            vec![],
-            core::TmData::RecTy {
-                fields: vec![CoreRecField::new(
-                    b"output",
-                    core::Tm::new(Location::new(0, 0), core::TmData::StrTy),
-                )],
-            },
-            Arc::new(core::library::stats),
-        ),
-        (
-            "counts",
-            vec![],
-            core::TmData::RecTy {
-                fields: vec![CoreRecField::new(
-                    b"output",
-                    core::Tm::new(Location::new(0, 0), core::TmData::StrTy),
-                )],
-            },
-            Arc::new(core::library::counts),
-        ),
-        // WARN this signature is not specific enough - currently just
-        //      (list: [AnyTy], val: AnyTy) -> Bool,
-        // but actually should be
-        //      (A: Type) => (list: [A], val: A) -> Bool
-        // it's not that bad because if you look up something incompatible it'll just be always false rather than type error
-        (
-            "contains",
-            vec![
-                core::TmData::ListTy {
-                    ty: Arc::new(core::Tm::new(Location::new(0, 0), core::TmData::AnyTy)),
-                },
-                core::TmData::AnyTy,
-            ],
-            core::TmData::BoolTy,
-            Arc::new(core::library::contains),
-        ),
-        (
-            "distance",
-            vec![core::TmData::StrTy, core::TmData::StrTy],
-            core::TmData::NumTy,
-            Arc::new(core::library::contains),
-        ),
-        (
-            "to_str",
-            vec![core::TmData::AnyTy],
-            core::TmData::StrTy,
-            Arc::new(core::library::to_str),
-        ),
-    ]
-    .into_iter()
-    .try_fold(ctx.clone(), |ctx0, (name, args, return_ty, fun)| {
-        let args = args
-            .iter()
-            .map(|arg| {
-                arena
-                    .alloc(core::Tm::new(Location::new(0, 0), arg.clone()))
-                    .eval(arena, &ctx0.tms, &Env::default())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let body = arena
-            .alloc(core::Tm::new(Location::new(0, 0), return_ty.clone()))
-            .eval(arena, &ctx0.tms, &Env::default())?;
-
-        Ok(ctx0.bind_def(
-            name.to_string(),
-            arena.alloc(core::Val::FunTy { args, body }),
-            arena.alloc(core::Val::FunForeign { f: fun }),
-        )) as Result<_, EvalError>
-    })
-    .expect("could not evaluate standard library!");
-
-    // this is a bit insane, clean it up later
-    if with_read {
-        ctx = ctx.bind_param(
-            "read".to_string(),
-            &core::Tm::new(
-                Location::new(0, 0),
-                core::TmData::FunApp {
-                    head: Arc::new(core::Tm::new(
-                        Location::new(0, 0),
-                        core::TmData::FunForeignLit {
-                            args: vec![],
-                            body: Arc::new(core::library::read_ty),
-                        },
-                    )),
-                    args: vec![],
-                },
-            )
-            .eval(arena, &ctx.tms, &Env::default())
-            .expect("could not evaluate standard library!"),
-            arena,
-        );
-    }
 
     ctx
 }
@@ -456,25 +51,52 @@ pub fn foreign<'a>(
     EvalError,
 > {
     match name {
-        "csv_ty" => Ok(Arc::new(csv_ty)),
-
         "binary_plus" => Ok(Arc::new(binary_plus)),
         "binary_times" => Ok(Arc::new(binary_times)),
+        "binary_minus" => Ok(Arc::new(binary_minus)),
         "binary_division" => Ok(Arc::new(binary_division)),
         "binary_modulo" => Ok(Arc::new(binary_modulo)),
         "binary_exponent" => Ok(Arc::new(binary_exponent)),
-        "binary_minus" => Ok(Arc::new(binary_minus)),
+
         "binary_equal" => Ok(Arc::new(binary_equal)),
         "binary_not_equal" => Ok(Arc::new(binary_not_equal)),
+
         "binary_less_than" => Ok(Arc::new(binary_less_than)),
         "binary_greater_than" => Ok(Arc::new(binary_greater_than)),
         "binary_less_than_or_equal" => Ok(Arc::new(binary_less_than_or_equal)),
         "binary_greater_than_or_equal" => Ok(Arc::new(binary_greater_than_or_equal)),
+
         "binary_and" => Ok(Arc::new(binary_and)),
         "binary_or" => Ok(Arc::new(binary_or)),
 
         "unary_minus" => Ok(Arc::new(unary_minus)),
         "unary_reverse_complement" => Ok(Arc::new(unary_reverse_complement)),
+
+        "read_ty" => Ok(Arc::new(read_ty)),
+
+        "len" => Ok(Arc::new(len)),
+        "slice" => Ok(Arc::new(slice)),
+        "tag" => Ok(Arc::new(tag)),
+        "translate" => Ok(Arc::new(translate)),
+        "str_concat" => Ok(Arc::new(str_concat)),
+        "concat" => Ok(Arc::new(concat)),
+        "csv_ty" => Ok(Arc::new(csv_ty)),
+        "csv" => Ok(Arc::new(csv)),
+        "tsv_ty" => Ok(Arc::new(tsv_ty)),
+        "tsv" => Ok(Arc::new(tsv)),
+        "fasta" => Ok(Arc::new(fasta)),
+        "find_first" => Ok(Arc::new(find_first)),
+        "find_last" => Ok(Arc::new(find_last)),
+        "to_upper" => Ok(Arc::new(to_upper)),
+        "to_lower" => Ok(Arc::new(to_lower)),
+        "describe" => Ok(Arc::new(describe)),
+        "stdout" => Ok(Arc::new(stdout)),
+        "counts" => Ok(Arc::new(counts)),
+        "average" => Ok(Arc::new(average)),
+        "file" => Ok(Arc::new(file)),
+        "contains" => Ok(Arc::new(to_lower)),
+        "distance" => Ok(Arc::new(distance)),
+        "to_str" => Ok(Arc::new(to_str)),
 
         _ => Err(EvalError::new(location, "foreign function does not exist")),
     }
@@ -916,6 +538,8 @@ pub fn csv_ty<'a>(
     location: &Location,
     vtms: &[&'a Val<'a>],
 ) -> Result<&'a Val<'a>, EvalError> {
+    println!("going in with {}", vtms.iter().join(", "));
+
     match vtms {
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
@@ -944,7 +568,10 @@ pub fn csv_ty<'a>(
 
         _ => Err(EvalError::new(
             &location,
-            "bad arguments given to function?!",
+            &format!(
+                "bad arguments given to function?! got ({})",
+                vtms.iter().join(", ")
+            ),
         )),
     }
 }
@@ -1317,26 +944,6 @@ pub fn stdout<'a>(
         )),
     }
 }
-pub fn stats<'a>(
-    arena: &'a Arena,
-    location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
-    match vtms {
-        [] => Ok(arena.alloc(Val::Rec(arena.alloc(rec::ConcreteRec {
-            map: HashMap::from([(
-                arena.alloc(b"output".to_vec()).as_slice(),
-                arena.alloc(Val::Str { s: b"stats" }) as &Val,
-            )]),
-        })))),
-
-        _ => Err(EvalError::new(
-            &location,
-            "bad arguments given to function?!",
-        )),
-    }
-}
-
 pub fn file<'a>(
     arena: &'a Arena,
     location: &Location,

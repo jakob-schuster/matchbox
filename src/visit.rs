@@ -15,6 +15,10 @@ pub fn ids_tm(tm: &Tm) -> Vec<String> {
             .iter()
             .flat_map(|field| ids_tm(&field.data))
             .collect(),
+        crate::surface::TmData::RecWithTy { fields } => fields
+            .iter()
+            .flat_map(|field| ids_tm(&field.data))
+            .collect(),
         crate::surface::TmData::RecLit { fields } => fields
             .iter()
             .flat_map(|field| ids_tm(&field.data))
@@ -39,11 +43,12 @@ pub fn ids_tm(tm: &Tm) -> Vec<String> {
             .into_iter()
             .chain(args.iter().flat_map(|arg| ids_tm(arg)).collect::<Vec<_>>())
             .collect(),
-        crate::surface::TmData::BinOp { tm0, tm1, op } => ids_tm(&tm0)
-            .into_iter()
-            .chain(ids_tm(&tm1).into_iter())
-            .collect(),
+        crate::surface::TmData::BinOp { tm0, tm1, op } => {
+            ids_tm(&tm0).into_iter().chain(ids_tm(&tm1)).collect()
+        }
         crate::surface::TmData::UnOp { tm, op } => ids_tm(&tm),
         crate::surface::TmData::Name { name } => vec![name.clone()],
+        crate::surface::TmData::ListTy { tm } => ids_tm(tm),
+        crate::surface::TmData::ListLit { tms } => tms.iter().flat_map(|tm| ids_tm(&tm)).collect(),
     }
 }

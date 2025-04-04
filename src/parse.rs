@@ -152,6 +152,7 @@ peg::parser! {
             = tm0:tm6() _ "*" _ tm1:tm7() { TmData::BinOp { tm0: Rc::new(tm0), tm1: Rc::new(tm1), op: BinOp::Times } }
             / tm0:tm6() _ "/" _ tm1:tm7() { TmData::BinOp { tm0: Rc::new(tm0), tm1: Rc::new(tm1), op: BinOp::Division } }
             / tm0:tm6() _ "%" _ tm1:tm7() { TmData::BinOp { tm0: Rc::new(tm0), tm1: Rc::new(tm1), op: BinOp::Modulo } }
+            / tm0:tm6() _ "^" _ tm1:tm7() { TmData::BinOp { tm0: Rc::new(tm0), tm1: Rc::new(tm1), op: BinOp::Exponent } }
             / tm_data7()
 
         rule tm7() -> Tm = located(<tm_data7()>)
@@ -193,15 +194,20 @@ peg::parser! {
 
             // record type literals
             / "{" _ fields:whitespace_sensitive_list(<rec_ty_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { TmData::RecTy { fields }}
+            / "{" _ fields:whitespace_sensitive_list(<rec_ty_field()>,<whitespace_except_newline() [','|'\n']() _>) _ ".." _ "}" { TmData::RecWithTy { fields }}
             // record literals
             / "{" _ fields:whitespace_sensitive_list(<rec_lit_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { TmData::RecLit { fields }}
+
+            // list type literals
+            / "[" _ tm:tm() _ "]" { TmData::ListTy { tm: Rc::new(tm) } }
+            // WARN there's no syntax yet for list literals, because how would we distinguish a singleton list from a list type literal?
 
             // function type literals
             / "(" _ args:list(<tm()>, <",">) _ ")" _ "->" _ body:tm() { TmData::FunTy { args, body: Rc::new(body) } }
             // function literals
             / "(" _ args:list(<param()>, <",">) _ ")" _ "=>" _ body:tm() { TmData::FunLit { args, body: Rc::new(body) }}
             // foreign function literals
-            / "#(" _ args:list(<param()>, <",">) _ ")" _ ":" _ ty:tm() _ "=>" _ name:name() { TmData::FunLitForeign { args, ty: Rc::new(ty), name } }
+            / "$(" _ args:list(<param()>, <",">) _ ")" _ ":" _ ty:tm() _ "=>" _ name:name() { TmData::FunLitForeign { args, ty: Rc::new(ty), name } }
             // function application
 
             // named things
@@ -260,6 +266,8 @@ peg::parser! {
 
         rule whitespace() = quiet!{[' ' | '\n' | '\t']*}
         rule whitespace_except_newline() = quiet!{ [' ' | '\t']* }
-        rule _ = whitespace()
+        rule _
+            = whitespace() "#" [c if c != '\n']* "\n" _()
+            / whitespace()
     }
 }

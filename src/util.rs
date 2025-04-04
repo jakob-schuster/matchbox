@@ -75,7 +75,7 @@ impl<'a, T: Display> Display for CoreRecField<'a, T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Env<A> {
     vec: Vec<A>,
 }
@@ -137,6 +137,13 @@ impl<A: Clone> Env<A> {
     pub fn with(&self, a: A) -> Env<A> {
         let mut vec = self.vec.clone();
         vec.push(a);
+
+        Env { vec }
+    }
+
+    pub fn without(&self, index: usize) -> Env<A> {
+        let mut vec = self.vec.clone();
+        vec.remove(index);
 
         Env { vec }
     }

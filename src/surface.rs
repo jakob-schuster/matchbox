@@ -72,7 +72,7 @@ pub enum StmtData {
     /// An output statement, sending a value to an output destination.
     /// (For now, these are built-in rather than functions - may need to change)
     /// [ read.name |> file('out.txt') ]
-    Out { tm0: Tm, tm1: Tm },
+    Tm { tm: Tm },
 
     /// A conditional structure.
     /// [ if read is [ |3| rest:_ ] => rest |> trimmed ]
@@ -449,26 +449,23 @@ fn elab_stmt<'a>(
                 )),
             }
         }
-        StmtData::Out { tm0, tm1 } => {
-            // todo: check types here if we like (LHS is portable, RHS is handler)
-            let (ctm0, _) = infer_tm(arena, ctx, tm0)?;
-            let (ctm1, _) = infer_tm(arena, ctx, tm1)?;
+        StmtData::Tm { tm } => {
+            // make sure that all surface-level terms evaluate to effects
+            let ctm = check_tm(arena, ctx, tm, &core::Val::EffectTy)?;
 
             match rest {
                 [] => Ok(core::Stmt::new(
                     stmt.location.clone(),
-                    core::StmtData::Out {
-                        tm0: ctm0,
-                        tm1: ctm1,
+                    core::StmtData::Tm {
+                        tm: ctm,
                         next: Arc::new(core::Stmt::new(stmt.location.clone(), core::StmtData::End)),
                     },
                 )),
 
                 [next, rest @ ..] => Ok(core::Stmt::new(
                     stmt.location.clone(),
-                    core::StmtData::Out {
-                        tm0: ctm0,
-                        tm1: ctm1,
+                    core::StmtData::Tm {
+                        tm: ctm,
                         next: Arc::new(elab_stmt(arena, ctx, next, rest)?),
                     },
                 )),
@@ -1042,7 +1039,6 @@ pub fn infer_tm<'a>(
 
             // then, get the type of the body
             // (note that this might be FunReturnTyAwaiting, as it may include parameters)
-            println!("about to do the thing in {:?}", new_ctx);
             let ty = check_tm(arena, &new_ctx, ty, &core::Val::Univ)?;
             let val = ty
                 .eval(arena, &new_ctx.tms, &Env::default())

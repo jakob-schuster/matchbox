@@ -307,7 +307,6 @@ pub fn infer_read_pattern<'a>(
         let mut known = known.clone();
 
         let mut ops_new = ops.clone();
-        println!("about to go into learn_new_fixed_lens()");
         ops_new.extend(learn_new_fixed_lens(&mut known, sized, arena));
         // WARN have changed this -- see if it works
         while !ops.len().eq(&ops_new.len()) {

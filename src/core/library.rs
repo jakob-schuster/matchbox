@@ -9,8 +9,9 @@ use crate::{
 use std::{collections::HashMap, io::Read, path::Path, sync::Arc};
 
 use super::{
+    make_portable,
     rec::{self, ConcreteRec},
-    EvalError, Val,
+    Effect, EvalError, PortableVal, Val,
 };
 
 pub fn standard_library<'a>(arena: &'a Arena) -> Context<'a> {
@@ -20,6 +21,7 @@ pub fn standard_library<'a>(arena: &'a Arena) -> Context<'a> {
         ("Bool", core::TmData::Univ, core::TmData::BoolTy),
         ("Num", core::TmData::Univ, core::TmData::NumTy),
         ("Str", core::TmData::Univ, core::TmData::StrTy),
+        ("Effect", core::TmData::Univ, core::TmData::EffectTy),
     ];
 
     let ctx = entries
@@ -90,13 +92,14 @@ pub fn foreign<'a>(
         "to_upper" => Ok(Arc::new(to_upper)),
         "to_lower" => Ok(Arc::new(to_lower)),
         "describe" => Ok(Arc::new(describe)),
-        "stdout" => Ok(Arc::new(stdout)),
-        "counts" => Ok(Arc::new(counts)),
-        "average" => Ok(Arc::new(average)),
-        "file" => Ok(Arc::new(file)),
         "contains" => Ok(Arc::new(to_lower)),
         "distance" => Ok(Arc::new(distance)),
         "to_str" => Ok(Arc::new(to_str)),
+
+        "stdout!" => Ok(Arc::new(stdout_eff)),
+        "count!" => Ok(Arc::new(count_eff)),
+        "out!" => Ok(Arc::new(out_eff)),
+        "average!" => Ok(Arc::new(average_eff)),
 
         _ => Err(EvalError::new(location, "foreign function does not exist")),
     }
@@ -925,91 +928,6 @@ pub fn describe<'a>(
     }
 }
 
-pub fn stdout<'a>(
-    arena: &'a Arena,
-    location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
-    match vtms {
-        [] => Ok(arena.alloc(Val::Rec(arena.alloc(rec::ConcreteRec {
-            map: HashMap::from([(
-                arena.alloc(b"output".to_vec()).as_slice(),
-                arena.alloc(Val::Str { s: b"stdout" }) as &Val,
-            )]),
-        })))),
-
-        _ => Err(EvalError::new(
-            &location,
-            "bad arguments given to function?!",
-        )),
-    }
-}
-pub fn file<'a>(
-    arena: &'a Arena,
-    location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
-    match vtms {
-        [Val::Str { s: filename }] => Ok(arena.alloc(Val::Rec(arena.alloc(rec::ConcreteRec {
-            map: HashMap::from([
-                (
-                    arena.alloc(b"output".to_vec()).as_slice(),
-                    arena.alloc(Val::Str { s: b"file" }) as &Val,
-                ),
-                (
-                    arena.alloc(b"filename".to_vec()).as_slice(),
-                    arena.alloc(Val::Str { s: filename }) as &Val,
-                ),
-            ]),
-        })))),
-
-        _ => Err(EvalError::new(
-            &location,
-            "bad arguments given to function?!",
-        )),
-    }
-}
-
-pub fn average<'a>(
-    arena: &'a Arena,
-    location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
-    match vtms {
-        [] => Ok(arena.alloc(Val::Rec(arena.alloc(rec::ConcreteRec {
-            map: HashMap::from([(
-                arena.alloc(b"output".to_vec()).as_slice(),
-                arena.alloc(Val::Str { s: b"average" }) as &Val,
-            )]),
-        })))),
-
-        _ => Err(EvalError::new(
-            &location,
-            "bad arguments given to function?!",
-        )),
-    }
-}
-
-pub fn counts<'a>(
-    arena: &'a Arena,
-    location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
-    match vtms {
-        [] => Ok(arena.alloc(Val::Rec(arena.alloc(rec::ConcreteRec {
-            map: HashMap::from([(
-                arena.alloc(b"output".to_vec()).as_slice(),
-                arena.alloc(Val::Str { s: b"counts" }) as &Val,
-            )]),
-        })))),
-
-        _ => Err(EvalError::new(
-            &location,
-            "bad arguments given to function?!",
-        )),
-    }
-}
-
 pub fn contains<'a>(
     arena: &'a Arena,
     location: &Location,
@@ -1063,6 +981,111 @@ pub fn to_str<'a>(
         // all else is turned into a string and then allocated
         [v] => Ok(arena.alloc(Val::Str {
             s: arena.alloc(v.to_string()).as_bytes(),
+        })),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn stdout_eff<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[&'a Val<'a>],
+) -> Result<&'a Val<'a>, EvalError> {
+    match vtms {
+        // string types pass straight through to reduce allocations
+        [v] => Ok(arena.alloc(Val::Effect {
+            val: make_portable(arena, v),
+            handler: PortableVal::Rec {
+                fields: HashMap::from([(
+                    b"output".to_vec(),
+                    PortableVal::Str {
+                        s: b"stdout".to_vec(),
+                    },
+                )]),
+            },
+        })),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn count_eff<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[&'a Val<'a>],
+) -> Result<&'a Val<'a>, EvalError> {
+    match vtms {
+        // string types pass straight through to reduce allocations
+        [v] => Ok(arena.alloc(Val::Effect {
+            val: make_portable(arena, v),
+            handler: PortableVal::Rec {
+                fields: HashMap::from([(
+                    b"output".to_vec(),
+                    PortableVal::Str {
+                        s: b"counts".to_vec(),
+                    },
+                )]),
+            },
+        })),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn out_eff<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[&'a Val<'a>],
+) -> Result<&'a Val<'a>, EvalError> {
+    match vtms {
+        [v, filename @ Val::Str { .. }] => Ok(arena.alloc(Val::Effect {
+            val: make_portable(arena, v),
+            handler: PortableVal::Rec {
+                fields: HashMap::from([
+                    (
+                        b"output".to_vec(),
+                        PortableVal::Str {
+                            s: b"file".to_vec(),
+                        },
+                    ),
+                    (b"filename".to_vec(), make_portable(arena, filename)),
+                ]),
+            },
+        })),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn average_eff<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[&'a Val<'a>],
+) -> Result<&'a Val<'a>, EvalError> {
+    match vtms {
+        [v] => Ok(arena.alloc(Val::Effect {
+            val: make_portable(arena, v),
+            handler: PortableVal::Rec {
+                fields: HashMap::from([(
+                    b"output".to_vec(),
+                    PortableVal::Str {
+                        s: b"average".to_vec(),
+                    },
+                )]),
+            },
         })),
 
         _ => Err(EvalError::new(

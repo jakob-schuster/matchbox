@@ -47,9 +47,8 @@ pub enum StmtData<'p> {
         tm: Tm<'p>,
         next: Arc<Stmt<'p>>,
     },
-    Out {
-        tm0: Tm<'p>,
-        tm1: Tm<'p>,
+    Tm {
+        tm: Tm<'p>,
         next: Arc<Stmt<'p>>,
     },
     If {
@@ -111,18 +110,22 @@ impl<'p> Stmt<'p> {
                 // and then evaluate the statement with that binding
                 next.eval(arena, global_env, &env.with(val))
             }
-            StmtData::Out { tm0, tm1, next } => {
-                let val0 = tm0.eval(arena, global_env, env)?;
-                let val1 = tm1.eval(arena, global_env, env)?;
+            StmtData::Tm { tm, next } => {
+                let val = tm.eval(arena, global_env, env)?;
 
-                // export the values to be portable
-                Ok([Effect {
-                    val: make_portable(arena, val0),
-                    handler: make_portable(arena, val1),
-                }]
-                .into_iter()
-                .chain(next.eval(arena, global_env, env)?)
-                .collect::<Vec<_>>())
+                match val {
+                    Val::Effect { val, handler } => {
+                        // export the values to be portable
+                        Ok([Effect {
+                            val: val.clone(),
+                            handler: handler.clone(),
+                        }]
+                        .into_iter()
+                        .chain(next.eval(arena, global_env, env)?)
+                        .collect::<Vec<_>>())
+                    }
+                    _ => panic!("type error in statement-level effect, found {}?!", val),
+                }
             }
             StmtData::If { branches, next } => {
                 // return the results of the first successful branch
@@ -287,6 +290,9 @@ pub enum TmData<'a> {
         tm: Arc<Tm<'a>>,
         name: &'a [u8],
     },
+
+    // the type of functions that produce effects
+    EffectTy,
 }
 
 impl<'p> Tm<'p> {
@@ -320,9 +326,9 @@ impl<'p> Tm<'p> {
             TmData::BoolTy => Ok(arena.alloc(Val::BoolTy)),
             TmData::BoolLit { b } => Ok(arena.alloc(Val::Bool { b: *b })),
             TmData::NumTy => Ok(arena.alloc(Val::NumTy)),
-            TmData::NumLit { n } => Ok(arena.alloc(Val::Num { n: n.clone() })),
+            TmData::NumLit { n } => Ok(arena.alloc(Val::Num { n: *n })),
             TmData::StrTy => Ok(arena.alloc(Val::StrTy)),
-            TmData::StrLit { s } => Ok(arena.alloc(Val::Str { s: s })),
+            TmData::StrLit { s } => Ok(arena.alloc(Val::Str { s })),
 
             TmData::FunTy { args, body } => Ok(arena.alloc(Val::FunTy {
                 args: args
@@ -432,6 +438,8 @@ impl<'p> Tm<'p> {
                     self.location.clone(),
                 )),
             },
+
+            TmData::EffectTy => Ok(arena.alloc(Val::EffectTy)),
         }
     }
 }
@@ -523,6 +531,13 @@ pub enum Val<'a> {
     Neutral {
         neutral: Neutral<'a>,
     },
+
+    EffectTy,
+    // by the time it's an effect, the values have already been made portable
+    Effect {
+        val: PortableVal,
+        handler: PortableVal,
+    },
 }
 
 impl<'a> Val<'a> {
@@ -552,7 +567,8 @@ impl<'a> Val<'a> {
             (Val::Univ, Val::Univ)
             | (Val::BoolTy, Val::BoolTy)
             | (Val::NumTy, Val::NumTy)
-            | (Val::StrTy, Val::StrTy) => true,
+            | (Val::StrTy, Val::StrTy)
+            | (Val::EffectTy, Val::EffectTy) => true,
 
             // equivalent if argument types are the same
             // and return types are the same
@@ -646,7 +662,8 @@ impl<'a> Val<'a> {
             | (Val::AnyTy, Val::AnyTy)
             | (Val::BoolTy, Val::BoolTy)
             | (Val::NumTy, Val::NumTy)
-            | (Val::StrTy, Val::StrTy) => true,
+            | (Val::StrTy, Val::StrTy)
+            | (Val::EffectTy, Val::EffectTy) => true,
 
             (Val::Bool { b: b1 }, Val::Bool { b: b2 }) => b1.eq(b2),
             (Val::Num { n: n1 }, Val::Num { n: n2 }) => n1.eq(n2),
@@ -666,6 +683,17 @@ impl<'a> Val<'a> {
                         _ => false,
                     })
             }
+
+            (
+                Val::Effect {
+                    val: val1,
+                    handler: handler1,
+                },
+                Val::Effect {
+                    val: val2,
+                    handler: handler2,
+                },
+            ) => val1.eq(val2) && handler1.eq(handler2),
 
             // really not sure how to check equivalence between functions, so false for now
             _ => false,
@@ -765,8 +793,6 @@ impl<'a> Val<'a> {
                     .collect(),
                 body: arena.alloc(body.coerce(arena)),
             },
-
-            // WARN these really need to be implemented
             Val::Fun { data } => todo!(),
             Val::FunForeign {
                 body: f,
@@ -783,6 +809,11 @@ impl<'a> Val<'a> {
             Val::FunReturnTyAwaiting { data } => todo!(),
             Val::Neutral { neutral } => Val::Neutral {
                 neutral: neutral.coerce(arena),
+            },
+            Val::EffectTy => Val::EffectTy,
+            Val::Effect { val, handler } => Val::Effect {
+                val: val.clone(),
+                handler: handler.clone(),
             },
         }
     }
@@ -940,6 +971,12 @@ pub fn make_portable<'a>(arena: &'a Arena, val: &'a Val<'a>) -> PortableVal {
         Val::FunReturnTyAwaiting { .. } => todo!(),
         Val::Neutral { .. } => todo!(),
         Val::AnyTy => todo!(),
+
+        Val::EffectTy => PortableVal::EffectTy,
+        Val::Effect { val, handler } => PortableVal::Effect {
+            val: Arc::new(val.clone()),
+            handler: Arc::new(handler.clone()),
+        },
     }
 }
 
@@ -1003,6 +1040,12 @@ pub enum PortableVal {
     Rec {
         fields: HashMap<Vec<u8>, PortableVal>,
     },
+
+    EffectTy,
+    Effect {
+        val: Arc<PortableVal>,
+        handler: Arc<PortableVal>,
+    },
 }
 
 #[derive(Clone)]
@@ -1021,7 +1064,7 @@ impl<'a> Display for StmtData<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StmtData::Let { tm, next } => format!("push {}; {}", tm, next).fmt(f),
-            StmtData::Out { tm0, tm1, next } => format!("{} |> {}; {}", tm0, tm1, next).fmt(f),
+            StmtData::Tm { tm, next } => format!("{}; {}", tm, next).fmt(f),
             StmtData::If { branches, next } => format!(
                 "if {}; {}",
                 branches.iter().map(|a| a.to_string()).join(", "),
@@ -1137,6 +1180,7 @@ impl<'a> Display for TmData<'a> {
             TmData::RecProj { tm, name } => {
                 format!("{}.{}", tm, util::bytes_to_string(name).unwrap()).fmt(f)
             }
+            TmData::EffectTy => "Effect".fmt(f),
         }
     }
 }
@@ -1158,10 +1202,8 @@ impl<'a> Display for Val<'a> {
             Val::Num { n } => n.fmt(f),
             Val::StrTy => "Str".fmt(f),
             Val::Str { s } => util::bytes_to_string(s).unwrap().fmt(f),
-
             Val::ListTy { ty } => format!("[{}]", ty).fmt(f),
             Val::List { v } => format!("[{}]", v.into_iter().join(", ")).fmt(f),
-
             Val::RecTy { fields } => format!(
                 "{{ {} }}",
                 fields
@@ -1180,7 +1222,6 @@ impl<'a> Display for Val<'a> {
                     .join(", ")
             )
             .fmt(f),
-
             Val::Rec(rec) => rec.fmt(f),
             Val::FunTy { args, body } => format!(
                 "({}) -> {}",
@@ -1195,6 +1236,8 @@ impl<'a> Display for Val<'a> {
             Val::FunForeign { .. } => "#func(foreign)".fmt(f),
             Val::FunReturnTyAwaiting { data } => format!("#awaiting({})", data).fmt(f),
             Val::Neutral { neutral } => format!("#neutral({})", neutral).fmt(f),
+            Val::EffectTy => "Effect".fmt(f),
+            Val::Effect { val, handler } => format!("#effect({}, {})", val, handler).fmt(f),
         }
     }
 }
@@ -1291,6 +1334,8 @@ impl<'a> Display for PortableVal {
             )
             .fmt(f),
             PortableVal::Fun { s } => format!("#func({})", s).fmt(f),
+            PortableVal::EffectTy => "Effect".fmt(f),
+            PortableVal::Effect { val, handler } => format!("#effect({}, {})", val, handler).fmt(f),
         }
     }
 }

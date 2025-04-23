@@ -40,10 +40,10 @@ peg::parser! {
         rule stmt() -> Stmt = stmt:located(<stmt_data()>) { stmt }
         rule stmt_data() -> StmtData
             = name:name() _ "=" _ tm:tm() { StmtData::Let { name, tm } }
-            / tm0:tm() _ "|>" _ tm1:tm() { StmtData::Out { tm0, tm1 } }
             // for now, just keep it to two kinds of if statement - boolean conditionals and match statements
             / "if" _ tm:tm() _ "is" _ branches:whitespace_sensitive_list_without_final_delimiter(<pattern_branch()>, <whitespace_except_newline() [','|'\n']() _>) { StmtData::If { branches: vec![Branch::new(tm.location.clone(), BranchData::Is { tm, branches })] } }
             / "if"  _ branches:whitespace_sensitive_list_without_final_delimiter(<branch()>, <whitespace_except_newline() [','|'\n']() _>) { StmtData::If { branches } }
+            / tm:tm() { StmtData::Tm { tm } }
 
         rule group_stmt() -> Stmt = stmt:located(<group_stmt_data()>) { stmt }
         rule group_stmt_data() -> StmtData
@@ -248,7 +248,7 @@ peg::parser! {
             = n:$(['0'..='9']+) { Num::Int(n.parse::<i32>().unwrap()) }
 
         rule name() -> String
-            = s:$(['a'..='z' | 'A'..='Z' | '_']['a'..='z' | 'A'..='Z' | '_' | '0'..='9']*) { s.to_string() }
+            = s:$(['a'..='z' | 'A'..='Z' | '_']['a'..='z' | 'A'..='Z' | '_' | '0'..='9' | '!']*) { s.to_string() }
 
         //
 

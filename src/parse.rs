@@ -41,18 +41,23 @@ peg::parser! {
         rule stmt_data() -> StmtData
             = name:name() _ "=" _ tm:tm() { StmtData::Let { name, tm } }
             / tm0:tm() _ "|>" _ tm1:tm() { StmtData::Out { tm0, tm1 } }
-            / "if" _ branches:whitespace_sensitive_list(<branch()>, <whitespace_except_newline() [','|'\n']() _>) { StmtData::If { branches } }
+            // for now, just keep it to two kinds of if statement - boolean conditionals and match statements
+            / "if" _ tm:tm() _ "is" _ branches:whitespace_sensitive_list_without_final_delimiter(<pattern_branch()>, <whitespace_except_newline() [','|'\n']() _>) { StmtData::If { branches: vec![Branch::new(tm.location.clone(), BranchData::Is { tm, branches })] } }
+            / "if"  _ branches:whitespace_sensitive_list_without_final_delimiter(<branch()>, <whitespace_except_newline() [','|'\n']() _>) { StmtData::If { branches } }
 
         rule group_stmt() -> Stmt = stmt:located(<group_stmt_data()>) { stmt }
         rule group_stmt_data() -> StmtData
             = "{" _ stmts:whitespace_sensitive_list(<stmt()>, <whitespace_except_newline() [';'|'\n']() _>) _ "}" { StmtData::Group { stmts } }
+            // single statements don't need braces
+            / stmt_data()
 
         //
 
         rule branch() -> Branch = branch:located(<branch_data()>) { branch }
+        #[cache_left_rec]
         rule branch_data() -> BranchData
             = tm:tm() _ "=>" _ stmt:group_stmt() { BranchData::Bool { tm, stmt } }
-            / tm:tm() _ "is" _ branches:whitespace_sensitive_list(<pattern_branch()>, <whitespace_except_newline() [','|'\n']() _>) { BranchData::Is { tm, branches } }
+            // / tm:tm() _ "is" _ branches:whitespace_sensitive_list_without_final_delimiter(<pattern_branch()>, <whitespace_except_newline() [','|'\n']() _>) { BranchData::Is { tm, branches } }
 
         //
 
@@ -65,7 +70,6 @@ peg::parser! {
             = name:name() ":" pattern:pattern1() { PatternData::Named { name, pattern: Rc::new(pattern) } }
             / pattern_data1()
 
-
         rule pattern1() -> Pattern = located(<pattern_data1()>)
         rule pattern_data1() -> PatternData
             = "_" { PatternData::Hole }
@@ -74,7 +78,7 @@ peg::parser! {
             / "{" _ fields:whitespace_sensitive_list(<rec_pattern_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { PatternData::RecLit { fields } }
             / "[" _ regs:list(<region()>, <_()>) _ "]" _ binds:read_parameters() { PatternData::Read { regs, binds, error: global_config.error } }
 
-        //
+        //z
 
         rule region() -> Region = located(<region_data()>)
         rule region_data() -> RegionData
@@ -260,6 +264,10 @@ peg::parser! {
 
         rule whitespace_sensitive_list<T>(tr: rule<T>, sepr: rule<()>) -> Vec<T>
             = v:(t:tr() ** sepr() {t}) sepr()?
+                { v }
+
+        rule whitespace_sensitive_list_without_final_delimiter<T>(tr: rule<T>, sepr: rule<()>) -> Vec<T>
+            = v:(t:tr() ** sepr() {t})
                 { v }
 
         //

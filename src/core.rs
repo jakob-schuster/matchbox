@@ -125,7 +125,8 @@ impl<'p> Stmt<'p> {
                 .collect::<Vec<_>>())
             }
             StmtData::If { branches, next } => {
-                let vec: Vec<Effect> = {
+                // return the results of the first successful branch
+                let get_first_branch_results = || {
                     for branch in branches {
                         if let Some(vec) = branch.eval(arena, global_env, env)? {
                             return Ok(vec);
@@ -133,9 +134,10 @@ impl<'p> Stmt<'p> {
                     }
 
                     Ok(vec![])
-                }?;
+                };
 
-                Ok(vec
+                // and then chain on the rest of the results after this statement
+                Ok(get_first_branch_results()?
                     .into_iter()
                     .chain(next.eval(arena, global_env, env)?)
                     .collect::<Vec<_>>())

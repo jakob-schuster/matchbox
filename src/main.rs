@@ -56,6 +56,9 @@ pub struct GlobalConfig {
     /// Paired reads. Accepts FASTA/FASTQ files.
     #[arg(short, long)]
     paired_with: Option<String>,
+
+    #[arg(short, long, default_value = "")]
+    args: String,
 }
 
 impl GlobalConfig {
@@ -66,6 +69,7 @@ impl GlobalConfig {
             script: "".to_string(),
             reads: None,
             paired_with: None,
+            args: "".to_string(),
         }
     }
 }
@@ -112,7 +116,14 @@ fn run(code: &str, global_config: &GlobalConfig) {
         // should never unwrap, because program terminates
         .unwrap();
 
-    println!("{:?}", ctx);
+    // parse the args program
+    let args_prog = parse(&format!("args = {{{}}}", global_config.args), global_config)
+        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        .unwrap();
+
+    let ctx = elab_prog_for_ctx(&arena, &ctx, &args_prog)
+        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        .unwrap();
 
     // parse the program
     let prog = parse(code, global_config)
@@ -198,6 +209,7 @@ fn read_code_from_script(script_filename: &str) -> Result<String, InputError> {
 
 /// A simple wrapper around the various error types,
 /// so that they can all be universally printed with codespan.
+#[derive(Debug)]
 struct GenericError {
     pub location: Option<Location>,
     pub message: String,

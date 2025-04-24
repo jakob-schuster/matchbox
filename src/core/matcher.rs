@@ -15,9 +15,9 @@ pub trait Matcher<'p>: Send + Sync {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
         val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a;
 }
@@ -30,9 +30,9 @@ impl<'p> Matcher<'p> for Chain<'p> {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
         val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
@@ -52,9 +52,9 @@ impl<'p> Matcher<'p> for FieldAccess<'p> {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
         val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
@@ -75,9 +75,9 @@ impl<'p> Matcher<'p> for Succeed {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
         val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
@@ -91,13 +91,13 @@ impl<'p> Matcher<'p> for Bind {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
         val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
-        Ok(vec![vec![val]])
+        Ok(vec![vec![val.clone()]])
     }
 }
 
@@ -115,9 +115,9 @@ impl<'p> Matcher<'p> for Equal<'p> {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
         val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {

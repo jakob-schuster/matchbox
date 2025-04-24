@@ -165,7 +165,7 @@ pub fn read_fa<'p, 'a: 'p>(
         match record {
             Ok(read) => {
                 let mut arena = Arena::new();
-                let val = arena.alloc(core::Val::Rec(arena.alloc(rec::FastaRead { read: &read })));
+                let val = core::Val::Rec(arena.alloc(rec::FastaRead { read: &read }));
                 let effects = prog.eval(&arena, env, val).expect("");
 
                 for effect in &effects {
@@ -199,7 +199,7 @@ pub fn read_fa_multithreaded<'p, 'a: 'p>(
                 Ok(read) => {
                     let arena = Arena::new();
                     let val = core::Val::Rec(arena.alloc(rec::FastaRead { read: &read }));
-                    let effects = prog.eval(&arena, env, arena.alloc(val));
+                    let effects = prog.eval(&arena, env, val);
 
                     effects
                 }
@@ -229,7 +229,7 @@ pub fn read_fq<'p, 'a: 'p>(
         match record {
             Ok(read) => {
                 let arena = Arena::new();
-                let val = arena.alloc(core::Val::Rec(arena.alloc(rec::FastqRead { read: &read })));
+                let val = core::Val::Rec(arena.alloc(rec::FastqRead { read: &read }));
                 let effects = prog.eval(&arena, env, val);
 
                 for effect in &effects.expect("") {

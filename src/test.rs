@@ -122,7 +122,7 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
 
     // evaluate the program
     Ok(core_prog
-        .eval(&arena, &ctx.tms, &read)
+        .eval(&arena, &ctx.tms, read)
         .unwrap()
         .iter()
         .map(|a| a.to_string())

@@ -25,9 +25,9 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
         val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
@@ -55,7 +55,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                         .map
                         .iter()
                         .sorted_by_key(|(id, _)| **id)
-                        .map(|(_, val)| *val)
+                        .map(|(_, val)| (*val).clone())
                         .chain(
                             // then make the other sequence binds
                             self.binds.iter().map(|ran| {
@@ -68,7 +68,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                                     arena,
                                 )));
 
-                                arena.alloc(sliced) as &'a Val<'a>
+                                sliced as Val<'a>
                             }),
                         )
                         .collect::<Vec<_>>();
@@ -602,7 +602,7 @@ impl<'p> OpVal<'p> {
     fn exec<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a core::Val<'a>>,
+        env: &Env<core::Val<'a>>,
         seq: &'a [u8],
         loc_ctx: &LocCtx,
         bind_ctx: &BindCtx<'a>,
@@ -728,7 +728,7 @@ impl<'p> LocTm<'p> {
     fn eval<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a core::Val<'a>>,
+        env: &Env<core::Val<'a>>,
         loc_ctx: &LocCtx,
     ) -> Result<usize, core::EvalError>
     where
@@ -737,7 +737,8 @@ impl<'p> LocTm<'p> {
         match self {
             LocTm::Var { loc } => Ok(loc_ctx.get(loc)),
             LocTm::Plus { loc_tm, offset } => {
-                if let core::Val::Num { n } = offset.eval(arena, env, &Env::default())? {
+                // WARN changed the order of env and env default; see if this works
+                if let core::Val::Num { n } = offset.eval(arena, &Env::default(), env)? {
                     let i = n.round() as i32;
 
                     Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 + i) as usize)
@@ -746,7 +747,8 @@ impl<'p> LocTm<'p> {
                 }
             }
             LocTm::Minus { loc_tm, offset } => {
-                if let core::Val::Num { n } = offset.eval(arena, env, &Env::default())? {
+                // WARN changed the order of env and env default; see if this works
+                if let core::Val::Num { n } = offset.eval(arena, &Env::default(), env)? {
                     let i = n.round() as i32;
 
                     Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 - i) as usize)

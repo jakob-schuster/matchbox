@@ -84,12 +84,14 @@ impl<'p> Prog<'p> {
         &self,
         arena: &'a Arena,
         env: &Env<&'p Val<'p>>,
-        read: &'a Val<'a>,
+        read: Val<'a>,
     ) -> Result<Vec<Effect>, EvalError>
     where
         'p: 'a,
     {
-        self.data.stmt.eval(arena, env, &Env::default().with(read))
+        self.data
+            .stmt
+            .eval(arena, env, &Env::default().with(read.clone()))
     }
 }
 
@@ -98,7 +100,7 @@ impl<'p> Stmt<'p> {
         &self,
         arena: &'a Arena,
         global_env: &Env<&'p Val<'p>>,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
     ) -> Result<Vec<Effect>, EvalError>
     where
         'p: 'a,
@@ -108,7 +110,7 @@ impl<'p> Stmt<'p> {
                 // evaluate the term
                 let val = tm.eval(arena, global_env, env)?;
                 // and then evaluate the statement with that binding
-                next.eval(arena, global_env, &env.with(arena.alloc(val)))
+                next.eval(arena, global_env, &env.with(val))
             }
             StmtData::Tm { tm, next } => {
                 let val = tm.eval(arena, global_env, env)?;
@@ -157,7 +159,7 @@ impl<'p> Branch<'p> {
         &self,
         arena: &'a Arena,
         global_env: &Env<&'p Val<'p>>,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
     ) -> Result<Option<Vec<Effect>>, EvalError>
     where
         'p: 'a,
@@ -196,7 +198,7 @@ impl<'p> PatternBranch<'p> {
         &self,
         arena: &'a Arena,
         global_env: &Env<&'p Val<'p>>,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
         val: &'a Val<'a>,
     ) -> Result<Option<Vec<Effect>>, EvalError>
     where
@@ -206,12 +208,14 @@ impl<'p> PatternBranch<'p> {
             [] => Ok(None),
             bind_options => Ok(Some(
                 bind_options
-                    .iter()
+                    .into_iter()
                     .map(|binds| {
                         self.data.stmt.eval(
                             arena,
                             global_env,
-                            &binds.iter().fold(env.clone(), |env0, bind| env0.with(bind)),
+                            &binds
+                                .iter()
+                                .fold(env.clone(), |env0, bind| env0.with(bind.clone())),
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?
@@ -302,7 +306,7 @@ impl<'p> Tm<'p> {
         &self,
         arena: &'a Arena,
         global_env: &Env<&'p Val<'p>>,
-        env: &Env<&'a Val<'a>>,
+        env: &Env<Val<'a>>,
     ) -> Result<Val<'a>, EvalError>
     where
         'p: 'a,
@@ -355,11 +359,11 @@ impl<'p> Tm<'p> {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let smaller_env = args.iter().fold(env.clone(), |env0, _| {
-                    env0.with(arena.alloc(Val::Neutral {
+                    env0.with(Val::Neutral {
                         neutral: Neutral::Var {
                             level: env0.iter().len(),
                         },
-                    }))
+                    })
                 });
 
                 Ok(Val::FunForeign {
@@ -449,7 +453,7 @@ impl<'p> Tm<'p> {
 /// Function type that explicitly captures its environment.
 #[derive(Clone)]
 pub struct FunData<'a> {
-    pub env: Env<&'a Val<'a>>,
+    pub env: Env<Val<'a>>,
     pub body: Tm<'a>,
 }
 
@@ -457,7 +461,7 @@ impl<'a> FunData<'a> {
     pub fn app(&self, arena: &'a Arena, args: Vec<Val<'a>>) -> Result<Val<'a>, EvalError> {
         let new_env = args
             .into_iter()
-            .fold(self.env.clone(), |env0, arg| env0.with(arena.alloc(arg)));
+            .fold(self.env.clone(), |env0, arg| env0.with(arg));
 
         self.body.eval(arena, &Env::default(), &new_env)
     }

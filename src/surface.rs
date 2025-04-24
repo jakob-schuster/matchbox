@@ -1056,7 +1056,10 @@ pub fn infer_tm<'a>(
                 // to a new val (which we expect to be concrete)
                 core::Val::FunReturnTyAwaiting {
                     data: core::FunData {
-                        env: ctx.tms.clone(),
+                        env: ctx
+                            .tms
+                            .iter()
+                            .fold(Env::default(), |env0, val| env0.with((*val).clone())),
                         body: ty.clone(),
                     },
                 }

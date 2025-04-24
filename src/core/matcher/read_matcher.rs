@@ -94,7 +94,7 @@ enum Reg<'p> {
 
 fn flatten_regs<'a>(
     binds: &[String],
-    bind_tys: &HashMap<String, &'a core::Val<'a>>,
+    bind_tys: &HashMap<String, core::Val<'a>>,
     i: usize,
     regs: Vec<&'a Region>,
     sized_acc: Vec<(core::Tm<'a>, Ran<usize>)>,
@@ -138,7 +138,11 @@ fn flatten_regs<'a>(
 
                 // build a new context with these bound
                 let new_ctx = ids.iter().fold(ctx.clone(), |ctx0, id| {
-                    ctx0.bind_param(id.clone(), bind_tys.get(id).unwrap(), arena)
+                    ctx0.bind_param(
+                        id.clone(),
+                        arena.alloc(bind_tys.get(id).unwrap().clone()),
+                        arena,
+                    )
                 });
 
                 // check that the tm is a string
@@ -214,7 +218,7 @@ pub fn infer_read_pattern<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
     regs: &'a [Region],
-    params: Vec<(String, &'a core::Val<'a>, &'a core::Val<'a>)>,
+    params: Vec<(String, core::Val<'a>, core::Val<'a>)>,
     error: f32,
 ) -> Result<(ReadMatcher<'a>, Vec<String>), ElabError> {
     // first, separate all the regions out into
@@ -426,7 +430,7 @@ impl<'p> OpTm<'p> {
         &self,
         arena: &'a Arena,
         ctx: &Context<'a>,
-        params: HashMap<String, Vec<&'a Val<'a>>>,
+        params: HashMap<String, Vec<Val<'a>>>,
         param_indices: HashMap<String, usize>,
         error: f32,
     ) -> Result<OpVal<'a>, EvalError>
@@ -461,19 +465,21 @@ impl<'p> OpTm<'p> {
                     }
                 } else {
                     let new_binds = params
-                        .iter()
+                        .into_iter()
                         .filter(|(id, vals)| ids.contains(id))
                         .map(|(id, vals)| {
-                            vals.iter().map(|val| (id, val.clone())).collect::<Vec<_>>()
+                            vals.iter()
+                                .map(|val| (id.clone(), val.clone()))
+                                .collect::<Vec<_>>()
                         })
                         .collect::<Vec<_>>();
 
                     let ctxs = match &new_binds[..] {
                         [first, rest @ ..] => {
-                            first.iter().flat_map(|first_val: &(&String, &Val<'a>)| {
+                            first.into_iter().flat_map(|first_val: &(String, Val<'a>)| {
                                 rest.iter().fold(
-                                    vec![vec![*first_val]],
-                                    |v: Vec<Vec<(&String, &Val<'a>)>>, bind| {
+                                    vec![vec![first_val.clone()]],
+                                    |v: Vec<Vec<(String, Val<'a>)>>, bind| {
                                         v.iter()
                                             .cartesian_product(bind)
                                             .map(|(v, new)| {
@@ -492,22 +498,26 @@ impl<'p> OpTm<'p> {
                     }
                     .map(|bind_ctx| {
                         // WARN this may not be binding things in the right order?
-                        let new_ctx = bind_ctx.iter().fold(ctx.clone(), |ctx0, (name, val)| {
-                            ctx0.bind_def((*name).clone(), &core::Val::StrTy, val)
-                        });
+                        let new_ctx =
+                            bind_ctx
+                                .clone()
+                                .into_iter()
+                                .fold(ctx.clone(), |ctx0, (name, val)| {
+                                    ctx0.bind_def(name, &core::Val::StrTy, arena.alloc(val))
+                                });
 
                         let val = tm.eval(arena, &new_ctx.tms, &Env::default())?;
 
                         match val {
                             Val::Str { s } => Ok((
                                 bind_ctx
-                                    .iter()
+                                    .into_iter()
                                     .map(|(name, val)| {
                                         (
                                             *param_indices
-                                                .get(*name)
+                                                .get(&name)
                                                 .expect("bind index was invalid?!"),
-                                            *val,
+                                            val,
                                         )
                                     })
                                     .collect::<HashMap<_, _>>(),
@@ -539,7 +549,7 @@ pub enum OpVal<'a> {
     },
     Restrict {
         // list of new binds to make
-        ctxs: Vec<(HashMap<usize, &'a Val<'a>>, Seq)>,
+        ctxs: Vec<(HashMap<usize, Val<'a>>, Seq)>,
         // the location range to search between
         ran: Ran<usize>,
         // whether the ends are fixed

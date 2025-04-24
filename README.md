@@ -12,3 +12,4 @@ Currently you'll have a (slightly!) more stable experience with the original pro
 - [x] fix script parsing statements after conditionals
 - [x] make terms effectful
 - [ ] add optional arguments
+- [ ] add search term parameters

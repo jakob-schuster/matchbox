@@ -147,7 +147,7 @@ pub fn read_any<'p, 'a: 'p>(
     let (filetype, buffer) = get_filetype_and_buffer(filename).unwrap();
 
     match filetype {
-        FileType::Fasta => read_fa_multithreaded(buffer, prog, env, output_handler),
+        FileType::Fasta => read_fa(buffer, prog, env, output_handler),
         FileType::Fastq => read_fq(buffer, prog, env, output_handler),
         _ => panic!("unexpected filetype?!"),
     }

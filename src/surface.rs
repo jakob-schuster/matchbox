@@ -352,25 +352,27 @@ impl<'a> Context<'a> {
     pub fn bind_read(&self, arena: &'a Arena) -> Context<'a> {
         self.bind_param(
             "read".to_string(),
-            core::Tm::new(
-                Location::new(0, 0),
-                core::TmData::FunApp {
-                    head: Arc::new(core::Tm::new(
-                        Location::new(0, 0),
-                        core::TmData::FunForeignLit {
-                            args: vec![],
-                            body: Arc::new(core::library::read_ty),
-                            body_ty: Arc::new(core::Tm::new(
-                                Location::new(0, 0),
-                                core::TmData::Univ,
-                            )),
-                        },
-                    )),
-                    args: vec![],
-                },
-            )
-            .eval(arena, &self.tms, &Env::default())
-            .expect("could not evaluate standard library!"),
+            arena.alloc(
+                core::Tm::new(
+                    Location::new(0, 0),
+                    core::TmData::FunApp {
+                        head: Arc::new(core::Tm::new(
+                            Location::new(0, 0),
+                            core::TmData::FunForeignLit {
+                                args: vec![],
+                                body: Arc::new(core::library::read_ty),
+                                body_ty: Arc::new(core::Tm::new(
+                                    Location::new(0, 0),
+                                    core::TmData::Univ,
+                                )),
+                            },
+                        )),
+                        args: vec![],
+                    },
+                )
+                .eval(arena, &self.tms, &Env::default())
+                .expect("could not evaluate standard library!"),
+            ),
             arena,
         )
     }
@@ -426,9 +428,11 @@ fn elab_stmt<'a>(
             // now we evaluate the terms as best we can, in case we need them at the static stage (we probably will)
             let new_ctx = ctx.bind_def(
                 name.clone(),
-                ty,
-                ctm.eval(arena, &ctx.tms, &Env::default())
-                    .map_err(ElabError::from_eval_error)?,
+                arena.alloc(ty),
+                arena.alloc(
+                    ctm.eval(arena, &ctx.tms, &Env::default())
+                        .map_err(ElabError::from_eval_error)?,
+                ),
             );
 
             match rest {
@@ -525,9 +529,11 @@ fn elab_stmt_for_ctx<'a>(
             // now we evaluate the terms as best we can, in case we need them at the static stage (we probably will)
             let new_ctx = ctx.bind_def(
                 name.clone(),
-                ty,
-                ctm.eval(arena, &ctx.tms, &Env::default())
-                    .map_err(ElabError::from_eval_error)?,
+                arena.alloc(ty),
+                arena.alloc(
+                    ctm.eval(arena, &ctx.tms, &Env::default())
+                        .map_err(ElabError::from_eval_error)?,
+                ),
             );
 
             match rest {
@@ -556,7 +562,7 @@ fn elab_branch<'a>(
         BranchData::Bool { tm, stmt } => {
             let (ctm, ty) = infer_tm(arena, ctx, tm)?;
             // check that the type of the guard is Bool!
-            equate_ty(&tm.location, ty, &core::Val::BoolTy)?;
+            equate_ty(&tm.location, &ty, &core::Val::BoolTy)?;
 
             Ok(core::Branch::new(
                 branch.location.clone(),
@@ -575,7 +581,7 @@ fn elab_branch<'a>(
             let mut final_branches = vec![];
             for branch in branches {
                 let (core_branch, core_branch_ty) =
-                    infer_pattern_branch(arena, ctx, branch, core_ty)?;
+                    infer_pattern_branch(arena, ctx, branch, core_ty.clone())?;
 
                 // check that we can equate the branches
                 equate_ty(&branch.location, &core_branch_ty, &final_ty)?;
@@ -603,18 +609,18 @@ fn infer_pattern_branch<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
     branch: &'a PatternBranch,
-    ty: &'a core::Val<'a>,
+    ty: core::Val<'a>,
 ) -> Result<(core::PatternBranch<'a>, core::Val<'a>), ElabError> {
     // just check the type of the pattern itself
-    let (matcher, ty1, bind_tys) = infer_pattern(arena, ctx, &branch.data.pat, ty)?;
+    let (matcher, ty1, bind_tys) = infer_pattern(arena, ctx, &branch.data.pat, ty.clone())?;
     // make sure that it aligns with the type that you're putting in
-    equate_ty(&branch.data.pat.location, &ty1, ty)?;
+    equate_ty(&branch.data.pat.location, &ty1, &ty)?;
 
     let stmt = elab_stmt(
         arena,
         // bind everything from the pattern when elaborating the statement
-        &bind_tys.iter().fold(ctx.clone(), |ctx0, (name, val)| {
-            ctx0.bind_param(name.clone(), val, arena)
+        &bind_tys.into_iter().fold(ctx.clone(), |ctx0, (name, val)| {
+            ctx0.bind_param(name.clone(), arena.alloc(val), arena)
         }),
         &branch.data.stmt,
         &[],
@@ -633,12 +639,12 @@ fn infer_pattern<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
     pattern: &'a Pattern,
-    ty: &'a core::Val<'a>,
+    ty: core::Val<'a>,
 ) -> Result<
     (
         Arc<dyn core::matcher::Matcher<'a> + 'a>,
         core::Val<'a>,
-        Vec<(String, &'a core::Val<'a>)>,
+        Vec<(String, core::Val<'a>)>,
     ),
     ElabError,
 > {
@@ -647,7 +653,7 @@ fn infer_pattern<'a>(
             let (matcher, ty, binds) = infer_pattern(arena, ctx, pattern, ty)?;
 
             let mut new_binds = binds;
-            new_binds.push((name.clone(), arena.alloc(ty.clone())));
+            new_binds.push((name.clone(), ty.clone()));
 
             Ok((matcher, ty, new_binds))
         }
@@ -681,8 +687,8 @@ fn infer_pattern<'a>(
             // for each field, infer the pattern
             let (matcher, tys, names): (
                 Arc<dyn core::matcher::Matcher<'a> + 'a>,
-                Vec<CoreRecField<&'a core::Val>>,
-                Vec<(String, &core::Val)>,
+                Vec<CoreRecField<core::Val>>,
+                Vec<(String, core::Val)>,
             ) = fields.iter().try_fold(
                 (
                     Arc::new(core::matcher::Succeed {}) as Arc<dyn core::matcher::Matcher>,
@@ -690,12 +696,12 @@ fn infer_pattern<'a>(
                     vec![],
                 ),
                 |(acc, tys, names), field| {
-                    let (m1, ty1, names1) = infer_pattern(arena, ctx, &field.data, ty)?;
+                    let (m1, ty1, names1) = infer_pattern(arena, ctx, &field.data, ty.clone())?;
 
                     let mut tys1 = tys.clone();
                     tys1.push(CoreRecField::new(
                         arena.alloc(field.name.as_bytes().to_vec()),
-                        arena.alloc(ty1) as &core::Val<'a>,
+                        ty1 as core::Val<'a>,
                     ));
 
                     let names = names.iter().chain(&names1).cloned().collect::<Vec<_>>();
@@ -730,7 +736,9 @@ fn infer_pattern<'a>(
                         .map_err(ElabError::from_eval_error)?;
 
                     match cty {
-                        core::Val::ListTy { ty } => Ok((param.data.name.clone(), vtm, *ty)),
+                        core::Val::ListTy { ty } => {
+                            Ok((param.data.name.clone(), vtm, (*ty).clone()))
+                        }
                         _ => Err(ElabError::new(&param.location, "hello")),
                     }
                 })
@@ -747,12 +755,12 @@ fn infer_pattern<'a>(
             )?;
 
             let new_binds = params
-                .iter()
-                .map(|(name, _, ty)| (name.clone(), *ty))
+                .into_iter()
+                .map(|(name, _, ty)| (name.clone(), ty))
                 .chain(
                     named
                         .iter()
-                        .map(|name| (name.clone(), ty))
+                        .map(|name| (name.clone(), ty.clone()))
                         .collect::<Vec<_>>(),
                 )
                 .collect::<Vec<_>>();
@@ -765,7 +773,7 @@ fn infer_pattern<'a>(
                 core::Val::RecWithTy {
                     fields: vec![CoreRecField::new(
                         *arena.alloc(b"seq") as &[u8],
-                        arena.alloc(core::Val::StrTy),
+                        core::Val::StrTy,
                     )],
                 },
                 new_binds,
@@ -808,22 +816,22 @@ pub fn infer_tm<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
     tm: &'a Tm,
-) -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
+) -> Result<(core::Tm<'a>, core::Val<'a>), ElabError> {
     match &tm.data {
         TmData::BoolLit { b } => Ok((
             core::Tm::new(tm.location.clone(), core::TmData::BoolLit { b: *b }),
-            arena.alloc(core::Val::BoolTy),
+            core::Val::BoolTy,
         )),
         TmData::NumLit { n } => Ok((
             core::Tm::new(
                 tm.location.clone(),
                 core::TmData::NumLit { n: n.get_float() },
             ),
-            arena.alloc(core::Val::NumTy),
+            core::Val::NumTy,
         )),
         TmData::StrLit { regs } => Ok((
             elab_str_lit_regs(arena, ctx, &tm.location, &regs[..])?,
-            arena.alloc(core::Val::StrTy),
+            core::Val::StrTy,
         )),
         TmData::RecTy { fields } => Ok((
             core::Tm::new(
@@ -840,7 +848,7 @@ pub fn infer_tm<'a>(
                         .collect::<Result<Vec<_>, ElabError>>()?,
                 },
             ),
-            arena.alloc(core::Val::Univ),
+            core::Val::Univ,
         )),
         TmData::RecWithTy { fields } => Ok((
             core::Tm::new(
@@ -857,7 +865,7 @@ pub fn infer_tm<'a>(
                         .collect::<Result<Vec<_>, ElabError>>()?,
                 },
             ),
-            arena.alloc(core::Val::Univ),
+            core::Val::Univ,
         )),
         TmData::RecLit { fields } => {
             let mut tms = vec![];
@@ -869,13 +877,13 @@ pub fn infer_tm<'a>(
                 tms.push(CoreRecField::new(field.name.as_bytes(), tm));
                 tys.push(CoreRecField::new(
                     field.name.as_bytes(),
-                    arena.alloc(ty) as &core::Val<'a>,
+                    ty as core::Val<'a>,
                 ));
             }
 
             Ok((
                 core::Tm::new(tm.location.clone(), core::TmData::RecLit { fields: tms }),
-                arena.alloc(core::Val::RecTy { fields: tys }),
+                core::Val::RecTy { fields: tys },
             ))
         }
         TmData::RecProj { tm: head_tm, name } => {
@@ -892,7 +900,7 @@ pub fn infer_tm<'a>(
                                     name: name.as_bytes(),
                                 },
                             ),
-                            field.data,
+                            field.data.clone(),
                         )),
                         None => Err(ElabError::new_non_existent_field_access(&tm.location, name)),
                     }
@@ -912,7 +920,7 @@ pub fn infer_tm<'a>(
                     ty: Arc::new(check_tm(arena, ctx, tm, &core::Val::Univ)?),
                 },
             ),
-            arena.alloc(core::Val::Univ),
+            core::Val::Univ,
         )),
         TmData::ListLit { tms } => {
             // infer the type of each tm
@@ -936,9 +944,9 @@ pub fn infer_tm<'a>(
 
             Ok((
                 core::Tm::new(tm.location.clone(), core::TmData::ListLit { tms: core_tms }),
-                arena.alloc(core::Val::ListTy {
-                    ty: arena.alloc(inner_ty),
-                }),
+                core::Val::ListTy {
+                    ty: Arc::new(inner_ty),
+                },
             ))
         }
 
@@ -953,7 +961,7 @@ pub fn infer_tm<'a>(
                     body: Arc::new(check_tm(arena, ctx, body, &core::Val::Univ)?),
                 },
             ),
-            arena.alloc(core::Val::Univ),
+            core::Val::Univ,
         )),
         TmData::FunLit { args, body } => {
             // then, make sure each param has a type associated which is actually a type
@@ -985,7 +993,7 @@ pub fn infer_tm<'a>(
                         .eval(arena, &ctx.tms, &Env::default())
                         .map_err(ElabError::from_eval_error)?;
                     // bind it in the context
-                    Ok(ctx0.bind_param(name.clone(), val, arena))
+                    Ok(ctx0.bind_param(name.clone(), arena.alloc(val), arena))
                 })?;
 
             // then, get the type of the body
@@ -1034,7 +1042,7 @@ pub fn infer_tm<'a>(
                         .eval(arena, &ctx.tms, &Env::default())
                         .map_err(ElabError::from_eval_error)?;
                     // bind it in the context
-                    Ok(ctx0.bind_param(name.clone(), val, arena))
+                    Ok(ctx0.bind_param(name.clone(), arena.alloc(val), arena))
                 })?;
 
             // then, get the type of the body
@@ -1046,12 +1054,12 @@ pub fn infer_tm<'a>(
             let final_ty = if val.is_neutral() {
                 // if it's neutral, we throw it away - need to create a val that is just a function frome some arguments
                 // to a new val (which we expect to be concrete)
-                arena.alloc(core::Val::FunReturnTyAwaiting {
+                core::Val::FunReturnTyAwaiting {
                     data: core::FunData {
                         env: ctx.tms.clone(),
                         body: ty.clone(),
                     },
-                })
+                }
             } else {
                 // otherwise just send through whatever the value is
                 val
@@ -1067,10 +1075,10 @@ pub fn infer_tm<'a>(
                             .map_err(ElabError::from_eval_error)?,
                     },
                 ),
-                arena.alloc(core::Val::FunTy {
+                core::Val::FunTy {
                     args: arg_vals,
-                    body: final_ty,
-                }),
+                    body: Arc::new(final_ty),
+                },
             ))
         }
         TmData::FunApp { head, args } => {
@@ -1098,7 +1106,7 @@ pub fn infer_tm<'a>(
                         .iter()
                         .zip(args_ty)
                         .map(|(arg, arg_ty)| {
-                            let arg_tm = check_tm(arena, ctx, arg, arg_ty)?;
+                            let arg_tm = check_tm(arena, ctx, arg, &arg_ty)?;
                             Ok(arg_tm)
                         })
                         .collect::<Result<Vec<_>, _>>()?;
@@ -1111,7 +1119,7 @@ pub fn infer_tm<'a>(
                                 args: arg_tms,
                             },
                         ),
-                        body_ty,
+                        body_ty.as_ref().clone(),
                     ))
                 }
                 core::Val::FunTy {
@@ -1138,13 +1146,13 @@ pub fn infer_tm<'a>(
                         .iter()
                         .zip(args_ty)
                         .map(|(arg, arg_ty)| {
-                            let arg_tm = check_tm(arena, ctx, arg, arg_ty)?;
+                            let arg_tm = check_tm(arena, ctx, arg, &arg_ty)?;
                             Ok(arg_tm)
                         })
                         .collect::<Result<Vec<_>, _>>()?;
 
                     // check if the return type needs to be evaluated
-                    let body_ty = match body {
+                    let body_ty = match body.as_ref() {
                         core::Val::FunReturnTyAwaiting { data } => {
                             let arg_vals = arg_tms
                                 .iter()
@@ -1154,12 +1162,12 @@ pub fn infer_tm<'a>(
 
                             // apply the function to get the concrete type out
                             let ty_val = data
-                                .app(arena, &arg_vals)
+                                .app(arena, arg_vals)
                                 .map_err(ElabError::from_eval_error)?;
 
                             ty_val
                         }
-                        _ => body,
+                        _ => body.as_ref().clone(),
                     };
 
                     Ok((
@@ -1186,7 +1194,7 @@ pub fn infer_tm<'a>(
         TmData::Name { name } => match ctx.lookup(name.clone()) {
             Some((index, ty)) => Ok((
                 core::Tm::new(tm.location.clone(), core::TmData::Var { index }),
-                ty,
+                ty.clone(),
             )),
             None => Err(ElabError::new_unbound_name(&tm.location, name)),
         },
@@ -1210,11 +1218,11 @@ fn infer_bin_op<'a>(
     location: &Location,
     tm0: &'a Tm,
     tm1: &'a Tm,
-) -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
+) -> Result<(core::Tm<'a>, core::Val<'a>), ElabError> {
     let non_parametric_operator = |ty0: &core::Val<'a>,
                                    ty1: &core::Val<'a>,
                                    name: &str|
-     -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
+     -> Result<(core::Tm<'a>, core::Val<'a>), ElabError> {
         let ctm0 = check_tm(arena, ctx, tm0, ty0)?;
         let ctm1 = check_tm(arena, ctx, tm1, ty1)?;
 
@@ -1231,7 +1239,7 @@ fn infer_bin_op<'a>(
                             args: vec![ctm0, ctm1],
                         },
                     ),
-                    body,
+                    (*body).as_ref().clone(),
                 )),
 
                 _ => panic!("operator has non-function type?!"),
@@ -1290,9 +1298,9 @@ fn infer_un_op<'a>(
     ctx: &Context<'a>,
     location: &Location,
     tm: &'a Tm,
-) -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
+) -> Result<(core::Tm<'a>, core::Val<'a>), ElabError> {
     let non_parametric_operator =
-        |ty0: &core::Val<'a>, name: &str| -> Result<(core::Tm<'a>, &'a core::Val<'a>), ElabError> {
+        |ty0: &core::Val<'a>, name: &str| -> Result<(core::Tm<'a>, core::Val<'a>), ElabError> {
             let ctm0 = check_tm(arena, ctx, tm, ty0)?;
 
             match ctx.lookup(name.to_string()) {
@@ -1307,7 +1315,7 @@ fn infer_un_op<'a>(
                             args: vec![ctm0],
                         },
                     ),
-                    ty,
+                    ty.clone(),
                 )),
                 None => Err(ElabError::new_unbound_name(location, name)),
             }
@@ -1331,7 +1339,7 @@ fn infer_un_op<'a>(
                                 args: vec![ctm0],
                             },
                         ),
-                        ty,
+                        ty.clone(),
                     )),
                     None => Err(ElabError::new_unbound_name(location, "unary_minus")),
                 },
@@ -1347,7 +1355,7 @@ fn infer_un_op<'a>(
                                 args: vec![ctm0],
                             },
                         ),
-                        ty,
+                        ty.clone(),
                     )),
                     None => Err(ElabError::new_unbound_name(
                         location,
@@ -1392,11 +1400,8 @@ fn elab_str_lit_regs<'a>(
                                 },
                             )),
                             &core::Val::FunTy {
-                                args: vec![
-                                    arena.alloc(core::Val::StrTy),
-                                    arena.alloc(core::Val::StrTy),
-                                ],
-                                body: arena.alloc(core::Val::StrTy),
+                                args: vec![core::Val::StrTy, core::Val::StrTy],
+                                body: Arc::new(core::Val::StrTy),
                             },
                         )?),
                         args: vec![
@@ -1443,8 +1448,8 @@ fn elab_str_lit_reg<'a>(
                             },
                         )),
                         &core::Val::FunTy {
-                            args: vec![arena.alloc(core::Val::AnyTy)],
-                            body: arena.alloc(core::Val::StrTy),
+                            args: vec![core::Val::AnyTy],
+                            body: Arc::new(core::Val::StrTy),
                         },
                     )?),
                     args: vec![check_tm(arena, ctx, tm, &core::Val::AnyTy)?],

@@ -34,7 +34,11 @@ pub fn standard_library<'a>(arena: &'a Arena) -> Context<'a> {
                 .alloc(core::Tm::new(Location::new(0, 0), tm.clone()))
                 .eval(arena, &ctx.tms, &Env::default())?;
 
-            Ok::<Context, EvalError>(ctx.bind_def(name.to_string(), ty1, tm1))
+            Ok::<Context, EvalError>(ctx.bind_def(
+                name.to_string(),
+                arena.alloc(ty1),
+                arena.alloc(tm1),
+            ))
         })
         .expect("could not evaluate standard library!");
 
@@ -46,7 +50,7 @@ pub fn foreign<'a>(
     name: &str,
 ) -> Result<
     Arc<
-        dyn for<'b> Fn(&'b Arena, &Location, &[&'b Val<'b>]) -> Result<&'b Val<'b>, EvalError>
+        dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>
             + Send
             + Sync,
     >,
@@ -108,10 +112,10 @@ pub fn foreign<'a>(
 pub fn binary_plus<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Num { n: n0 + n1 })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Num { n: n0 + n1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -123,10 +127,10 @@ pub fn binary_plus<'a>(
 pub fn binary_times<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Num { n: n0 * n1 })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Num { n: n0 * n1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -138,10 +142,10 @@ pub fn binary_times<'a>(
 pub fn binary_division<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Num { n: n0 / n1 })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Num { n: n0 / n1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -153,10 +157,10 @@ pub fn binary_division<'a>(
 pub fn binary_modulo<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Num { n: n0 % n1 })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Num { n: n0 % n1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -168,10 +172,10 @@ pub fn binary_modulo<'a>(
 pub fn binary_exponent<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Num { n: n0.powf(*n1) })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Num { n: n0.powf(*n1) }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -183,10 +187,10 @@ pub fn binary_exponent<'a>(
 pub fn binary_minus<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Num { n: n0 - n1 })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Num { n: n0 - n1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -198,12 +202,12 @@ pub fn binary_minus<'a>(
 pub fn binary_equal<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [v0, v1] => Ok(arena.alloc(Val::Bool {
+        [v0, v1] => Ok(Val::Bool {
             b: v0.eq(arena, v1),
-        })),
+        }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -215,12 +219,12 @@ pub fn binary_equal<'a>(
 pub fn binary_not_equal<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [v0, v1] => Ok(arena.alloc(Val::Bool {
+        [v0, v1] => Ok(Val::Bool {
             b: !v0.eq(arena, v1),
-        })),
+        }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -232,10 +236,10 @@ pub fn binary_not_equal<'a>(
 pub fn binary_less_than<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Bool { b: n0 < n1 })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Bool { b: n0 < n1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -247,10 +251,10 @@ pub fn binary_less_than<'a>(
 pub fn binary_greater_than<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Bool { b: n0 > n1 })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Bool { b: n0 > n1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -262,10 +266,10 @@ pub fn binary_greater_than<'a>(
 pub fn binary_less_than_or_equal<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Bool { b: n0 <= n1 })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Bool { b: n0 <= n1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -277,10 +281,10 @@ pub fn binary_less_than_or_equal<'a>(
 pub fn binary_greater_than_or_equal<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(arena.alloc(Val::Bool { b: n0 >= n1 })),
+        [Val::Num { n: n0 }, Val::Num { n: n1 }] => Ok(Val::Bool { b: n0 >= n1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -292,10 +296,10 @@ pub fn binary_greater_than_or_equal<'a>(
 pub fn binary_and<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Bool { b: b0 }, Val::Bool { b: b1 }] => Ok(arena.alloc(Val::Bool { b: *b0 && *b1 })),
+        [Val::Bool { b: b0 }, Val::Bool { b: b1 }] => Ok(Val::Bool { b: *b0 && *b1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -307,10 +311,10 @@ pub fn binary_and<'a>(
 pub fn binary_or<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Bool { b: b0 }, Val::Bool { b: b1 }] => Ok(arena.alloc(Val::Bool { b: *b0 || *b1 })),
+        [Val::Bool { b: b0 }, Val::Bool { b: b1 }] => Ok(Val::Bool { b: *b0 || *b1 }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -322,10 +326,10 @@ pub fn binary_or<'a>(
 pub fn unary_minus<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Num { n }] => Ok(arena.alloc(Val::Num { n: -n })),
+        [Val::Num { n }] => Ok(Val::Num { n: -n }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -337,12 +341,12 @@ pub fn unary_minus<'a>(
 pub fn unary_reverse_complement<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }] => Ok(arena.alloc(Val::Str {
+        [Val::Str { s }] => Ok(Val::Str {
             s: arena.alloc(util::rev_comp(s)),
-        })),
+        }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -354,25 +358,25 @@ pub fn unary_reverse_complement<'a>(
 pub fn read_ty<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [] => Ok(arena.alloc(Val::RecTy {
+        [] => Ok(Val::RecTy {
             fields: vec![
                 CoreRecField {
                     name: b"seq",
-                    data: arena.alloc(Val::StrTy),
+                    data: Val::StrTy,
                 },
                 CoreRecField {
                     name: b"id",
-                    data: arena.alloc(Val::StrTy),
+                    data: Val::StrTy,
                 },
                 CoreRecField {
                     name: b"desc",
-                    data: arena.alloc(Val::StrTy),
+                    data: Val::StrTy,
                 },
             ],
-        })),
+        }),
         _ => Err(EvalError::new(
             &location,
             "bad arguments given to function?!",
@@ -383,10 +387,10 @@ pub fn read_ty<'a>(
 pub fn len<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }] => Ok(arena.alloc(Val::Num { n: s.len() as f32 })),
+        [Val::Str { s }] => Ok(Val::Num { n: s.len() as f32 }),
         _ => Err(EvalError::new(
             &location,
             "bad arguments given to function?!",
@@ -397,12 +401,12 @@ pub fn len<'a>(
 pub fn slice<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }, Val::Num { n: start }, Val::Num { n: end }] => Ok(arena.alloc(Val::Str {
+        [Val::Str { s }, Val::Num { n: start }, Val::Num { n: end }] => Ok(Val::Str {
             s: &s[start.round() as usize..end.round() as usize],
-        })),
+        }),
         _ => Err(EvalError::new(
             &location,
             "bad arguments given to function?!",
@@ -413,8 +417,8 @@ pub fn slice<'a>(
 pub fn tag<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Rec(rec), Val::Str { s }] => {
             let desc = rec
@@ -422,7 +426,7 @@ pub fn tag<'a>(
                 .expect("record with no desc given to tag?!");
 
             match desc {
-                Val::Str { s: old_s } => Ok(arena.alloc(Val::Rec(
+                Val::Str { s: old_s } => Ok(Val::Rec(
                     arena.alloc(
                         rec.with(
                             b"desc",
@@ -438,7 +442,7 @@ pub fn tag<'a>(
                             arena,
                         ),
                     ),
-                ))),
+                )),
                 _ => panic!("record desc was not string type?!"),
             }
         }
@@ -452,12 +456,12 @@ pub fn tag<'a>(
 pub fn translate<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }] => Ok(arena.alloc(Val::Str {
+        [Val::Str { s }] => Ok(Val::Str {
             s: arena.alloc(util::translate(s)).as_bytes(),
-        })),
+        }),
         _ => Err(EvalError::new(
             location,
             "bad arguments given to function?!",
@@ -468,8 +472,8 @@ pub fn translate<'a>(
 pub fn concat<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Rec(read0), Val::Rec(read1)] => {
             // Get sequences from both structs
@@ -505,11 +509,12 @@ pub fn concat<'a>(
                         s: arena.alloc(qual0.iter().chain(*qual1).cloned().collect::<Vec<_>>()),
                     });
 
-                    Ok(arena.alloc(Val::Rec(arena.alloc(
-                        read1.with_all(&[(b"seq", new_seq), (b"qual", new_qual)], arena),
+                    Ok(Val::Rec(arena.alloc(read1.with_all(
+                        &[(b"seq", new_seq), (b"qual", new_qual)],
+                        arena,
                     ))))
                 }
-                _ => Ok(arena.alloc(Val::Rec(arena.alloc(read1.with(b"seq", new_seq, arena))))),
+                _ => Ok(Val::Rec(arena.alloc(read1.with(b"seq", new_seq, arena)))),
             }
         }
 
@@ -522,12 +527,12 @@ pub fn concat<'a>(
 pub fn str_concat<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s: s0 }, Val::Str { s: s1 }] => Ok(arena.alloc(Val::Str {
+        [Val::Str { s: s0 }, Val::Str { s: s1 }] => Ok(Val::Str {
             s: &arena.alloc((*s0).iter().chain(*s1).cloned().collect::<Vec<_>>())[..],
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,
@@ -539,8 +544,8 @@ pub fn str_concat<'a>(
 pub fn csv_ty<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     println!("going in with {}", vtms.iter().join(", "));
 
     match vtms {
@@ -561,12 +566,12 @@ pub fn csv_ty<'a>(
 
             let fields = field_names
                 .iter()
-                .map(|name| CoreRecField::new(*name, arena.alloc(Val::StrTy) as &Val))
+                .map(|name| CoreRecField::new(*name, Val::StrTy))
                 .collect::<Vec<_>>();
 
-            Ok(arena.alloc(Val::ListTy {
-                ty: arena.alloc(Val::RecTy { fields }),
-            }))
+            Ok(Val::ListTy {
+                ty: Arc::new(Val::RecTy { fields }),
+            })
         }
 
         _ => Err(EvalError::new(
@@ -582,8 +587,8 @@ pub fn csv_ty<'a>(
 pub fn csv<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
@@ -603,8 +608,8 @@ pub fn csv<'a>(
             let structs: Vec<_> = rdr
                 .records()
                 .map(|r| {
-                    r.map(|sr| -> &Val<'_> {
-                        arena.alloc(Val::Rec(arena.alloc(ConcreteRec {
+                    r.map(|sr| -> Val<'_> {
+                        Val::Rec(arena.alloc(ConcreteRec {
                             map: HashMap::from_iter(sr.into_iter().enumerate().map(|(i, s)| {
                                 let field: &[u8] = field_names.get(i).unwrap();
                                 let val: &Val = arena.alloc(Val::Str {
@@ -613,13 +618,13 @@ pub fn csv<'a>(
 
                                 (field, val)
                             })),
-                        })))
+                        }))
                     })
                 })
                 .try_collect()
                 .map_err(|_| EvalError::new(location, "couldn't open file"))?;
 
-            Ok(arena.alloc(Val::List { v: structs }))
+            Ok(Val::List { v: structs })
         }
 
         _ => Err(EvalError::new(
@@ -632,8 +637,8 @@ pub fn csv<'a>(
 pub fn tsv_ty<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
@@ -653,12 +658,12 @@ pub fn tsv_ty<'a>(
 
             let fields = field_names
                 .iter()
-                .map(|name| CoreRecField::new(*name, arena.alloc(Val::StrTy) as &Val))
+                .map(|name| CoreRecField::new(*name, Val::StrTy))
                 .collect::<Vec<_>>();
 
-            Ok(arena.alloc(Val::ListTy {
-                ty: arena.alloc(Val::RecTy { fields }),
-            }))
+            Ok(Val::ListTy {
+                ty: Arc::new(Val::RecTy { fields }),
+            })
         }
 
         _ => Err(EvalError::new(
@@ -671,8 +676,8 @@ pub fn tsv_ty<'a>(
 pub fn tsv<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
@@ -693,8 +698,8 @@ pub fn tsv<'a>(
             let structs: Vec<_> = rdr
                 .records()
                 .map(|r| {
-                    r.map(|sr| -> &Val<'_> {
-                        arena.alloc(Val::Rec(arena.alloc(ConcreteRec {
+                    r.map(|sr| -> Val<'_> {
+                        Val::Rec(arena.alloc(ConcreteRec {
                             map: HashMap::from_iter(sr.into_iter().enumerate().map(|(i, s)| {
                                 let field: &[u8] = field_names.get(i).unwrap();
                                 let val: &Val = arena.alloc(Val::Str {
@@ -703,13 +708,13 @@ pub fn tsv<'a>(
 
                                 (field, val)
                             })),
-                        })))
+                        }))
                     })
                 })
                 .try_collect()
                 .map_err(|_| EvalError::new(location, "couldn't open file"))?;
 
-            Ok(arena.alloc(Val::List { v: structs }))
+            Ok(Val::List { v: structs })
         }
 
         _ => Err(EvalError::new(
@@ -722,8 +727,8 @@ pub fn tsv<'a>(
 pub fn fasta<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: filename }] => {
             let f =
@@ -749,13 +754,13 @@ pub fn fasta<'a>(
                             ),
                         ]);
 
-                        v.push(arena.alloc(Val::Rec(arena.alloc(ConcreteRec { map }))) as &Val);
+                        v.push(Val::Rec(arena.alloc(ConcreteRec { map })));
                     }
                     Err(_) => panic!("bad read in fasta"),
                 }
             }
 
-            Ok(arena.alloc(Val::List { v }))
+            Ok(Val::List { v })
         }
 
         _ => Err(EvalError::new(
@@ -768,10 +773,10 @@ pub fn fasta<'a>(
 pub fn find_first<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s: s1 }, Val::Str { s: s2 }] => Ok(arena.alloc(Val::Num {
+        [Val::Str { s: s1 }, Val::Str { s: s2 }] => Ok(Val::Num {
             n: match String::from_utf8((*s1).to_vec())
                 .unwrap()
                 .find(&String::from_utf8((*s2).to_vec()).unwrap())
@@ -779,7 +784,7 @@ pub fn find_first<'a>(
                 Some(i) => i as f32,
                 None => -1.0,
             },
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,
@@ -791,10 +796,10 @@ pub fn find_first<'a>(
 pub fn find_last<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s: s1 }, Val::Str { s: s2 }] => Ok(arena.alloc(Val::Num {
+        [Val::Str { s: s1 }, Val::Str { s: s2 }] => Ok(Val::Num {
             n: match String::from_utf8((*s1).to_vec())
                 .unwrap()
                 .rfind(&String::from_utf8((*s2).to_vec()).unwrap())
@@ -802,7 +807,7 @@ pub fn find_last<'a>(
                 Some(i) => i as f32,
                 None => -1.0,
             },
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,
@@ -814,12 +819,12 @@ pub fn find_last<'a>(
 pub fn to_upper<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }] => Ok(arena.alloc(Val::Str {
+        [Val::Str { s }] => Ok(Val::Str {
             s: arena.alloc(s.to_ascii_uppercase().to_vec()),
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,
@@ -831,12 +836,12 @@ pub fn to_upper<'a>(
 pub fn to_lower<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }] => Ok(arena.alloc(Val::Str {
+        [Val::Str { s }] => Ok(Val::Str {
             s: arena.alloc(s.to_ascii_lowercase().to_vec()),
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,
@@ -848,8 +853,8 @@ pub fn to_lower<'a>(
 pub fn describe<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Rec(read), Val::Rec(search_terms), Val::Num { n: error_rate }] => {
             if let Val::Str { s: read_seq } = read
@@ -904,7 +909,7 @@ pub fn describe<'a>(
                     .join(" _ ");
 
                 // allocate the description
-                Ok(arena.alloc(Val::Str {
+                Ok(Val::Str {
                     s: arena
                         .alloc(if description.is_empty() {
                             String::from("[ _ ]")
@@ -912,7 +917,7 @@ pub fn describe<'a>(
                             format!("[ _ {description} _ ]")
                         })
                         .as_bytes(),
-                }))
+                })
             } else {
                 Err(EvalError::new(
                     location,
@@ -931,18 +936,18 @@ pub fn describe<'a>(
 pub fn contains<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::List { v }, v0] => {
             // look for the query value in the list
             for v1 in v {
                 if v1.eq(arena, v0) {
                     // if you find it, return early
-                    return Ok(arena.alloc(Val::Bool { b: true }));
+                    return Ok(Val::Bool { b: true });
                 }
             }
-            Ok(arena.alloc(Val::Bool { b: false }))
+            Ok(Val::Bool { b: false })
         }
 
         _ => Err(EvalError::new(
@@ -955,12 +960,12 @@ pub fn contains<'a>(
 pub fn distance<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: s0 }, Val::Str { s: s1 }] => {
             let distance = bio::alignment::distance::levenshtein(s0, s1);
-            Ok(arena.alloc(Val::Num { n: distance as f32 }))
+            Ok(Val::Num { n: distance as f32 })
         }
 
         _ => Err(EvalError::new(
@@ -973,15 +978,15 @@ pub fn distance<'a>(
 pub fn to_str<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         // string types pass straight through to reduce allocations
-        [v @ Val::Str { .. }] => Ok(v),
+        [v @ Val::Str { .. }] => Ok(v.clone()),
         // all else is turned into a string and then allocated
-        [v] => Ok(arena.alloc(Val::Str {
+        [v] => Ok(Val::Str {
             s: arena.alloc(v.to_string()).as_bytes(),
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,
@@ -993,11 +998,11 @@ pub fn to_str<'a>(
 pub fn stdout_eff<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         // string types pass straight through to reduce allocations
-        [v] => Ok(arena.alloc(Val::Effect {
+        [v] => Ok(Val::Effect {
             val: make_portable(arena, v),
             handler: PortableVal::Rec {
                 fields: HashMap::from([(
@@ -1007,7 +1012,7 @@ pub fn stdout_eff<'a>(
                     },
                 )]),
             },
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,
@@ -1019,11 +1024,11 @@ pub fn stdout_eff<'a>(
 pub fn count_eff<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
         // string types pass straight through to reduce allocations
-        [v] => Ok(arena.alloc(Val::Effect {
+        [v] => Ok(Val::Effect {
             val: make_portable(arena, v),
             handler: PortableVal::Rec {
                 fields: HashMap::from([(
@@ -1033,7 +1038,7 @@ pub fn count_eff<'a>(
                     },
                 )]),
             },
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,
@@ -1045,10 +1050,10 @@ pub fn count_eff<'a>(
 pub fn out_eff<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [v, filename @ Val::Str { .. }] => Ok(arena.alloc(Val::Effect {
+        [v, filename @ Val::Str { .. }] => Ok(Val::Effect {
             val: make_portable(arena, v),
             handler: PortableVal::Rec {
                 fields: HashMap::from([
@@ -1061,7 +1066,7 @@ pub fn out_eff<'a>(
                     (b"filename".to_vec(), make_portable(arena, filename)),
                 ]),
             },
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,
@@ -1073,10 +1078,10 @@ pub fn out_eff<'a>(
 pub fn average_eff<'a>(
     arena: &'a Arena,
     location: &Location,
-    vtms: &[&'a Val<'a>],
-) -> Result<&'a Val<'a>, EvalError> {
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [v] => Ok(arena.alloc(Val::Effect {
+        [v] => Ok(Val::Effect {
             val: make_portable(arena, v),
             handler: PortableVal::Rec {
                 fields: HashMap::from([(
@@ -1086,7 +1091,7 @@ pub fn average_eff<'a>(
                     },
                 )]),
             },
-        })),
+        }),
 
         _ => Err(EvalError::new(
             &location,

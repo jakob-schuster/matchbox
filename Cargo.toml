@@ -17,3 +17,6 @@ flate2 = { version = "*", features = ["zlib-ng"] }
 
 [dev-dependencies]
 insta = { version = "1.42.0", features = ["yaml"] }
+
+[profile.release]
+debug = true

@@ -229,7 +229,7 @@ pub fn read_fq<'p, 'a: 'p>(
         match record {
             Ok(read) => {
                 let arena = Arena::new();
-                let val = arena.alloc(core::Val::Rec(arena.alloc(rec::FastqRead { read })));
+                let val = arena.alloc(core::Val::Rec(arena.alloc(rec::FastqRead { read: &read })));
                 let effects = prog.eval(&arena, env, val);
 
                 for effect in &effects.expect("") {

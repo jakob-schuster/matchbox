@@ -108,20 +108,18 @@ pub struct FastaRead<'a> {
     pub read: &'a bio::io::fasta::Record,
 }
 
-impl<'p, 'b> Rec<'p> for FastaRead<'b> {
+impl<'p> Rec<'p> for FastaRead<'p> {
     fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError>
     where
         'p: 'a,
     {
         match key {
-            b"seq" => Ok(arena.alloc(Val::Str {
-                s: arena.alloc(self.read.seq().to_vec()),
-            })),
+            b"seq" => Ok(arena.alloc(Val::Str { s: self.read.seq() })),
             b"id" => Ok(arena.alloc(Val::Str {
-                s: arena.alloc(self.read.id().as_bytes().to_vec()),
+                s: self.read.id().as_bytes(),
             })),
             b"desc" => Ok(arena.alloc(Val::Str {
-                s: arena.alloc(self.read.desc().unwrap_or_default().as_bytes().to_vec()),
+                s: self.read.desc().unwrap_or_default().as_bytes(),
             })),
 
             _ => Err(InternalError {
@@ -154,27 +152,25 @@ impl<'a> Display for FastaRead<'a> {
     }
 }
 
-pub struct FastqRead {
-    pub read: bio::io::fastq::Record,
+pub struct FastqRead<'a> {
+    pub read: &'a bio::io::fastq::Record,
 }
 
-impl<'p> Rec<'p> for FastqRead {
+impl<'p> Rec<'p> for FastqRead<'p> {
     fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<&'a Val<'a>, InternalError>
     where
         'p: 'a,
     {
         match key {
-            b"seq" => Ok(arena.alloc(Val::Str {
-                s: arena.alloc(self.read.seq().to_vec()),
-            })),
+            b"seq" => Ok(arena.alloc(Val::Str { s: self.read.seq() })),
             b"id" => Ok(arena.alloc(Val::Str {
-                s: arena.alloc(self.read.id().as_bytes().to_vec()),
+                s: self.read.id().as_bytes(),
             })),
             b"desc" => Ok(arena.alloc(Val::Str {
-                s: arena.alloc(self.read.desc().unwrap_or_default().as_bytes().to_vec()),
+                s: self.read.desc().unwrap_or_default().as_bytes(),
             })),
             b"qual" => Ok(arena.alloc(Val::Str {
-                s: arena.alloc(self.read.desc().unwrap_or_default().as_bytes().to_vec()),
+                s: self.read.desc().unwrap_or_default().as_bytes(),
             })),
 
             _ => Err(InternalError {
@@ -198,7 +194,7 @@ impl<'p> Rec<'p> for FastqRead {
     }
 }
 
-impl Display for FastqRead {
+impl<'a> Display for FastqRead<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         todo!()
     }

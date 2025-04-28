@@ -16,7 +16,7 @@ pub trait Matcher<'p>: Send + Sync {
         &self,
         arena: &'a Arena,
         env: &Env<Val<'a>>,
-        val: &'a Val<'a>,
+        val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a;
@@ -31,7 +31,7 @@ impl<'p> Matcher<'p> for Chain<'p> {
         &self,
         arena: &'a Arena,
         env: &Env<Val<'a>>,
-        val: &'a Val<'a>,
+        val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
@@ -53,13 +53,13 @@ impl<'p> Matcher<'p> for FieldAccess<'p> {
         &self,
         arena: &'a Arena,
         env: &Env<Val<'a>>,
-        val: &'a Val<'a>,
+        val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
         match val {
-            Val::Rec(rec) => match rec.get(self.name.as_bytes(), arena) {
+            Val::Rec { rec } => match rec.get(self.name.as_bytes(), arena) {
                 Ok(field) => self.inner.evaluate(arena, env, &field),
                 // such errors are actually OK when pattern matching,
                 // just means the pattern didn't match!
@@ -76,7 +76,7 @@ impl<'p> Matcher<'p> for Succeed {
         &self,
         arena: &'a Arena,
         env: &Env<Val<'a>>,
-        val: &'a Val<'a>,
+        val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
@@ -92,7 +92,7 @@ impl<'p> Matcher<'p> for Bind {
         &self,
         arena: &'a Arena,
         env: &Env<Val<'a>>,
-        val: &'a Val<'a>,
+        val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
@@ -116,7 +116,7 @@ impl<'p> Matcher<'p> for Equal<'p> {
         &self,
         arena: &'a Arena,
         env: &Env<Val<'a>>,
-        val: &'a Val<'a>,
+        val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,

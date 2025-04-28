@@ -6,7 +6,7 @@ use matcher::Matcher;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rec::{ConcreteRec, FastaRead, Rec};
 
-use crate::util::{self, Arena, CoreRecField, Env, Located, Location, RecField};
+use crate::util::{self, Arena, Cache, CoreRecField, Env, Located, Location, RecField};
 
 pub mod library;
 pub mod matcher;
@@ -40,6 +40,40 @@ pub struct ProgData<'p> {
     pub stmt: Stmt<'p>,
 }
 
+impl<'p> Prog<'p> {
+    pub fn eval<'a>(
+        &self,
+        arena: &'a Arena,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        read: Val<'a>,
+    ) -> Result<Vec<Effect>, EvalError>
+    where
+        'p: 'a,
+    {
+        self.data
+            .stmt
+            .eval(arena, env, cache, &Env::default().with(read.clone()))
+    }
+
+    pub fn cache<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+    ) -> Result<(Prog<'p>, Cache<Val<'a>>), EvalError>
+    where
+        'p: 'a,
+    {
+        // start with an empty cache and local env
+        let (stmt, cache) =
+            self.data
+                .stmt
+                .cache(arena, global_env, &Cache::default(), &Env::default())?;
+
+        Ok((Prog::new(self.location.clone(), ProgData { stmt }), cache))
+    }
+}
+
 pub type Stmt<'p> = Located<StmtData<'p>>;
 #[derive(Clone)]
 pub enum StmtData<'p> {
@@ -58,6 +92,145 @@ pub enum StmtData<'p> {
     End,
 }
 
+impl<'p> Stmt<'p> {
+    pub fn eval<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        env: &Env<Val<'a>>,
+    ) -> Result<Vec<Effect>, EvalError>
+    where
+        'p: 'a,
+    {
+        match &self.data {
+            StmtData::Let { tm, next } => {
+                // evaluate the term
+                let val = tm.eval(arena, global_env, cache, env)?;
+                // and then evaluate the statement with that binding
+                next.eval(arena, global_env, cache, &env.with(val))
+            }
+            StmtData::Tm { tm, next } => {
+                let val = tm.eval(arena, global_env, cache, env)?;
+
+                match val {
+                    Val::Effect { val, handler } => {
+                        // export the values to be portable
+                        Ok([Effect {
+                            val: val.clone(),
+                            handler: handler.clone(),
+                        }]
+                        .into_iter()
+                        .chain(next.eval(arena, global_env, cache, env)?)
+                        .collect::<Vec<_>>())
+                    }
+                    _ => panic!("type error in statement-level effect, found {}?!", val),
+                }
+            }
+            StmtData::If { branches, next } => {
+                // return the results of the first successful branch
+                let get_first_branch_results = || {
+                    for branch in branches {
+                        if let Some(vec) = branch.eval(arena, global_env, cache, env)? {
+                            return Ok(vec);
+                        }
+                    }
+
+                    Ok(vec![])
+                };
+
+                // and then chain on the rest of the results after this statement
+                Ok(get_first_branch_results()?
+                    .into_iter()
+                    .chain(next.eval(arena, global_env, cache, env)?)
+                    .collect::<Vec<_>>())
+            }
+            StmtData::End => Ok(vec![]),
+        }
+    }
+
+    fn cache<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'a>>,
+        env: &Env<Val<'a>>,
+    ) -> Result<(Stmt<'p>, Cache<Val<'a>>), EvalError>
+    where
+        'p: 'a,
+    {
+        match &self.data {
+            StmtData::Let { tm, next } => {
+                // evaluate the term (with no cache, as this is before caching anyway)
+                let val = tm.eval(arena, global_env, &Cache::default(), env)?;
+                // and also cache the term
+                let (tm, cache) = tm.cache(arena, global_env, cache, env)?;
+                // and then evaluate the statement with that binding
+                let (stmt, cache) = next.cache(arena, global_env, &cache, &env.with(val))?;
+
+                Ok((
+                    Stmt::new(
+                        self.location.clone(),
+                        StmtData::Let {
+                            tm,
+                            next: Arc::new(stmt),
+                        },
+                    ),
+                    cache,
+                ))
+            }
+            StmtData::Tm { tm, next } => {
+                let (tm, cache) = tm.cache(arena, global_env, cache, env)?;
+                let (stmt, cache) = next.cache(arena, global_env, &cache, env)?;
+
+                Ok((
+                    Stmt::new(
+                        self.location.clone(),
+                        StmtData::Tm {
+                            tm,
+                            next: Arc::new(stmt),
+                        },
+                    ),
+                    cache,
+                ))
+            }
+            StmtData::If { branches, next } => {
+                let (branches, cache) = branches.iter().try_fold(
+                    (vec![], cache.clone()),
+                    |(branches0, cache0), branch| {
+                        let (branch, cache) = branch.cache(arena, global_env, &cache0, env)?;
+
+                        Ok((
+                            branches0
+                                .into_iter()
+                                .chain([branch].iter().cloned())
+                                .collect::<Vec<_>>(),
+                            cache,
+                        ))
+                    },
+                )?;
+
+                let (stmt, cache) = next.cache(arena, global_env, &cache, env)?;
+
+                Ok((
+                    Stmt::new(
+                        self.location.clone(),
+                        StmtData::If {
+                            branches,
+                            next: Arc::new(stmt),
+                        },
+                    ),
+                    cache,
+                ))
+            }
+            StmtData::End => Ok((
+                Stmt::new(self.location.clone(), StmtData::End),
+                cache.clone(),
+            )),
+        }
+    }
+}
+
 pub type Branch<'p> = Located<BranchData<'p>>;
 #[derive(Clone)]
 pub enum BranchData<'p> {
@@ -72,102 +245,21 @@ pub enum BranchData<'p> {
     },
 }
 
-pub type PatternBranch<'p> = Located<PatternBranchData<'p>>;
-#[derive(Clone)]
-pub struct PatternBranchData<'p> {
-    pub matcher: Arc<dyn Matcher<'p> + 'p>,
-    pub stmt: Stmt<'p>,
-}
-
-impl<'p> Prog<'p> {
-    pub fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<&'p Val<'p>>,
-        read: Val<'a>,
-    ) -> Result<Vec<Effect>, EvalError>
-    where
-        'p: 'a,
-    {
-        self.data
-            .stmt
-            .eval(arena, env, &Env::default().with(read.clone()))
-    }
-}
-
-impl<'p> Stmt<'p> {
-    pub fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        global_env: &Env<&'p Val<'p>>,
-        env: &Env<Val<'a>>,
-    ) -> Result<Vec<Effect>, EvalError>
-    where
-        'p: 'a,
-    {
-        match &self.data {
-            StmtData::Let { tm, next } => {
-                // evaluate the term
-                let val = tm.eval(arena, global_env, env)?;
-                // and then evaluate the statement with that binding
-                next.eval(arena, global_env, &env.with(val))
-            }
-            StmtData::Tm { tm, next } => {
-                let val = tm.eval(arena, global_env, env)?;
-
-                return Ok(vec![]);
-
-                match val {
-                    Val::Effect { val, handler } => {
-                        // export the values to be portable
-                        Ok([Effect {
-                            val: val.clone(),
-                            handler: handler.clone(),
-                        }]
-                        .into_iter()
-                        .chain(next.eval(arena, global_env, env)?)
-                        .collect::<Vec<_>>())
-                    }
-                    _ => panic!("type error in statement-level effect, found {}?!", val),
-                }
-            }
-            StmtData::If { branches, next } => {
-                // return the results of the first successful branch
-                let get_first_branch_results = || {
-                    for branch in branches {
-                        if let Some(vec) = branch.eval(arena, global_env, env)? {
-                            return Ok(vec);
-                        }
-                    }
-
-                    Ok(vec![])
-                };
-
-                // and then chain on the rest of the results after this statement
-                Ok(get_first_branch_results()?
-                    .into_iter()
-                    .chain(next.eval(arena, global_env, env)?)
-                    .collect::<Vec<_>>())
-            }
-            StmtData::End => Ok(vec![]),
-        }
-    }
-}
-
 impl<'p> Branch<'p> {
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
-        global_env: &Env<&'p Val<'p>>,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
     ) -> Result<Option<Vec<Effect>>, EvalError>
     where
         'p: 'a,
     {
         match &self.data {
-            BranchData::Bool { tm, stmt } => match tm.eval(arena, global_env, env)? {
+            BranchData::Bool { tm, stmt } => match tm.eval(arena, global_env, cache, env)? {
                 Val::Bool { b } => match b {
-                    true => Ok(Some(stmt.eval(arena, global_env, env)?)),
+                    true => Ok(Some(stmt.eval(arena, global_env, cache, env)?)),
                     false => Ok(None),
                 },
                 _ => Err(EvalError::from_internal(
@@ -178,10 +270,10 @@ impl<'p> Branch<'p> {
                 )),
             },
             BranchData::Is { tm, branches } => {
-                let val = arena.alloc(tm.eval(arena, global_env, env)?);
+                let val = tm.eval(arena, global_env, cache, env)?;
 
                 for branch in branches {
-                    if let Some(vec) = branch.eval(arena, global_env, env, val)? {
+                    if let Some(vec) = branch.eval(arena, global_env, cache, env, &val)? {
                         return Ok(Some(vec));
                     }
                 }
@@ -191,15 +283,68 @@ impl<'p> Branch<'p> {
             }
         }
     }
+
+    fn cache<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'a>>,
+        env: &Env<Val<'a>>,
+    ) -> Result<(Branch<'p>, Cache<Val<'a>>), EvalError>
+    where
+        'p: 'a,
+    {
+        match &self.data {
+            BranchData::Bool { tm, stmt } => {
+                let (tm, cache) = tm.cache(arena, global_env, cache, env)?;
+                let (stmt, cache) = stmt.cache(arena, global_env, &cache, env)?;
+
+                Ok((
+                    Branch::new(self.location.clone(), BranchData::Bool { tm, stmt }),
+                    cache,
+                ))
+            }
+            BranchData::Is { tm, branches } => {
+                let (tm, cache) = tm.cache(arena, global_env, cache, env)?;
+                let (branches, cache) = branches.iter().try_fold(
+                    (vec![], cache.clone()),
+                    |(branches0, cache0), branch| {
+                        let (branch, cache) = branch.cache(arena, global_env, &cache0, env)?;
+
+                        Ok((
+                            branches0
+                                .into_iter()
+                                .chain([branch].iter().cloned())
+                                .collect::<Vec<_>>(),
+                            cache,
+                        ))
+                    },
+                )?;
+
+                Ok((
+                    Branch::new(self.location.clone(), BranchData::Is { tm, branches }),
+                    cache,
+                ))
+            }
+        }
+    }
+}
+
+pub type PatternBranch<'p> = Located<PatternBranchData<'p>>;
+#[derive(Clone)]
+pub struct PatternBranchData<'p> {
+    pub matcher: Arc<dyn Matcher<'p> + 'p>,
+    pub stmt: Stmt<'p>,
 }
 
 impl<'p> PatternBranch<'p> {
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
-        global_env: &Env<&'p Val<'p>>,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
-        val: &'a Val<'a>,
+        val: &Val<'a>,
     ) -> Result<Option<Vec<Effect>>, EvalError>
     where
         'p: 'a,
@@ -213,6 +358,7 @@ impl<'p> PatternBranch<'p> {
                         self.data.stmt.eval(
                             arena,
                             global_env,
+                            cache,
                             &binds
                                 .iter()
                                 .fold(env.clone(), |env0, bind| env0.with(bind.clone())),
@@ -225,11 +371,44 @@ impl<'p> PatternBranch<'p> {
             )),
         }
     }
+
+    fn cache<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'a>>,
+        env: &Env<Val<'a>>,
+    ) -> Result<(PatternBranch<'p>, Cache<Val<'a>>), EvalError>
+    where
+        'p: 'a,
+    {
+        // matcher doesn't need to be cached, since it carries all its values
+        // and expects them to be statically evaluable
+
+        // WARN for now, don't go deeper - anything inside will not be cached
+        return Ok((self.clone(), cache.clone()));
+
+        let (stmt, cache) = self.data.stmt.cache(arena, global_env, cache, env)?;
+
+        Ok((
+            PatternBranch::new(
+                self.location.clone(),
+                PatternBranchData {
+                    matcher: self.data.matcher.clone(),
+                    stmt,
+                },
+            ),
+            cache,
+        ))
+    }
 }
 
 pub type Tm<'a> = Located<TmData<'a>>;
 #[derive(Clone)]
 pub enum TmData<'a> {
+    Cached {
+        index: usize,
+    },
     Var {
         index: usize,
     },
@@ -297,7 +476,7 @@ pub enum TmData<'a> {
         name: &'a [u8],
     },
 
-    // the type of functions that produce effects
+    // the return type of effectful functions
     EffectTy,
 }
 
@@ -305,13 +484,17 @@ impl<'p> Tm<'p> {
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
-        global_env: &Env<&'p Val<'p>>,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
     ) -> Result<Val<'a>, EvalError>
     where
         'p: 'a,
     {
         match &self.data {
+            // WARN clumsy and wasteful coercion
+            TmData::Cached { index } => Ok(cache.get(*index).coerce(arena)),
+
             // look up the variable in the environment
             TmData::Var { index } => {
                 Ok(if *index < env.iter().len() {
@@ -338,14 +521,14 @@ impl<'p> Tm<'p> {
             TmData::FunTy { args, body } => Ok(Val::FunTy {
                 args: args
                     .iter()
-                    .map(|arg| arg.eval(arena, global_env, env))
+                    .map(|arg| arg.eval(arena, global_env, cache, env))
                     .collect::<Result<Vec<_>, EvalError>>()?,
-                body: Arc::new(body.eval(arena, global_env, env)?),
+                body: Arc::new(body.eval(arena, global_env, cache, env)?),
             }),
             TmData::FunLit { args, body } => Ok(Val::Fun {
                 data: FunData {
-                    env: env.clone(),
-                    body: body.as_ref().clone(),
+                    env: env.clone() as Env<Val<'a>>,
+                    body: body.coerce(arena),
                 },
             }),
             TmData::FunForeignLit {
@@ -355,7 +538,7 @@ impl<'p> Tm<'p> {
             } => {
                 let args = args
                     .iter()
-                    .map(|arg| arg.eval(arena, global_env, env))
+                    .map(|arg| arg.eval(arena, global_env, cache, env))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let smaller_env = args.iter().fold(env.clone(), |env0, _| {
@@ -368,26 +551,26 @@ impl<'p> Tm<'p> {
 
                 Ok(Val::FunForeign {
                     args,
-                    body_ty: Arc::new(body_ty.eval(arena, global_env, &smaller_env)?),
+                    body_ty: Arc::new(body_ty.eval(arena, global_env, cache, &smaller_env)?),
                     body: body.clone(),
                 })
             }
             TmData::FunApp { head, args } => app(
                 arena,
                 &self.location,
-                head.eval(arena, global_env, env)?,
+                head.eval(arena, global_env, cache, env)?,
                 args.iter()
-                    .map(|arg| arg.eval(arena, global_env, env))
+                    .map(|arg| arg.eval(arena, global_env, cache, env))
                     .collect::<Result<Vec<_>, _>>()?,
             ),
 
             TmData::ListTy { ty } => Ok(Val::ListTy {
-                ty: Arc::new(ty.eval(arena, global_env, env)?),
+                ty: Arc::new(ty.eval(arena, global_env, cache, env)?),
             }),
             TmData::ListLit { tms } => Ok(Val::List {
                 v: tms
                     .iter()
-                    .map(|tm| tm.eval(arena, global_env, env))
+                    .map(|tm| tm.eval(arena, global_env, cache, env))
                     .collect::<Result<Vec<_>, _>>()?,
             }),
 
@@ -397,7 +580,7 @@ impl<'p> Tm<'p> {
                     .map(|field| {
                         Ok(CoreRecField::new(
                             field.name,
-                            field.data.eval(arena, global_env, env)?,
+                            field.data.eval(arena, global_env, cache, env)?,
                         ))
                     })
                     .collect::<Result<Vec<_>, EvalError>>()?,
@@ -408,45 +591,151 @@ impl<'p> Tm<'p> {
                     .map(|field| {
                         Ok(CoreRecField::new(
                             field.name,
-                            field.data.eval(arena, global_env, env)?,
+                            field.data.eval(arena, global_env, cache, env)?,
                         ))
                     })
                     .collect::<Result<Vec<_>, EvalError>>()?,
             }),
 
             // allocate a RecLit as a ConcreteRec
-            TmData::RecLit { fields } => Ok(Val::Rec(
-                arena.alloc(ConcreteRec {
+            TmData::RecLit { fields } => Ok(Val::Rec {
+                rec: Arc::new(ConcreteRec {
                     map: fields
                         .iter()
                         .map(|field| {
                             Ok((
-                                field.name,
-                                arena.alloc(field.data.eval(arena, global_env, env)?) as &Val<'a>,
+                                field.name as &'a [u8],
+                                field.data.eval(arena, global_env, cache, env)? as Val<'a>,
                             ))
                         })
                         .collect::<Result<HashMap<_, _>, EvalError>>()?,
-                }),
-            )),
-            TmData::RecProj { tm: head_tm, name } => match head_tm.eval(arena, global_env, env)? {
-                Val::Rec(r) => {
-                    let e = r
-                        .get(name, arena)
-                        .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
-                        .clone();
+                }) as Arc<dyn Rec<'a> + 'a>,
+            }),
+            TmData::RecProj { tm: head_tm, name } => {
+                match head_tm.eval(arena, global_env, cache, env)? {
+                    Val::Rec { rec: r } => {
+                        let e = r
+                            .get(name, arena)
+                            .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
+                            .clone();
 
-                    Ok(e)
+                        Ok(e)
+                    }
+                    val @ _ => Err(EvalError::from_internal(
+                        InternalError {
+                            message: format!(
+                                "trying to access field of non-record value {}?!",
+                                val
+                            ),
+                        },
+                        self.location.clone(),
+                    )),
                 }
-                _ => Err(EvalError::from_internal(
-                    InternalError {
-                        message: "trying to access field of non-record value?!".to_string(),
-                    },
-                    self.location.clone(),
-                )),
-            },
+            }
 
             TmData::EffectTy => Ok(Val::EffectTy),
         }
+    }
+
+    fn cache<'a>(
+        &self,
+        arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'a>>,
+        env: &Env<Val<'a>>,
+    ) -> Result<(Tm<'p>, Cache<Val<'a>>), EvalError>
+    where
+        'p: 'a,
+    {
+        // this is still pre-caching
+        let val = self.eval(arena, global_env, &Cache::default(), env)?;
+
+        match val {
+            // for now, shallow caching
+            Val::Neutral { .. } => Ok((self.clone(), cache.clone())),
+
+            // otherwise, cache the value and change the tm
+            // (this is the ENTIRE bit of program logic for this caching operation.
+            // could we do all of this with a fold somehow?)
+            _ => {
+                let (cache, index) = cache.push(val);
+
+                Ok((
+                    Tm::new(self.location.clone(), TmData::Cached { index }),
+                    cache,
+                ))
+            }
+        }
+    }
+
+    fn coerce<'a>(&self, arena: &'a Arena) -> Tm<'a>
+    where
+        'p: 'a,
+    {
+        let tm_data = match &self.data {
+            TmData::Cached { index } => TmData::Cached { index: *index },
+            TmData::Var { index } => TmData::Var { index: *index },
+            TmData::Univ => TmData::Univ,
+            TmData::AnyTy => TmData::AnyTy,
+            TmData::BoolTy => TmData::BoolTy,
+            TmData::BoolLit { b } => TmData::BoolLit { b: *b },
+            TmData::NumTy => TmData::NumTy,
+            TmData::NumLit { n } => TmData::NumLit { n: *n },
+            TmData::StrTy => TmData::StrTy,
+            TmData::StrLit { s } => TmData::StrLit { s: s.clone() },
+            TmData::ListTy { ty } => TmData::ListTy {
+                ty: Arc::new(ty.coerce(arena)),
+            },
+            TmData::ListLit { tms } => TmData::ListLit {
+                tms: tms.iter().map(|tm| tm.coerce(arena)).collect(),
+            },
+            TmData::FunTy { args, body } => TmData::FunTy {
+                args: args.iter().map(|tm| tm.coerce(arena)).collect(),
+                body: Arc::new(body.coerce(arena)),
+            },
+            TmData::FunLit { args, body } => TmData::FunLit {
+                args: args.iter().map(|tm| tm.coerce(arena)).collect(),
+                body: Arc::new(body.coerce(arena)),
+            },
+            TmData::FunForeignLit {
+                args,
+                body_ty,
+                body,
+            } => TmData::FunForeignLit {
+                args: args.iter().map(|tm| tm.coerce(arena)).collect(),
+                body_ty: Arc::new(body_ty.coerce(arena)),
+                body: body.clone(),
+            },
+            TmData::FunApp { head, args } => TmData::FunApp {
+                head: Arc::new(head.coerce(arena)),
+                args: args.iter().map(|arg| arg.coerce(arena)).collect(),
+            },
+            TmData::RecTy { fields } => TmData::RecTy {
+                fields: fields
+                    .iter()
+                    .map(|field| CoreRecField::new(field.name, field.data.coerce(arena)))
+                    .collect(),
+            },
+            TmData::RecWithTy { fields } => TmData::RecWithTy {
+                fields: fields
+                    .iter()
+                    .map(|field| CoreRecField::new(field.name, field.data.coerce(arena)))
+                    .collect(),
+            },
+            TmData::RecLit { fields } => TmData::RecLit {
+                fields: fields
+                    .iter()
+                    .map(|field| CoreRecField::new(field.name, field.data.coerce(arena)))
+                    .collect(),
+            },
+            TmData::RecProj { tm, name } => TmData::RecProj {
+                tm: Arc::new(tm.coerce(arena)),
+                name,
+            },
+            TmData::EffectTy => TmData::EffectTy,
+        };
+
+        Tm::new(self.location.clone(), tm_data)
     }
 }
 
@@ -463,7 +752,8 @@ impl<'a> FunData<'a> {
             .into_iter()
             .fold(self.env.clone(), |env0, arg| env0.with(arg));
 
-        self.body.eval(arena, &Env::default(), &new_env)
+        self.body
+            .eval(arena, &Env::default(), &Cache::default(), &new_env)
     }
 }
 
@@ -506,7 +796,9 @@ pub enum Val<'a> {
     RecWithTy {
         fields: Vec<CoreRecField<'a, Val<'a>>>,
     },
-    Rec(&'a dyn Rec<'a>),
+    Rec {
+        rec: Arc<dyn Rec<'a> + 'a>,
+    },
 
     /// Function value; defunctionalised, carries the context it needs
     /// and the Rust function it will execute, which takes this carried
@@ -676,7 +968,7 @@ impl<'a> Val<'a> {
             (Val::Str { s: s1 }, Val::Str { s: s2 }) => s1.eq(s2),
 
             // check that all the fields of r1 and all the fields of r2 are the same
-            (Val::Rec(r1), Val::Rec(r2)) => {
+            (Val::Rec { rec: r1 }, Val::Rec { rec: r2 }) => {
                 let fields1 = r1.all(arena);
                 let fields2 = r2.all(arena);
                 let mut names = fields1.iter().chain(fields2.iter()).map(|(name, _)| name);
@@ -787,7 +1079,9 @@ impl<'a> Val<'a> {
                     .map(|a| CoreRecField::new(a.name, a.data.coerce(arena) as Val<'b>))
                     .collect(),
             },
-            Val::Rec(rec) => Val::Rec(rec.coerce(arena)),
+            Val::Rec { rec } => Val::Rec {
+                rec: rec.coerce(arena),
+            },
             Val::FunTy { args, body } => Val::FunTy {
                 args: args
                     .iter()
@@ -828,7 +1122,7 @@ impl<'a> Val<'a> {
             Val::List { v } => v.iter().any(|val| val.is_neutral()),
             Val::RecTy { fields } => fields.iter().any(|field| field.data.is_neutral()),
             Val::RecWithTy { fields } => fields.iter().any(|field| field.data.is_neutral()),
-            Val::Rec(rec) => rec.is_neutral(),
+            Val::Rec { rec } => rec.is_neutral(),
             Val::FunTy { args, body } => {
                 args.iter().any(|arg| arg.is_neutral()) || body.is_neutral()
             }
@@ -950,7 +1244,7 @@ pub fn make_portable<'a>(arena: &'a Arena, val: &Val<'a>) -> PortableVal {
                 .map(|field| (field.name.to_vec(), make_portable(arena, &field.data)))
                 .collect(),
         },
-        Val::Rec(rec) => PortableVal::Rec {
+        Val::Rec { rec } => PortableVal::Rec {
             fields: rec
                 .all(arena)
                 .iter()
@@ -1101,6 +1395,7 @@ impl<'a> Display for PatternBranchData<'a> {
 impl<'a> Display for TmData<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            TmData::Cached { index } => format!("#cached[{}]", index).fmt(f),
             TmData::Var { index } => format!("#[{}]", index).fmt(f),
             TmData::Univ => "Univ".fmt(f),
             TmData::AnyTy => "Any".fmt(f),
@@ -1224,7 +1519,7 @@ impl<'a> Display for Val<'a> {
                     .join(", ")
             )
             .fmt(f),
-            Val::Rec(rec) => rec.fmt(f),
+            Val::Rec { rec } => rec.fmt(f),
             Val::FunTy { args, body } => format!(
                 "({}) -> {}",
                 args.iter()

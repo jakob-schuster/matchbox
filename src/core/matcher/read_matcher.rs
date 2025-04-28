@@ -6,7 +6,7 @@ use crate::{
     core::{self, matcher, EvalError, Val},
     myers::VarMyers,
     surface::{self, check_tm, Context, ElabError, Region, RegionData},
-    util::{Arena, Env, Ran},
+    util::{Arena, Cache, Env, Ran},
     visit,
 };
 
@@ -26,12 +26,12 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
         &self,
         arena: &'a Arena,
         env: &Env<Val<'a>>,
-        val: &'a Val<'a>,
+        val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
-        if let Val::Rec(rec) = val {
+        if let Val::Rec { rec } = val {
             if let Val::Str { s: seq } = rec.get(b"seq", arena).expect("") {
                 // first, generate all the worlds from the operations
                 let loc_ctx = LocCtx::default().with(0, 0).with(self.end, seq.len());
@@ -42,7 +42,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                             worlds
                                 .iter()
                                 .flat_map(|(bind_ctx, loc_ctx)| {
-                                    op.exec(arena, env, seq, &loc_ctx, bind_ctx)
+                                    op.exec(arena, env, seq, loc_ctx, bind_ctx)
                                 })
                                 .flatten()
                                 .collect::<Vec<_>>()
@@ -60,13 +60,15 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                             // then make the other sequence binds
                             self.binds.iter().map(|ran| {
                                 let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                let sliced = Val::Rec(arena.alloc(rec.with(
-                                    b"seq",
-                                    arena.alloc(Val::Str {
-                                        s: &seq[pos_ran.start..pos_ran.end],
-                                    }),
-                                    arena,
-                                )));
+                                let sliced = Val::Rec {
+                                    rec: Arc::new(rec.with(
+                                        b"seq",
+                                        Val::Str {
+                                            s: &seq[pos_ran.start..pos_ran.end],
+                                        },
+                                        arena,
+                                    )),
+                                };
 
                                 sliced as Val<'a>
                             }),
@@ -138,15 +140,11 @@ fn flatten_regs<'a>(
 
                 // build a new context with these bound
                 let new_ctx = ids.iter().fold(ctx.clone(), |ctx0, id| {
-                    ctx0.bind_param(
-                        id.clone(),
-                        arena.alloc(bind_tys.get(id).unwrap().clone()),
-                        arena,
-                    )
+                    ctx0.bind_param(id.clone(), bind_tys.get(id).unwrap().clone(), arena)
                 });
 
                 // check that the tm is a string
-                let ctm = check_tm(arena, &new_ctx, &tm, &core::Val::StrTy)?;
+                let ctm = check_tm(arena, &new_ctx, tm, &core::Val::StrTy)?;
 
                 flatten_regs(
                     binds,
@@ -181,7 +179,7 @@ fn flatten_regs<'a>(
                 sized_acc,
                 named_acc
                     .into_iter()
-                    .chain([(name.clone(), Ran::new(i, i + inner_regs.len() as usize))])
+                    .chain([(name.clone(), Ran::new(i, i + inner_regs.len()))])
                     .collect(),
                 regs_acc,
                 arena,
@@ -201,7 +199,7 @@ fn flatten_regs<'a>(
                     inner_regs.iter().chain(rest).collect_vec(),
                     sized_acc
                         .into_iter()
-                        .chain([(ctm, Ran::new(i, i + inner_regs.len() as usize))])
+                        .chain([(ctm, Ran::new(i, i + inner_regs.len()))])
                         .collect_vec(),
                     named_acc,
                     regs_acc,
@@ -440,7 +438,7 @@ impl<'p> OpTm<'p> {
         match self {
             OpTm::Let { loc, tm } => Ok(OpVal::Let {
                 loc: *loc,
-                tm: tm.clone(),
+                tm: tm.coerce(arena),
             }),
 
             OpTm::Restrict {
@@ -452,7 +450,8 @@ impl<'p> OpTm<'p> {
             } => {
                 if ids.is_empty() {
                     // special case - just wrap up the one value
-                    let val = tm.eval(arena, &ctx.tms, &Env::default())?;
+                    // (cache can be empty, because this is pre-caching)
+                    let val = tm.eval(arena, &Env::default(), &Cache::default(), &ctx.tms)?;
 
                     match &val {
                         Val::Str { s } => Ok(OpVal::Restrict {
@@ -503,10 +502,12 @@ impl<'p> OpTm<'p> {
                                 .clone()
                                 .into_iter()
                                 .fold(ctx.clone(), |ctx0, (name, val)| {
-                                    ctx0.bind_def(name, &core::Val::StrTy, arena.alloc(val))
+                                    ctx0.bind_def(name, core::Val::StrTy, val as Val<'a>)
                                 });
 
-                        let val = tm.eval(arena, &new_ctx.tms, &Env::default())?;
+                        // WARN cache can be empty because this is pre-caching.
+                        let val =
+                            tm.eval(arena, &Env::default(), &Cache::default(), &new_ctx.tms)?;
 
                         match val {
                             Val::Str { s } => Ok((
@@ -582,15 +583,15 @@ impl LocCtx {
 
 #[derive(Clone, Default)]
 pub struct BindCtx<'a> {
-    map: HashMap<usize, &'a core::Val<'a>>,
+    map: HashMap<usize, core::Val<'a>>,
 }
 
 impl<'a> BindCtx<'a> {
-    fn get(&self, id: &usize) -> Option<&'a core::Val<'a>> {
-        self.map.get(id).copied()
+    fn get(&self, id: &usize) -> Option<&core::Val<'a>> {
+        self.map.get(id)
     }
 
-    fn with(&self, id: usize, val: &'a core::Val<'a>) -> BindCtx<'a> {
+    fn with(&self, id: usize, val: core::Val<'a>) -> BindCtx<'a> {
         let mut map = self.map.clone();
         map.insert(id, val);
 
@@ -613,7 +614,13 @@ impl<'p> OpVal<'p> {
         match self {
             OpVal::Let { loc, tm } => {
                 let pos = tm.eval(&arena, env, loc_ctx)?;
-                Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos))])
+
+                // return out if the range is inappropriate
+                if pos > seq.len() {
+                    Ok(vec![])
+                } else {
+                    Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos))])
+                }
             }
             OpVal::Restrict {
                 ctxs,
@@ -657,7 +664,7 @@ impl<'p> OpVal<'p> {
                                     local_binds.iter().fold(
                                         bind_ctx.clone(),
                                         |old_bind_ctx, (id, val)| {
-                                            old_bind_ctx.with(*id, arena.alloc(val.coerce(arena)))
+                                            old_bind_ctx.with(*id, val.coerce(arena))
                                         },
                                     ) as BindCtx<'a>,
                                     c.iter().enumerate().fold(
@@ -738,7 +745,10 @@ impl<'p> LocTm<'p> {
             LocTm::Var { loc } => Ok(loc_ctx.get(loc)),
             LocTm::Plus { loc_tm, offset } => {
                 // WARN changed the order of env and env default; see if this works
-                if let core::Val::Num { n } = offset.eval(arena, &Env::default(), env)? {
+                // WARN cache can be empty because this is pre-caching
+                if let core::Val::Num { n } =
+                    offset.eval(arena, &Env::default(), &Cache::default(), env)?
+                {
                     let i = n.round() as i32;
 
                     Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 + i) as usize)
@@ -748,7 +758,10 @@ impl<'p> LocTm<'p> {
             }
             LocTm::Minus { loc_tm, offset } => {
                 // WARN changed the order of env and env default; see if this works
-                if let core::Val::Num { n } = offset.eval(arena, &Env::default(), env)? {
+                // WARN cache can be empty because this is pre-caching
+                if let core::Val::Num { n } =
+                    offset.eval(arena, &Env::default(), &Cache::default(), env)?
+                {
                     let i = n.round() as i32;
 
                     Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 - i) as usize)
@@ -756,6 +769,23 @@ impl<'p> LocTm<'p> {
                     panic!("sized read pattern wasn't numeric type?!")
                 }
             }
+        }
+    }
+
+    fn coerce<'a>(&self, arena: &'a Arena) -> LocTm<'a>
+    where
+        'p: 'a,
+    {
+        match self {
+            LocTm::Var { loc } => LocTm::Var { loc: *loc },
+            LocTm::Plus { loc_tm, offset } => LocTm::Plus {
+                loc_tm: Arc::new(loc_tm.coerce(arena)),
+                offset: offset.coerce(arena),
+            },
+            LocTm::Minus { loc_tm, offset } => LocTm::Minus {
+                loc_tm: Arc::new(loc_tm.coerce(arena)),
+                offset: offset.coerce(arena),
+            },
         }
     }
 }

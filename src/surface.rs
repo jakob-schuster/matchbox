@@ -9,7 +9,7 @@ use crate::{
         EvalError,
     },
     parse,
-    util::{Arena, CoreRecField, Env, Located, Location, Ran, RecField},
+    util::{Arena, Cache, CoreRecField, Env, Located, Location, Ran, RecField},
     visit, GlobalConfig,
 };
 
@@ -288,26 +288,21 @@ pub enum StrLitRegionData {
 pub struct Context<'a> {
     size: usize,
     names: Env<String>,
-    tys: Env<&'a core::Val<'a>>,
-    pub tms: Env<&'a core::Val<'a>>,
+    tys: Env<core::Val<'a>>,
+    pub tms: Env<core::Val<'a>>,
 }
 
 impl<'a> Context<'a> {
     /// Returns the next variable that will be bound in the context after
     /// calling bind_def or bind_param
-    pub fn next_var(&self, arena: &'a Arena) -> &'a core::Val<'a> {
-        arena.alloc(core::Val::Neutral {
+    pub fn next_var(&self, arena: &'a Arena) -> core::Val<'a> {
+        core::Val::Neutral {
             neutral: core::Neutral::Var { level: self.size },
-        })
+        }
     }
 
     /// Binds a definition in the context
-    pub fn bind_def(
-        &self,
-        name: String,
-        ty: &'a core::Val<'a>,
-        tm: &'a core::Val<'a>,
-    ) -> Context<'a> {
+    pub fn bind_def(&self, name: String, ty: core::Val<'a>, tm: core::Val<'a>) -> Context<'a> {
         Context {
             size: self.size + 1,
             names: self.names.with(name),
@@ -333,12 +328,12 @@ impl<'a> Context<'a> {
     }
 
     /// Binds a parameter in the context
-    pub fn bind_param(&self, name: String, ty: &'a core::Val<'a>, arena: &'a Arena) -> Context<'a> {
+    pub fn bind_param(&self, name: String, ty: core::Val<'a>, arena: &'a Arena) -> Context<'a> {
         self.bind_def(name, ty, self.next_var(arena))
     }
 
     /// Looks up a name in the context
-    pub fn lookup(&self, name: String) -> Option<(usize, &'a core::Val<'a>)> {
+    pub fn lookup(&self, name: String) -> Option<(usize, &core::Val<'a>)> {
         // Find the index of most recent binding in the context identified by
         // name, starting from the most recent binding. This gives us the
         // de Bruijn index of the variable.
@@ -352,27 +347,26 @@ impl<'a> Context<'a> {
     pub fn bind_read(&self, arena: &'a Arena) -> Context<'a> {
         self.bind_param(
             "read".to_string(),
-            arena.alloc(
-                core::Tm::new(
-                    Location::new(0, 0),
-                    core::TmData::FunApp {
-                        head: Arc::new(core::Tm::new(
-                            Location::new(0, 0),
-                            core::TmData::FunForeignLit {
-                                args: vec![],
-                                body: Arc::new(core::library::read_ty),
-                                body_ty: Arc::new(core::Tm::new(
-                                    Location::new(0, 0),
-                                    core::TmData::Univ,
-                                )),
-                            },
-                        )),
-                        args: vec![],
-                    },
-                )
-                .eval(arena, &self.tms, &Env::default())
-                .expect("could not evaluate standard library!"),
-            ),
+            core::Tm::new(
+                Location::new(0, 0),
+                core::TmData::FunApp {
+                    head: Arc::new(core::Tm::new(
+                        Location::new(0, 0),
+                        core::TmData::FunForeignLit {
+                            args: vec![],
+                            body: Arc::new(core::library::read_ty),
+                            body_ty: Arc::new(core::Tm::new(
+                                Location::new(0, 0),
+                                core::TmData::Univ,
+                            )),
+                        },
+                    )),
+                    args: vec![],
+                },
+            )
+            // WARN cache can be empty because this is pre-caching
+            .eval(arena, &self.tms, &Cache::default(), &Env::default())
+            .expect("could not evaluate standard library!"),
             arena,
         )
     }
@@ -428,11 +422,10 @@ fn elab_stmt<'a>(
             // now we evaluate the terms as best we can, in case we need them at the static stage (we probably will)
             let new_ctx = ctx.bind_def(
                 name.clone(),
-                arena.alloc(ty),
-                arena.alloc(
-                    ctm.eval(arena, &ctx.tms, &Env::default())
-                        .map_err(ElabError::from_eval_error)?,
-                ),
+                ty,
+                // WARN cache can be empty because this is pre-caching
+                ctm.eval(arena, &ctx.tms, &Cache::default(), &Env::default())
+                    .map_err(ElabError::from_eval_error)?,
             );
 
             match rest {
@@ -529,11 +522,9 @@ fn elab_stmt_for_ctx<'a>(
             // now we evaluate the terms as best we can, in case we need them at the static stage (we probably will)
             let new_ctx = ctx.bind_def(
                 name.clone(),
-                arena.alloc(ty),
-                arena.alloc(
-                    ctm.eval(arena, &ctx.tms, &Env::default())
-                        .map_err(ElabError::from_eval_error)?,
-                ),
+                ty,
+                ctm.eval(arena, &ctx.tms, &Cache::default(), &Env::default())
+                    .map_err(ElabError::from_eval_error)?,
             );
 
             match rest {
@@ -620,7 +611,7 @@ fn infer_pattern_branch<'a>(
         arena,
         // bind everything from the pattern when elaborating the statement
         &bind_tys.into_iter().fold(ctx.clone(), |ctx0, (name, val)| {
-            ctx0.bind_param(name.clone(), arena.alloc(val), arena)
+            ctx0.bind_param(name.clone(), val, arena)
         }),
         &branch.data.stmt,
         &[],
@@ -732,7 +723,8 @@ fn infer_pattern<'a>(
                 .map(|param| {
                     let (ctm, cty) = infer_tm(arena, ctx, &param.data.tm)?;
                     let vtm = ctm
-                        .eval(arena, &ctx.tms, &Env::default())
+                        // WARN cache can be empty because this is pre-caching
+                        .eval(arena, &ctx.tms, &Cache::default(), &Env::default())
                         .map_err(ElabError::from_eval_error)?;
 
                     match cty {
@@ -979,7 +971,8 @@ pub fn infer_tm<'a>(
             let arg_vals = arg_tms
                 .clone()
                 .iter()
-                .map(|arg| arg.eval(arena, &ctx.tms, &Env::default()))
+                // WARN cache can be empty because this is pre-caching
+                .map(|arg| arg.eval(arena, &ctx.tms, &Cache::default(), &Env::default()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(ElabError::from_eval_error)?;
 
@@ -990,10 +983,11 @@ pub fn infer_tm<'a>(
                 .try_fold(ctx.clone(), |ctx0, (name, ty)| {
                     // evaluate the type
                     let val = ty
-                        .eval(arena, &ctx.tms, &Env::default())
+                        // WARN cache can be empty because this is pre-caching
+                        .eval(arena, &ctx.tms, &Cache::default(), &Env::default())
                         .map_err(ElabError::from_eval_error)?;
                     // bind it in the context
-                    Ok(ctx0.bind_param(name.clone(), arena.alloc(val), arena))
+                    Ok(ctx0.bind_param(name.clone(), val, arena))
                 })?;
 
             // then, get the type of the body
@@ -1028,7 +1022,8 @@ pub fn infer_tm<'a>(
             let arg_vals = arg_tms
                 .clone()
                 .iter()
-                .map(|arg| arg.eval(arena, &ctx.tms, &Env::default()))
+                // WARN cache can be empty because this is pre-caching
+                .map(|arg| arg.eval(arena, &ctx.tms, &Cache::default(), &Env::default()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(ElabError::from_eval_error)?;
 
@@ -1039,17 +1034,17 @@ pub fn infer_tm<'a>(
                 .try_fold(ctx.clone(), |ctx0, (name, ty)| {
                     // evaluate the type
                     let val = ty
-                        .eval(arena, &ctx.tms, &Env::default())
+                        .eval(arena, &ctx.tms, &Cache::default(), &Env::default())
                         .map_err(ElabError::from_eval_error)?;
                     // bind it in the context
-                    Ok(ctx0.bind_param(name.clone(), arena.alloc(val), arena))
+                    Ok(ctx0.bind_param(name.clone(), val, arena))
                 })?;
 
             // then, get the type of the body
             // (note that this might be FunReturnTyAwaiting, as it may include parameters)
             let ty = check_tm(arena, &new_ctx, ty, &core::Val::Univ)?;
             let val = ty
-                .eval(arena, &new_ctx.tms, &Env::default())
+                .eval(arena, &new_ctx.tms, &Cache::default(), &Env::default())
                 .map_err(ElabError::from_eval_error)?;
             let final_ty = if val.is_neutral() {
                 // if it's neutral, we throw it away - need to create a val that is just a function frome some arguments
@@ -1159,7 +1154,10 @@ pub fn infer_tm<'a>(
                         core::Val::FunReturnTyAwaiting { data } => {
                             let arg_vals = arg_tms
                                 .iter()
-                                .map(|arg| arg.eval(arena, &ctx.tms, &Env::default()))
+                                // WARN cache can be empty because this is pre-caching
+                                .map(|arg| {
+                                    arg.eval(arena, &ctx.tms, &Cache::default(), &Env::default())
+                                })
                                 .collect::<Result<Vec<_>, _>>()
                                 .map_err(ElabError::from_eval_error)?;
 

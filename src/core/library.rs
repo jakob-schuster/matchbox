@@ -4,7 +4,7 @@ use crate::{
     core,
     myers::VarMyers,
     surface::Context,
-    util::{self, bytes_to_string, Arena, CoreRecField, Env, Location},
+    util::{self, bytes_to_string, Arena, Cache, CoreRecField, Env, Location},
 };
 use std::{collections::HashMap, io::Read, path::Path, sync::Arc};
 
@@ -27,18 +27,16 @@ pub fn standard_library<'a>(arena: &'a Arena) -> Context<'a> {
     let ctx = entries
         .iter()
         .try_fold(Context::default(), |ctx, (name, ty, tm)| {
+            // WARN cache can be empty because this is pre-caching
+
             let ty1 = arena
                 .alloc(core::Tm::new(Location::new(0, 0), ty.clone()))
-                .eval(arena, &ctx.tms, &Env::default())?;
+                .eval(arena, &ctx.tms, &Cache::default(), &Env::default())?;
             let tm1 = arena
                 .alloc(core::Tm::new(Location::new(0, 0), tm.clone()))
-                .eval(arena, &ctx.tms, &Env::default())?;
+                .eval(arena, &ctx.tms, &Cache::default(), &Env::default())?;
 
-            Ok::<Context, EvalError>(ctx.bind_def(
-                name.to_string(),
-                arena.alloc(ty1),
-                arena.alloc(tm1),
-            ))
+            Ok::<Context, EvalError>(ctx.bind_def(name.to_string(), ty1, tm1))
         })
         .expect("could not evaluate standard library!");
 
@@ -420,17 +418,17 @@ pub fn tag<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Rec(rec), Val::Str { s }] => {
+        [Val::Rec { rec }, Val::Str { s }] => {
             let desc = rec
                 .get(b"desc", arena)
                 .expect("record with no desc given to tag?!");
 
             match desc {
-                Val::Str { s: old_s } => Ok(Val::Rec(
-                    arena.alloc(
+                Val::Str { s: old_s } => Ok(Val::Rec {
+                    rec: Arc::new(
                         rec.with(
                             b"desc",
-                            arena.alloc(Val::Str {
+                            Val::Str {
                                 s: arena
                                     .alloc(format!(
                                         "{} {}",
@@ -438,11 +436,11 @@ pub fn tag<'a>(
                                         util::bytes_to_string(s).unwrap()
                                     ))
                                     .as_bytes(),
-                            }),
+                            },
                             arena,
                         ),
                     ),
-                )),
+                }),
                 _ => panic!("record desc was not string type?!"),
             }
         }
@@ -475,13 +473,13 @@ pub fn concat<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Rec(read0), Val::Rec(read1)] => {
+        [Val::Rec { rec: read0 }, Val::Rec { rec: read1 }] => {
             // Get sequences from both structs
             let seq0 = match read0
                 .get(b"seq", arena)
                 .map_err(|e| EvalError::new(location, "read did not have a sequence field"))?
             {
-                Val::Str { s } => Ok(*s),
+                Val::Str { s } => Ok(s),
                 _ => Err(EvalError::new(
                     location,
                     "read's sequence field was of the wrong type",
@@ -491,7 +489,7 @@ pub fn concat<'a>(
                 .get(b"seq", arena)
                 .map_err(|e| EvalError::new(location, "read did not have a sequence field"))?
             {
-                Val::Str { s } => Ok(*s),
+                Val::Str { s } => Ok(s),
                 _ => Err(EvalError::new(
                     location,
                     "read's sequence field was of the wrong type",
@@ -499,22 +497,25 @@ pub fn concat<'a>(
             }?;
 
             // Combine sequences
-            let new_seq = arena.alloc(Val::Str {
+            let new_seq = Val::Str {
                 s: arena.alloc(seq0.iter().chain(seq1).cloned().collect::<Vec<_>>()),
-            });
+            };
 
             match (read0.get(b"qual", arena), read1.get(b"qual", arena)) {
                 (Ok(Val::Str { s: qual0 }), Ok(Val::Str { s: qual1 })) => {
-                    let new_qual = arena.alloc(Val::Str {
-                        s: arena.alloc(qual0.iter().chain(*qual1).cloned().collect::<Vec<_>>()),
-                    });
+                    let new_qual = Val::Str {
+                        s: arena.alloc(qual0.iter().chain(qual1).cloned().collect::<Vec<_>>()),
+                    };
 
-                    Ok(Val::Rec(arena.alloc(read1.with_all(
-                        &[(b"seq", new_seq), (b"qual", new_qual)],
-                        arena,
-                    ))))
+                    Ok(Val::Rec {
+                        rec: Arc::new(
+                            read1.with_all(&[(b"seq", new_seq), (b"qual", new_qual)], arena),
+                        ),
+                    })
                 }
-                _ => Ok(Val::Rec(arena.alloc(read1.with(b"seq", new_seq, arena)))),
+                _ => Ok(Val::Rec {
+                    rec: Arc::new(read1.with(b"seq", new_seq, arena)),
+                }),
             }
         }
 
@@ -609,16 +610,20 @@ pub fn csv<'a>(
                 .records()
                 .map(|r| {
                     r.map(|sr| -> Val<'_> {
-                        Val::Rec(arena.alloc(ConcreteRec {
-                            map: HashMap::from_iter(sr.into_iter().enumerate().map(|(i, s)| {
-                                let field: &[u8] = field_names.get(i).unwrap();
-                                let val: &Val = arena.alloc(Val::Str {
-                                    s: arena.alloc(s.to_string()).as_bytes(),
-                                });
+                        Val::Rec {
+                            rec: Arc::new(ConcreteRec {
+                                map: HashMap::from_iter(sr.into_iter().enumerate().map(
+                                    |(i, s)| {
+                                        let field: &[u8] = field_names.get(i).unwrap();
+                                        let val: Val = Val::Str {
+                                            s: arena.alloc(s.to_string()).as_bytes(),
+                                        };
 
-                                (field, val)
-                            })),
-                        }))
+                                        (field, val)
+                                    },
+                                )),
+                            }),
+                        }
                     })
                 })
                 .try_collect()
@@ -699,16 +704,20 @@ pub fn tsv<'a>(
                 .records()
                 .map(|r| {
                     r.map(|sr| -> Val<'_> {
-                        Val::Rec(arena.alloc(ConcreteRec {
-                            map: HashMap::from_iter(sr.into_iter().enumerate().map(|(i, s)| {
-                                let field: &[u8] = field_names.get(i).unwrap();
-                                let val: &Val = arena.alloc(Val::Str {
-                                    s: arena.alloc(s.to_string()).as_bytes(),
-                                });
+                        Val::Rec {
+                            rec: Arc::new(ConcreteRec {
+                                map: HashMap::from_iter(sr.into_iter().enumerate().map(
+                                    |(i, s)| {
+                                        let field: &[u8] = field_names.get(i).unwrap();
+                                        let val: Val = Val::Str {
+                                            s: arena.alloc(s.to_string()).as_bytes(),
+                                        };
 
-                                (field, val)
-                            })),
-                        }))
+                                        (field, val)
+                                    },
+                                )),
+                            }),
+                        }
                     })
                 })
                 .try_collect()
@@ -737,24 +746,23 @@ pub fn fasta<'a>(
 
             let mut v = vec![];
 
+            let id_str = arena.alloc(b"id".to_vec());
+            let seq_str = arena.alloc(b"seq".to_vec());
+
             for rec in f.records() {
                 match rec {
                     Ok(read) => {
                         let seq = arena.alloc(read.seq().to_vec());
                         let name = arena.alloc(read.id().as_bytes().to_vec());
 
-                        let map: HashMap<&[u8], &Val<'_>> = HashMap::from([
-                            (
-                                arena.alloc(b"id".to_vec()) as &[u8],
-                                arena.alloc(Val::Str { s: name }) as &Val,
-                            ),
-                            (
-                                arena.alloc(b"seq".to_vec()) as &[u8],
-                                arena.alloc(Val::Str { s: seq }) as &Val,
-                            ),
+                        let map: HashMap<&[u8], Val<'_>> = HashMap::from([
+                            (id_str as &[u8], Val::Str { s: name }),
+                            (seq_str as &[u8], Val::Str { s: seq }),
                         ]);
 
-                        v.push(Val::Rec(arena.alloc(ConcreteRec { map })));
+                        v.push(Val::Rec {
+                            rec: Arc::new(ConcreteRec { map }),
+                        });
                     }
                     Err(_) => panic!("bad read in fasta"),
                 }
@@ -856,7 +864,7 @@ pub fn describe<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Rec(read), Val::Rec(search_terms), Val::Num { n: error_rate }] => {
+        [Val::Rec { rec: read }, Val::Rec { rec: search_terms }, Val::Num { n: error_rate }] => {
             if let Val::Str { s: read_seq } = read
                 .get(b"seq", arena)
                 .map_err(|e| EvalError::from_internal(e, location.clone()))?
@@ -866,7 +874,7 @@ pub fn describe<'a>(
 
                 for (name, val) in search_terms.all(arena) {
                     if let Val::Str { s: seq } = val {
-                        map.insert(name, *seq);
+                        map.insert(name, seq);
                     } else {
                         return Err(EvalError::new(
                             location,

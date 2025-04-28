@@ -8,7 +8,7 @@ Currently you'll have a (slightly!) more stable experience with the original pro
 
 ## Todo before this becomes main matchbox
 
-- [ ] fix memory leak
+- [x] fix memory leak
 - [x] fix script parsing statements after conditionals
 - [x] make terms effectful
 - [ ] add optional arguments

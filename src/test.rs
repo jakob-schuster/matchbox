@@ -1,14 +1,10 @@
 use std::collections::HashMap;
 
+use crate::parse::parse;
 use crate::{
-    core::{
-        self,
-        rec::{ConcreteRec, FastaRead},
-        Val,
-    },
-    parse::parse,
+    core::{self, rec::ConcreteRec, Val},
     surface::elab_prog,
-    util::{Arena, Located},
+    util::Arena,
     GenericError, GlobalConfig,
 };
 
@@ -20,7 +16,7 @@ fn parse_test(code: &str) -> Result<String, GenericError> {
 
     let global_config = GlobalConfig::default();
 
-    let prog = parse(code, &global_config).map_err(|e| GenericError::from(e))?;
+    let prog = parse(code, &global_config).map_err(GenericError::from)?;
 
     Ok(format!("{:?}", prog))
 }
@@ -37,7 +33,7 @@ fn elab_test(code: &str) -> Result<String, GenericError> {
     let global_config = GlobalConfig::default();
 
     // should never unwrap, because program terminates
-    let prog = parse(code, &global_config).map_err(|e| GenericError::from(e))?;
+    let prog = parse(code, &global_config).map_err(GenericError::from)?;
 
     // establish a global-level arena and context,
     // for values allocated during elaboration
@@ -49,13 +45,14 @@ fn elab_test(code: &str) -> Result<String, GenericError> {
         &read_code_from_script("local/standard_library.mb").unwrap(),
         &global_config,
     )
-    .map_err(|e| GenericError::from(e))?;
+    .map_err(GenericError::from)?;
 
     // elaborate to generate the context
-    let ctx = elab_prog_for_ctx(&arena, &ctx, &library_prog).map_err(|e| GenericError::from(e))?;
+    let ctx =
+        elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
 
     // elaborate to a core program
-    let core_prog = elab_prog(&arena, &ctx, &prog).map_err(|e| GenericError::from(e))?;
+    let core_prog = elab_prog(&arena, &ctx, &prog).map_err(GenericError::from)?;
 
     Ok(core_prog.to_string())
 }
@@ -64,6 +61,8 @@ fn elab_test(code: &str) -> Result<String, GenericError> {
 /// printing the resulting effects as a string.
 #[cfg(test)]
 fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericError> {
+    use std::sync::Arc;
+
     use crate::{
         core::library::standard_library, read_code_from_script, surface::elab_prog_for_ctx,
         GenericError,
@@ -71,7 +70,7 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
 
     let global_config = GlobalConfig::default();
 
-    let prog = parse(code, &global_config).map_err(|e| GenericError::from(e))?;
+    let prog = parse(code, &global_config).map_err(GenericError::from)?;
 
     // establish a global-level arena and context,
     // for values allocated during elaboration
@@ -83,46 +82,47 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
         &read_code_from_script("local/standard_library.mb").unwrap(),
         &global_config,
     )
-    .map_err(|e| GenericError::from(e))?;
+    .map_err(GenericError::from)?;
 
     // elaborate to generate the context
-    let ctx = elab_prog_for_ctx(&arena, &ctx, &library_prog).map_err(|e| GenericError::from(e))?;
+    let ctx =
+        elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
 
     // elaborate to a core program
-    let core_prog =
-        elab_prog(&arena, &ctx.bind_read(&arena), &prog).map_err(|e| GenericError::from(e))?;
+    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena), &prog).map_err(GenericError::from)?;
+    let (core_prog, cache) = core_prog.cache(&arena, &ctx.tms)?;
 
     // create a toy read
-    let read = core::Val::Rec(
-        arena.alloc(ConcreteRec {
+    let read = core::Val::Rec {
+        rec: Arc::new(ConcreteRec {
             map: [
                 (
                     b"seq" as &[u8],
-                    arena.alloc(core::Val::Str {
+                    core::Val::Str {
                         s: arena.alloc(seq.to_vec()),
-                    }) as &Val,
+                    } as Val,
                 ),
                 (
                     b"id" as &[u8],
-                    arena.alloc(core::Val::Str {
+                    core::Val::Str {
                         s: arena.alloc(b"read1".to_vec()),
-                    }) as &Val,
+                    } as Val,
                 ),
                 (
                     b"desc" as &[u8],
-                    arena.alloc(core::Val::Str {
+                    core::Val::Str {
                         s: arena.alloc(b"".to_vec()),
-                    }) as &Val,
+                    } as Val,
                 ),
             ]
             .into_iter()
             .collect(),
         }),
-    );
+    };
 
     // evaluate the program
     Ok(core_prog
-        .eval(&arena, &ctx.tms, read)
+        .eval(&arena, &ctx.tms, &cache, read)
         .unwrap()
         .iter()
         .map(|a| a.to_string())

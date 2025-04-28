@@ -12,7 +12,7 @@ use read::{
     get_extensions, get_filetype_and_buffer, read_any, read_fa, FileType, FileTypeError, InputError,
 };
 use surface::{elab_prog, elab_prog_for_ctx, Context, ElabError};
-use util::{Arena, Env, Location};
+use util::{Arena, Cache, Env, Location};
 
 mod core;
 mod myers;
@@ -111,7 +111,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
     .unwrap();
 
     // elaborate to generate the context
-    let ctx = elab_prog_for_ctx(&arena, &ctx, &library_prog)
+    let ctx = elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog))
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();
@@ -121,7 +121,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         .unwrap();
 
-    let ctx = elab_prog_for_ctx(&arena, &ctx, &args_prog)
+    let ctx = elab_prog_for_ctx(&arena, &ctx, arena.alloc(args_prog))
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         .unwrap();
 
@@ -132,12 +132,18 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .unwrap();
 
     // elaborate to a core program
-    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena), &prog)
+    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena), arena.alloc(prog))
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();
 
-    println!("{}", core_prog);
+    // cache the values
+    let (core_prog, cache) = core_prog
+        .cache(&arena, &ctx.bind_read(&arena).tms)
+        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        // should never unwrap, because program terminates
+        .unwrap();
+    // let cache = Cache::default();
 
     // create an output handler, to receive output effects
     let mut output_handler = OutputHandler::new();
@@ -147,7 +153,13 @@ fn run(code: &str, global_config: &GlobalConfig) {
 
     // process the reads
     if let Some(reads_filename) = &global_config.reads {
-        read_any(reads_filename, &core_prog, &env, &mut output_handler);
+        read_any(
+            reads_filename,
+            &core_prog,
+            &env,
+            &cache,
+            &mut output_handler,
+        );
     } else {
         panic!("can't handle stdin reads yet!")
     }

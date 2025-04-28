@@ -6,7 +6,7 @@ use crate::{
     core::{self, matcher, EvalError, Val},
     myers::VarMyers,
     surface::{self, check_tm, Context, ElabError, Region, RegionData},
-    util::{Arena, Env, Ran},
+    util::{Arena, Cache, Env, Ran},
     visit,
 };
 
@@ -25,13 +25,13 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+        env: &Env<Val<'a>>,
+        val: &Val<'a>,
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
-        if let Val::Rec(rec) = val {
+        if let Val::Rec { rec } = val {
             if let Val::Str { s: seq } = rec.get(b"seq", arena).expect("") {
                 // first, generate all the worlds from the operations
                 let loc_ctx = LocCtx::default().with(0, 0).with(self.end, seq.len());
@@ -42,7 +42,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                             worlds
                                 .iter()
                                 .flat_map(|(bind_ctx, loc_ctx)| {
-                                    op.exec(arena, env, seq, &loc_ctx, bind_ctx)
+                                    op.exec(arena, env, seq, loc_ctx, bind_ctx)
                                 })
                                 .flatten()
                                 .collect::<Vec<_>>()
@@ -55,20 +55,22 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                         .map
                         .iter()
                         .sorted_by_key(|(id, _)| **id)
-                        .map(|(_, val)| *val)
+                        .map(|(_, val)| (*val).clone())
                         .chain(
                             // then make the other sequence binds
                             self.binds.iter().map(|ran| {
                                 let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                let sliced = Val::Rec(arena.alloc(rec.with(
-                                    b"seq",
-                                    arena.alloc(Val::Str {
-                                        s: &seq[pos_ran.start..pos_ran.end],
-                                    }),
-                                    arena,
-                                )));
+                                let sliced = Val::Rec {
+                                    rec: Arc::new(rec.with(
+                                        b"seq",
+                                        Val::Str {
+                                            s: &seq[pos_ran.start..pos_ran.end],
+                                        },
+                                        arena,
+                                    )),
+                                };
 
-                                arena.alloc(sliced) as &'a Val<'a>
+                                sliced as Val<'a>
                             }),
                         )
                         .collect::<Vec<_>>();
@@ -94,7 +96,7 @@ enum Reg<'p> {
 
 fn flatten_regs<'a>(
     binds: &[String],
-    bind_tys: &HashMap<String, &'a core::Val<'a>>,
+    bind_tys: &HashMap<String, core::Val<'a>>,
     i: usize,
     regs: Vec<&'a Region>,
     sized_acc: Vec<(core::Tm<'a>, Ran<usize>)>,
@@ -138,11 +140,11 @@ fn flatten_regs<'a>(
 
                 // build a new context with these bound
                 let new_ctx = ids.iter().fold(ctx.clone(), |ctx0, id| {
-                    ctx0.bind_param(id.clone(), bind_tys.get(id).unwrap(), arena)
+                    ctx0.bind_param(id.clone(), bind_tys.get(id).unwrap().clone(), arena)
                 });
 
                 // check that the tm is a string
-                let ctm = check_tm(arena, &new_ctx, &tm, &core::Val::StrTy)?;
+                let ctm = check_tm(arena, &new_ctx, tm, &core::Val::StrTy)?;
 
                 flatten_regs(
                     binds,
@@ -177,7 +179,7 @@ fn flatten_regs<'a>(
                 sized_acc,
                 named_acc
                     .into_iter()
-                    .chain([(name.clone(), Ran::new(i, i + inner_regs.len() as usize))])
+                    .chain([(name.clone(), Ran::new(i, i + inner_regs.len()))])
                     .collect(),
                 regs_acc,
                 arena,
@@ -197,7 +199,7 @@ fn flatten_regs<'a>(
                     inner_regs.iter().chain(rest).collect_vec(),
                     sized_acc
                         .into_iter()
-                        .chain([(ctm, Ran::new(i, i + inner_regs.len() as usize))])
+                        .chain([(ctm, Ran::new(i, i + inner_regs.len()))])
                         .collect_vec(),
                     named_acc,
                     regs_acc,
@@ -214,7 +216,7 @@ pub fn infer_read_pattern<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
     regs: &'a [Region],
-    params: Vec<(String, &'a core::Val<'a>, &'a core::Val<'a>)>,
+    params: Vec<(String, core::Val<'a>, core::Val<'a>)>,
     error: f32,
 ) -> Result<(ReadMatcher<'a>, Vec<String>), ElabError> {
     // first, separate all the regions out into
@@ -383,7 +385,6 @@ pub fn infer_read_pattern<'a>(
         .map(|(i, name)| (name.clone(), i))
         .collect::<HashMap<_, _>>();
 
-    println!("{}", ops.iter().map(|op| op.to_string()).join(","));
     let final_ops = ops
         .iter()
         .map(|op| op.eval(arena, ctx, param_vals.clone(), param_indices.clone(), error))
@@ -426,7 +427,7 @@ impl<'p> OpTm<'p> {
         &self,
         arena: &'a Arena,
         ctx: &Context<'a>,
-        params: HashMap<String, Vec<&'a Val<'a>>>,
+        params: HashMap<String, Vec<Val<'a>>>,
         param_indices: HashMap<String, usize>,
         error: f32,
     ) -> Result<OpVal<'a>, EvalError>
@@ -436,7 +437,7 @@ impl<'p> OpTm<'p> {
         match self {
             OpTm::Let { loc, tm } => Ok(OpVal::Let {
                 loc: *loc,
-                tm: tm.clone(),
+                tm: tm.coerce(arena),
             }),
 
             OpTm::Restrict {
@@ -448,7 +449,8 @@ impl<'p> OpTm<'p> {
             } => {
                 if ids.is_empty() {
                     // special case - just wrap up the one value
-                    let val = tm.eval(arena, &ctx.tms, &Env::default())?;
+                    // (cache can be empty, because this is pre-caching)
+                    let val = tm.eval(arena, &Env::default(), &Cache::default(), &ctx.tms)?;
 
                     match &val {
                         Val::Str { s } => Ok(OpVal::Restrict {
@@ -461,19 +463,21 @@ impl<'p> OpTm<'p> {
                     }
                 } else {
                     let new_binds = params
-                        .iter()
+                        .into_iter()
                         .filter(|(id, vals)| ids.contains(id))
                         .map(|(id, vals)| {
-                            vals.iter().map(|val| (id, val.clone())).collect::<Vec<_>>()
+                            vals.iter()
+                                .map(|val| (id.clone(), val.clone()))
+                                .collect::<Vec<_>>()
                         })
                         .collect::<Vec<_>>();
 
                     let ctxs = match &new_binds[..] {
                         [first, rest @ ..] => {
-                            first.iter().flat_map(|first_val: &(&String, &Val<'a>)| {
+                            first.into_iter().flat_map(|first_val: &(String, Val<'a>)| {
                                 rest.iter().fold(
-                                    vec![vec![*first_val]],
-                                    |v: Vec<Vec<(&String, &Val<'a>)>>, bind| {
+                                    vec![vec![first_val.clone()]],
+                                    |v: Vec<Vec<(String, Val<'a>)>>, bind| {
                                         v.iter()
                                             .cartesian_product(bind)
                                             .map(|(v, new)| {
@@ -492,22 +496,28 @@ impl<'p> OpTm<'p> {
                     }
                     .map(|bind_ctx| {
                         // WARN this may not be binding things in the right order?
-                        let new_ctx = bind_ctx.iter().fold(ctx.clone(), |ctx0, (name, val)| {
-                            ctx0.bind_def((*name).clone(), &core::Val::StrTy, val)
-                        });
+                        let new_ctx =
+                            bind_ctx
+                                .clone()
+                                .into_iter()
+                                .fold(ctx.clone(), |ctx0, (name, val)| {
+                                    ctx0.bind_def(name, core::Val::StrTy, val as Val<'a>)
+                                });
 
-                        let val = tm.eval(arena, &new_ctx.tms, &Env::default())?;
+                        // WARN cache can be empty because this is pre-caching.
+                        let val =
+                            tm.eval(arena, &Env::default(), &Cache::default(), &new_ctx.tms)?;
 
                         match val {
                             Val::Str { s } => Ok((
                                 bind_ctx
-                                    .iter()
+                                    .into_iter()
                                     .map(|(name, val)| {
                                         (
                                             *param_indices
-                                                .get(*name)
+                                                .get(&name)
                                                 .expect("bind index was invalid?!"),
-                                            *val,
+                                            val,
                                         )
                                     })
                                     .collect::<HashMap<_, _>>(),
@@ -539,7 +549,7 @@ pub enum OpVal<'a> {
     },
     Restrict {
         // list of new binds to make
-        ctxs: Vec<(HashMap<usize, &'a Val<'a>>, Seq)>,
+        ctxs: Vec<(HashMap<usize, Val<'a>>, Seq)>,
         // the location range to search between
         ran: Ran<usize>,
         // whether the ends are fixed
@@ -572,15 +582,15 @@ impl LocCtx {
 
 #[derive(Clone, Default)]
 pub struct BindCtx<'a> {
-    map: HashMap<usize, &'a core::Val<'a>>,
+    map: HashMap<usize, core::Val<'a>>,
 }
 
 impl<'a> BindCtx<'a> {
-    fn get(&self, id: &usize) -> Option<&'a core::Val<'a>> {
-        self.map.get(id).copied()
+    fn get(&self, id: &usize) -> Option<&core::Val<'a>> {
+        self.map.get(id)
     }
 
-    fn with(&self, id: usize, val: &'a core::Val<'a>) -> BindCtx<'a> {
+    fn with(&self, id: usize, val: core::Val<'a>) -> BindCtx<'a> {
         let mut map = self.map.clone();
         map.insert(id, val);
 
@@ -592,7 +602,7 @@ impl<'p> OpVal<'p> {
     fn exec<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a core::Val<'a>>,
+        env: &Env<core::Val<'a>>,
         seq: &'a [u8],
         loc_ctx: &LocCtx,
         bind_ctx: &BindCtx<'a>,
@@ -603,7 +613,13 @@ impl<'p> OpVal<'p> {
         match self {
             OpVal::Let { loc, tm } => {
                 let pos = tm.eval(&arena, env, loc_ctx)?;
-                Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos))])
+
+                // return out if the range is inappropriate
+                if pos > seq.len() {
+                    Ok(vec![])
+                } else {
+                    Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos))])
+                }
             }
             OpVal::Restrict {
                 ctxs,
@@ -647,7 +663,7 @@ impl<'p> OpVal<'p> {
                                     local_binds.iter().fold(
                                         bind_ctx.clone(),
                                         |old_bind_ctx, (id, val)| {
-                                            old_bind_ctx.with(*id, arena.alloc(val.coerce(arena)))
+                                            old_bind_ctx.with(*id, val.coerce(arena))
                                         },
                                     ) as BindCtx<'a>,
                                     c.iter().enumerate().fold(
@@ -718,7 +734,7 @@ impl<'p> LocTm<'p> {
     fn eval<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a core::Val<'a>>,
+        env: &Env<core::Val<'a>>,
         loc_ctx: &LocCtx,
     ) -> Result<usize, core::EvalError>
     where
@@ -727,7 +743,11 @@ impl<'p> LocTm<'p> {
         match self {
             LocTm::Var { loc } => Ok(loc_ctx.get(loc)),
             LocTm::Plus { loc_tm, offset } => {
-                if let core::Val::Num { n } = offset.eval(arena, env, &Env::default())? {
+                // WARN changed the order of env and env default; see if this works
+                // WARN cache can be empty because this is pre-caching
+                if let core::Val::Num { n } =
+                    offset.eval(arena, &Env::default(), &Cache::default(), env)?
+                {
                     let i = n.round() as i32;
 
                     Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 + i) as usize)
@@ -736,7 +756,11 @@ impl<'p> LocTm<'p> {
                 }
             }
             LocTm::Minus { loc_tm, offset } => {
-                if let core::Val::Num { n } = offset.eval(arena, env, &Env::default())? {
+                // WARN changed the order of env and env default; see if this works
+                // WARN cache can be empty because this is pre-caching
+                if let core::Val::Num { n } =
+                    offset.eval(arena, &Env::default(), &Cache::default(), env)?
+                {
                     let i = n.round() as i32;
 
                     Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 - i) as usize)
@@ -744,6 +768,23 @@ impl<'p> LocTm<'p> {
                     panic!("sized read pattern wasn't numeric type?!")
                 }
             }
+        }
+    }
+
+    fn coerce<'a>(&self, arena: &'a Arena) -> LocTm<'a>
+    where
+        'p: 'a,
+    {
+        match self {
+            LocTm::Var { loc } => LocTm::Var { loc: *loc },
+            LocTm::Plus { loc_tm, offset } => LocTm::Plus {
+                loc_tm: Arc::new(loc_tm.coerce(arena)),
+                offset: offset.coerce(arena),
+            },
+            LocTm::Minus { loc_tm, offset } => LocTm::Minus {
+                loc_tm: Arc::new(loc_tm.coerce(arena)),
+                offset: offset.coerce(arena),
+            },
         }
     }
 }

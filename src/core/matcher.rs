@@ -15,9 +15,9 @@ pub trait Matcher<'p>: Send + Sync {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+        env: &Env<Val<'a>>,
+        val: &Val<'a>,
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a;
 }
@@ -30,9 +30,9 @@ impl<'p> Matcher<'p> for Chain<'p> {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+        env: &Env<Val<'a>>,
+        val: &Val<'a>,
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
@@ -52,14 +52,14 @@ impl<'p> Matcher<'p> for FieldAccess<'p> {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+        env: &Env<Val<'a>>,
+        val: &Val<'a>,
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
         match val {
-            Val::Rec(rec) => match rec.get(self.name.as_bytes(), arena) {
+            Val::Rec { rec } => match rec.get(self.name.as_bytes(), arena) {
                 Ok(field) => self.inner.evaluate(arena, env, &field),
                 // such errors are actually OK when pattern matching,
                 // just means the pattern didn't match!
@@ -75,9 +75,9 @@ impl<'p> Matcher<'p> for Succeed {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+        env: &Env<Val<'a>>,
+        val: &Val<'a>,
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
@@ -91,13 +91,13 @@ impl<'p> Matcher<'p> for Bind {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+        env: &Env<Val<'a>>,
+        val: &Val<'a>,
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
-        Ok(vec![vec![val]])
+        Ok(vec![vec![val.clone()]])
     }
 }
 
@@ -115,9 +115,9 @@ impl<'p> Matcher<'p> for Equal<'p> {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
-        env: &Env<&'a Val<'a>>,
-        val: &'a Val<'a>,
-    ) -> Result<Vec<Vec<&'a Val<'a>>>, EvalError>
+        env: &Env<Val<'a>>,
+        val: &Val<'a>,
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {

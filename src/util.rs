@@ -100,6 +100,33 @@ impl<A> Env<A> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Cache<A> {
+    vec: Vec<A>,
+}
+
+impl<A: Clone> Cache<A> {
+    pub fn push(&self, a: A) -> (Cache<A>, usize) {
+        let index = self.vec.len();
+        let mut vec = self.vec.clone();
+        vec.push(a);
+
+        (Cache { vec }, index)
+    }
+
+    pub fn get(&self, index: usize) -> &A {
+        self.vec.get(index).expect("Bad index in cache!")
+    }
+}
+
+impl<A> Default for Cache<A> {
+    fn default() -> Self {
+        Cache {
+            vec: Vec::default(),
+        }
+    }
+}
+
 impl<A: Display> Display for Env<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         format!(

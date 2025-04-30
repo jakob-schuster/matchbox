@@ -164,6 +164,7 @@ pub fn read_any<'p, 'a: 'p>(
     match filetype {
         FileType::Fasta => read_fa_multithreaded(buffer, prog, env, cache, output_handler),
         FileType::Fastq => read_fq_multithreaded(buffer, prog, env, cache, output_handler),
+        FileType::Sam => read_sam_multithreaded(buffer, prog, env, cache, output_handler),
         _ => panic!("unexpected filetype?!"),
     }
 }
@@ -287,6 +288,58 @@ pub fn read_fq_multithreaded<'p, 'a: 'p>(
                     let arena = Arena::new();
                     let val = core::Val::Rec {
                         rec: Arc::new(rec::FastqRead { read: &read }),
+                    };
+                    let effects = prog.eval(&arena, env, cache, val);
+
+                    effects
+                }
+                Err(_) => panic!("bad read?!"),
+            })
+            .collect_into_vec(&mut effects);
+
+        for result_effects in &effects {
+            for effect in result_effects.as_ref().expect("") {
+                output_handler.handle(effect).unwrap();
+            }
+        }
+    }
+
+    output_handler.finish();
+}
+
+pub fn read_sam_multithreaded<'p, 'a: 'p>(
+    buffer: Box<dyn BufRead>,
+    prog: &core::Prog<'p>,
+    env: &Env<Val<'p>>,
+    cache: &Cache<Val<'p>>,
+    output_handler: &mut OutputHandler,
+) {
+    let mut reader = noodles::sam::io::Reader::new(buffer);
+    let header = reader.read_header();
+    let input_records = reader.records();
+
+    for chunk in &input_records.chunks(10000) {
+        let mut effects = vec![];
+
+        chunk
+            .collect_vec()
+            .into_par_iter()
+            .map(|record| match record {
+                Ok(read) => {
+                    let arena = Arena::new();
+                    let cigar = read.cigar();
+                    let seq = read.sequence();
+                    let qual = read.quality_scores();
+                    let data = read.data();
+
+                    let val = core::Val::Rec {
+                        rec: Arc::new(rec::SamRead {
+                            read: &read,
+                            cigar: &cigar,
+                            seq: &seq,
+                            qual: &qual,
+                            data: &data,
+                        }),
                     };
                     let effects = prog.eval(&arena, env, cache, val);
 

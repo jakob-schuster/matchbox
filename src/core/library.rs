@@ -75,6 +75,7 @@ pub fn foreign<'a>(
 
         "unary_minus" => Ok(Arc::new(unary_minus)),
         "unary_reverse_complement" => Ok(Arc::new(unary_reverse_complement)),
+        "unary_read_reverse_complement" => Ok(Arc::new(unary_read_reverse_complement)),
 
         "read_ty" => Ok(Arc::new(read_ty)),
 
@@ -353,6 +354,69 @@ pub fn unary_reverse_complement<'a>(
     }
 }
 
+pub fn unary_read_reverse_complement<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Rec { rec }] => {
+            if let Ok(Val::Str { s: seq }) = rec.get(b"seq", arena) {
+                if let Ok(Val::Str { s: qual }) = rec.get(b"qual", arena) {
+                    let mut rev_qual = qual.to_vec();
+                    rev_qual.reverse();
+
+                    Ok(Val::Rec {
+                        rec: Arc::new(rec.with_all(
+                            &[
+                                (
+                                    b"seq",
+                                    Val::Str {
+                                        s: arena.alloc(util::rev_comp(seq)),
+                                    },
+                                ),
+                                (
+                                    b"qual",
+                                    Val::Str {
+                                        s: arena.alloc(rev_qual),
+                                    },
+                                ),
+                            ],
+                            arena,
+                        )),
+                    })
+                } else {
+                    Ok(Val::Rec {
+                        rec: Arc::new(rec.with(
+                            b"seq",
+                            Val::Str {
+                                s: arena.alloc(util::rev_comp(seq)),
+                            },
+                            arena,
+                        )),
+                    })
+                }
+            } else {
+                Err(EvalError {
+                    location: location.clone(),
+                    message: format!(
+                        "bad arguments given to function {}?!",
+                        vtms.iter().map(|v| v.to_string()).join(", ")
+                    ),
+                })
+            }
+        }
+
+        _ => Err(EvalError {
+            location: location.clone(),
+            message: format!(
+                "bad arguments given to function {}?!",
+                vtms.iter().map(|v| v.to_string()).join(", ")
+            ),
+        }),
+    }
+}
+
 pub fn read_ty<'a>(
     arena: &'a Arena,
     location: &Location,
@@ -613,7 +677,10 @@ pub fn tag<'a>(
         }
         _ => Err(EvalError::new(
             &location,
-            "bad arguments given to function?!",
+            &format!(
+                "bad arguments given to function {}?!",
+                vtms.iter().map(|v| v.to_string()).join(", ")
+            ),
         )),
     }
 }

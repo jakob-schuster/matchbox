@@ -1312,19 +1312,22 @@ fn infer_un_op<'a>(
             let ctm0 = check_tm(arena, ctx, tm, ty0)?;
 
             match ctx.lookup(name.to_string()) {
-                Some((index, ty)) => Ok((
-                    core::Tm::new(
-                        location.clone(),
-                        core::TmData::FunApp {
-                            head: Arc::new(core::Tm::new(
-                                location.clone(),
-                                core::TmData::Var { index },
-                            )),
-                            args: vec![ctm0],
-                        },
-                    ),
-                    ty.clone(),
-                )),
+                Some((index, ty)) => match ty {
+                    core::Val::FunTy { args, body } => Ok((
+                        core::Tm::new(
+                            location.clone(),
+                            core::TmData::FunApp {
+                                head: Arc::new(core::Tm::new(
+                                    location.clone(),
+                                    core::TmData::Var { index },
+                                )),
+                                args: vec![ctm0],
+                            },
+                        ),
+                        body.as_ref().clone(),
+                    )),
+                    _ => panic!("operator has non-function type?!"),
+                },
                 None => Err(ElabError::new_unbound_name(location, name)),
             }
         };
@@ -1334,49 +1337,79 @@ fn infer_un_op<'a>(
         UnOp::Minus => {
             let (ctm0, cty0) = infer_tm(arena, ctx, tm)?;
 
-            match cty0 {
-                core::Val::NumTy => match ctx.lookup("unary_minus".to_string()) {
-                    Some((index, ty)) => Ok((
-                        core::Tm::new(
-                            location.clone(),
-                            core::TmData::FunApp {
-                                head: Arc::new(core::Tm::new(
-                                    location.clone(),
-                                    core::TmData::Var { index },
-                                )),
-                                args: vec![ctm0],
-                            },
-                        ),
-                        ty.clone(),
-                    )),
+            if cty0.equiv(&core::Val::NumTy) {
+                match ctx.lookup("unary_minus".to_string()) {
+                    Some((index, ty)) => match ty {
+                        core::Val::FunTy { args, body } => Ok((
+                            core::Tm::new(
+                                location.clone(),
+                                core::TmData::FunApp {
+                                    head: Arc::new(core::Tm::new(
+                                        location.clone(),
+                                        core::TmData::Var { index },
+                                    )),
+                                    args: vec![ctm0],
+                                },
+                            ),
+                            body.as_ref().clone(),
+                        )),
+                        _ => panic!("operator has non-function type?!"),
+                    },
                     None => Err(ElabError::new_unbound_name(location, "unary_minus")),
-                },
-                core::Val::StrTy => match ctx.lookup("unary_reverse_complement".to_string()) {
-                    Some((index, ty)) => Ok((
-                        core::Tm::new(
-                            location.clone(),
-                            core::TmData::FunApp {
-                                head: Arc::new(core::Tm::new(
-                                    location.clone(),
-                                    core::TmData::Var { index },
-                                )),
-                                args: vec![ctm0],
-                            },
-                        ),
-                        ty.clone(),
-                    )),
+                }
+            } else if cty0.equiv(&core::Val::StrTy) {
+                match ctx.lookup("unary_reverse_complement".to_string()) {
+                    Some((index, ty)) => match ty {
+                        core::Val::FunTy { body, .. } => Ok((
+                            core::Tm::new(
+                                location.clone(),
+                                core::TmData::FunApp {
+                                    head: Arc::new(core::Tm::new(
+                                        location.clone(),
+                                        core::TmData::Var { index },
+                                    )),
+                                    args: vec![ctm0],
+                                },
+                            ),
+                            body.as_ref().clone(),
+                        )),
+                        _ => panic!("operator has non-function type?!"),
+                    },
                     None => Err(ElabError::new_unbound_name(
                         location,
                         "unary_reverse_complement",
                     )),
-                },
-                core::Val::FunReturnTyAwaiting { .. } => panic!(
-                    "trying to apply an operation on a value whose type is not yet defined; todo"
-                ),
-                _ => Err(ElabError::new(
+                }
+            } else if cty0.equiv(&core::Val::RecWithTy {
+                fields: vec![CoreRecField::new(b"seq", core::Val::StrTy)],
+            }) {
+                match ctx.lookup("unary_read_reverse_complement".to_string()) {
+                    Some((index, ty)) => match ty {
+                        core::Val::FunTy { body, .. } => Ok((
+                            core::Tm::new(
+                                location.clone(),
+                                core::TmData::FunApp {
+                                    head: Arc::new(core::Tm::new(
+                                        location.clone(),
+                                        core::TmData::Var { index },
+                                    )),
+                                    args: vec![ctm0],
+                                },
+                            ),
+                            body.as_ref().clone(),
+                        )),
+                        _ => panic!("operator has non-function type?!"),
+                    },
+                    None => Err(ElabError::new_unbound_name(
+                        location,
+                        "unary_read_reverse_complement",
+                    )),
+                }
+            } else {
+                Err(ElabError::new(
                     &ctm0.location,
                     &format!("mismatched types: expected Num or Str, got {}", cty0),
-                )),
+                ))
             }
         }
     }

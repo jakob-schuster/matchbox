@@ -1,6 +1,6 @@
 use noodles::sam::record::Sequence;
 
-use crate::util::{self, Arena, Location};
+use crate::util::{self, Arena, CoreRecField, Location};
 use std::{collections::HashMap, fmt::Display, rc::Rc, sync::Arc};
 
 use super::{EvalError, InternalError, Val};
@@ -213,11 +213,22 @@ impl<'a> Display for FastqRead<'a> {
 pub struct SamRead<'a> {
     pub read: &'a noodles::sam::Record,
 
-    record: &'a noodles::sam::Record,
-    cigar: &'a noodles::sam::record::Cigar<'a>,
-    seq: &'a noodles::sam::record::Sequence<'a>,
-    qual: &'a noodles::sam::record::QualityScores<'a>,
-    data: &'a noodles::sam::record::Data<'a>,
+    pub cigar: &'a noodles::sam::record::Cigar<'a>,
+    pub seq: &'a noodles::sam::record::Sequence<'a>,
+    pub qual: &'a noodles::sam::record::QualityScores<'a>,
+    pub data: &'a noodles::sam::record::Data<'a>,
+}
+
+impl<'a> SamRead<'a> {
+    // pub fn new(read: &'a noodles::sam::Record) -> SamRead<'a> {
+    //     SamRead {
+    //         read,
+    //         cigar: read.cigar(),
+    //         seq: todo!(),
+    //         qual: todo!(),
+    //         data: todo!(),
+    //     }
+    // }
 }
 
 impl<'p> Rec<'p> for SamRead<'p> {
@@ -226,13 +237,58 @@ impl<'p> Rec<'p> for SamRead<'p> {
         'p: 'a,
     {
         match key {
-            b"seq" => Ok(Val::Str {
-                s: self.seq.as_ref(),
+            b"qname" | b"id" => Ok(Val::Str {
+                s: self.read.name().unwrap_or_default(),
+            }),
+
+            b"flag" => Ok(Val::Num {
+                n: self.read.flags().unwrap_or_default().bits() as f32,
+            }),
+
+            b"flag_rec" => Ok(Val::Rec {
+                rec: Arc::new(SamFlags {
+                    flags: self.read.flags().unwrap(),
+                }),
+            }),
+
+            b"rname" => Ok(Val::Str {
+                s: self.read.reference_sequence_name().unwrap_or_default(),
+            }),
+
+            b"pos" => Ok(Val::Num {
+                n: self.read.alignment_start().unwrap().unwrap().get() as f32,
+            }),
+
+            b"mapq" => Ok(Val::Num {
+                n: self.read.mapping_quality().unwrap().unwrap().get() as f32,
             }),
 
             b"cigar" => Ok(Val::Str {
                 s: self.cigar.as_ref(),
             }),
+
+            b"rnext" => Ok(Val::Str {
+                s: self.read.mate_reference_sequence_name().unwrap_or_default(),
+            }),
+
+            b"pnext" => Ok(Val::Num {
+                n: self.read.mate_alignment_start().unwrap().unwrap().get() as f32,
+            }),
+
+            b"tlen" => Ok(Val::Num {
+                n: self.read.template_length().unwrap_or_default() as f32,
+            }),
+
+            b"seq" => Ok(Val::Str {
+                s: self.seq.as_ref(),
+            }),
+
+            b"qual" => Ok(Val::Str {
+                s: self.qual.as_ref(),
+            }),
+
+            // WARN need to do this
+            b"tags" => todo!(),
 
             _ => Err(InternalError {
                 message: String::from_utf8(key.to_vec()).expect("Couldn't convert vec to string!"),
@@ -262,5 +318,31 @@ impl<'p> Display for SamRead<'p> {
         let map = self.all(&arena);
         let s = ConcreteRec { map }.fmt(f);
         s
+    }
+}
+
+pub struct SamFlags {
+    pub flags: noodles::sam::alignment::record::Flags,
+}
+
+impl<'p> Rec<'p> for SamFlags {
+    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<Val<'a>, InternalError>
+    where
+        'p: 'a,
+    {
+        todo!()
+    }
+
+    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], Val<'a>>
+    where
+        'p: 'a,
+    {
+        todo!()
+    }
+}
+
+impl<'p> Display for SamFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
     }
 }

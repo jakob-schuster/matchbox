@@ -112,7 +112,8 @@ peg::parser! {
         pub rule tm() -> Tm = located(<tm_data()>)
         #[cache_left_rec]
         rule tm_data() -> TmData
-            = tm_data1()
+            = arg1:tm() _ "|>" _ head:tm9() "(" _ args:list(<tm()>, <",">) _ ")" { TmData::FunApp { head: Rc::new(head), args: [arg1].into_iter().chain(args.into_iter()).collect::<Vec<_>>() } }
+            / tm_data1()
 
         rule tm1() -> Tm = located(<tm_data1()>)
         #[cache_left_rec]

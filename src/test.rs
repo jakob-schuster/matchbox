@@ -41,11 +41,8 @@ fn elab_test(code: &str) -> Result<String, GenericError> {
     let ctx = standard_library(&arena);
 
     // parse the standard library
-    let library_prog = parse(
-        &read_code_from_script("local/standard_library.mb").unwrap(),
-        &global_config,
-    )
-    .map_err(GenericError::from)?;
+    let library_code = String::from_utf8(include_bytes!("standard_library.mb").to_vec()).unwrap();
+    let library_prog = parse(&library_code, &global_config).map_err(GenericError::from)?;
 
     // elaborate to generate the context
     let ctx =
@@ -78,11 +75,8 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
     let ctx = standard_library(&arena);
 
     // parse the standard library
-    let library_prog = parse(
-        &read_code_from_script("local/standard_library.mb").unwrap(),
-        &global_config,
-    )
-    .map_err(GenericError::from)?;
+    let library_code = String::from_utf8(include_bytes!("standard_library.mb").to_vec()).unwrap();
+    let library_prog = parse(&library_code, &global_config).map_err(GenericError::from)?;
 
     // elaborate to generate the context
     let ctx =

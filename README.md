@@ -15,3 +15,4 @@ Currently you'll have a (slightly!) more stable experience with the original pro
 - [ ] add search term parameters
 - [x] make standard library on compile
 - [ ] make reverse complement work for reads as well
+- [x] add pipe operator again

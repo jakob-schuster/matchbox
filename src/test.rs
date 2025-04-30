@@ -64,8 +64,8 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
     use std::sync::Arc;
 
     use crate::{
-        core::library::standard_library, read_code_from_script, surface::elab_prog_for_ctx,
-        GenericError,
+        core::library::standard_library, read::FileType, read_code_from_script,
+        surface::elab_prog_for_ctx, GenericError,
     };
 
     let global_config = GlobalConfig::default();
@@ -89,7 +89,8 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
         elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
 
     // elaborate to a core program
-    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena), &prog).map_err(GenericError::from)?;
+    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, &FileType::Fasta), &prog)
+        .map_err(GenericError::from)?;
     let (core_prog, cache) = core_prog.cache(&arena, &ctx.tms)?;
 
     // create a toy read

@@ -648,23 +648,26 @@ impl<'p> Tm<'p> {
         'p: 'a,
     {
         // this is still pre-caching
-        let val = self.eval(arena, global_env, &Cache::default(), env)?;
+        if let Ok(val) = self.eval(arena, global_env, &Cache::default(), env) {
+            match val {
+                // for now, shallow caching
+                Val::Neutral { .. } => Ok((self.clone(), cache.clone())),
 
-        match val {
-            // for now, shallow caching
-            Val::Neutral { .. } => Ok((self.clone(), cache.clone())),
+                // otherwise, cache the value and change the tm
+                // (this is the ENTIRE bit of program logic for this caching operation.
+                // could we do all of this with a fold somehow?)
+                _ => {
+                    let (cache, index) = cache.push(val);
 
-            // otherwise, cache the value and change the tm
-            // (this is the ENTIRE bit of program logic for this caching operation.
-            // could we do all of this with a fold somehow?)
-            _ => {
-                let (cache, index) = cache.push(val);
-
-                Ok((
-                    Tm::new(self.location.clone(), TmData::Cached { index }),
-                    cache,
-                ))
+                    Ok((
+                        Tm::new(self.location.clone(), TmData::Cached { index }),
+                        cache,
+                    ))
+                }
             }
+        } else {
+            // if the evaluation had an error, don't worry about caching
+            Ok((self.clone(), cache.clone()))
         }
     }
 
@@ -682,7 +685,7 @@ impl<'p> Tm<'p> {
             TmData::NumTy => TmData::NumTy,
             TmData::NumLit { n } => TmData::NumLit { n: *n },
             TmData::StrTy => TmData::StrTy,
-            TmData::StrLit { s } => TmData::StrLit { s: s.clone() },
+            TmData::StrLit { s } => TmData::StrLit { s },
             TmData::ListTy { ty } => TmData::ListTy {
                 ty: Arc::new(ty.coerce(arena)),
             },
@@ -923,7 +926,7 @@ impl<'a> Val<'a> {
                 names.clone().all(|name| with_names.clone().contains(name))
                     && fields
                         .iter()
-                        .all(|field| match get(with_fields, &field.name) {
+                        .all(|field| match get(with_fields, field.name) {
                             // if it contains it, they must be equiv
                             Some(ty) => field.data.equiv(&ty),
                             // if it doesn't contain it, that's fine

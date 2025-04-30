@@ -1,3 +1,5 @@
+use noodles::sam::record::Sequence;
+
 use crate::util::{self, Arena, Location};
 use std::{collections::HashMap, fmt::Display, rc::Rc, sync::Arc};
 
@@ -174,7 +176,7 @@ impl<'p> Rec<'p> for FastqRead<'p> {
                 s: self.read.desc().unwrap_or_default().as_bytes(),
             }),
             b"qual" => Ok(Val::Str {
-                s: self.read.desc().unwrap_or_default().as_bytes(),
+                s: self.read.qual(),
             }),
 
             _ => Err(InternalError {
@@ -200,6 +202,65 @@ impl<'p> Rec<'p> for FastqRead<'p> {
 
 impl<'a> Display for FastqRead<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        // note: this seems highly wasteful
+        let arena = Arena::new();
+        let map = self.all(&arena);
+        let s = ConcreteRec { map }.fmt(f);
+        s
+    }
+}
+
+pub struct SamRead<'a> {
+    pub read: &'a noodles::sam::Record,
+
+    record: &'a noodles::sam::Record,
+    cigar: &'a noodles::sam::record::Cigar<'a>,
+    seq: &'a noodles::sam::record::Sequence<'a>,
+    qual: &'a noodles::sam::record::QualityScores<'a>,
+    data: &'a noodles::sam::record::Data<'a>,
+}
+
+impl<'p> Rec<'p> for SamRead<'p> {
+    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<Val<'a>, InternalError>
+    where
+        'p: 'a,
+    {
+        match key {
+            b"seq" => Ok(Val::Str {
+                s: self.seq.as_ref(),
+            }),
+
+            b"cigar" => Ok(Val::Str {
+                s: self.cigar.as_ref(),
+            }),
+
+            _ => Err(InternalError {
+                message: String::from_utf8(key.to_vec()).expect("Couldn't convert vec to string!"),
+            }),
+        }
+    }
+
+    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], Val<'a>>
+    where
+        'p: 'a,
+    {
+        let mut map: HashMap<&'a [u8], Val<'a>> = HashMap::new();
+        let fields: Vec<&[u8]> = vec![b"seq", b"id", b"desc", b"qual"];
+
+        for field in fields {
+            map.insert(field, self.get(field, arena).expect("Couldn't get field!"));
+        }
+
+        map
+    }
+}
+
+impl<'p> Display for SamRead<'p> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // note: this seems highly wasteful
+        let arena = Arena::new();
+        let map = self.all(&arena);
+        let s = ConcreteRec { map }.fmt(f);
+        s
     }
 }

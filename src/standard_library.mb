@@ -1,0 +1,60 @@
+binary_plus = $(n0: Num, n1: Num): Num => binary_plus
+binary_times = $(n0: Num, n1: Num): Num => binary_times
+binary_minus = $(n0: Num, n1: Num): Num => binary_minus
+binary_division = $(n0: Num, n1: Num): Num => binary_division
+binary_modulo = $(n0: Num, n1: Num): Num => binary_modulo
+binary_exponent = $(n0: Num, n1: Num): Num => binary_exponent
+
+binary_equal = $(v0: Any, v1: Any): Bool => binary_equal
+binary_not_equal = $(v0: Any, v1: Any): Bool => binary_not_equal
+
+binary_less_than = $(n0: Num, n1: Num): Bool => binary_less_than
+binary_greater_than = $(n0: Num, n1: Num): Bool => binary_greater_than
+binary_greater_than = $(n0: Num, n1: Num): Bool => binary_greater_than
+binary_less_than_or_equal = $(n0: Num, n1: Num): Bool => binary_less_than_or_equal
+binary_greater_than_or_equal = $(n0: Num, n1: Num): Bool => binary_greater_than_or_equal
+
+binary_and = $(b0: Bool, b1: Bool): Bool => binary_and
+binary_or = $(b0: Bool, b1: Bool): Bool => binary_or
+
+unary_minus = $(n0: Num): Num => unary_minus
+unary_reverse_complement = $(n0: Num): Num => unary_reverse_complement
+
+read_ty = $(filetype: Str): Type => read_ty
+
+len = $(s: Str): Num => len
+slice = $(s: Str, start: Num, end: Num): Str => slice
+
+tag = $(r: { desc: Str .. }, tag: Str): Any => tag
+
+translate = $(seq: Str): Str => translate
+
+str_concat = $(s0: Str, s1: Str): Str => str_concat
+
+concat = $(r0: { seq: Str ..}, r1: {seq: Str ..}): {seq: Str ..} => concat
+
+csv_ty = $(filename: Str): Type => csv_ty
+csv = $(filename: Str): [csv_ty(filename)] => csv
+
+tsv_ty = $(filename: Str): Type => tsv_ty
+tsv = $(filename: Str): [tsv_ty(filename)] => tsv
+
+fasta = $(filename: Str): [{ seq: Str, id: Str, desc: Str }] => fasta
+
+find_first = $(s0: Str, s1: Str): Num => find_first
+find_last = $(s0: Str, s1: Str): Num => find_last
+
+to_upper = $(s: Str): Str => to_upper
+to_lower = $(s: Str): Str => to_lower
+
+describe = $(r: { seq: Str }, search_terms: {..}): Str => describe
+
+contains = $(list: [Any], val: Any): Bool => contains
+distance = $(s0: Str, s1: Str): Num => distance
+
+to_str = $(val: Any): Str => to_str
+
+stdout! = $(val: Any): Effect => stdout!
+count! = $(val: Any): Effect => count!
+out! = $(val: Any, filename: Str): Effect => out!
+average! = $(num: Num): Effect => average!

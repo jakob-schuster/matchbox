@@ -359,25 +359,192 @@ pub fn read_ty<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [] => Ok(Val::RecTy {
-            fields: vec![
-                CoreRecField {
-                    name: b"seq",
-                    data: Val::StrTy,
-                },
-                CoreRecField {
-                    name: b"id",
-                    data: Val::StrTy,
-                },
-                CoreRecField {
-                    name: b"desc",
-                    data: Val::StrTy,
-                },
-            ],
-        }),
+        [Val::Str { s: filetype }] => match *filetype {
+            b"fa" => Ok(Val::RecTy {
+                fields: vec![
+                    CoreRecField {
+                        name: b"seq",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"id",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"desc",
+                        data: Val::StrTy,
+                    },
+                ],
+            }),
+            b"fq" => Ok(Val::RecTy {
+                fields: vec![
+                    CoreRecField {
+                        name: b"seq",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"id",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"desc",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"qual",
+                        data: Val::StrTy,
+                    },
+                ],
+            }),
+
+            b"sam" | b"bam" => Ok(Val::RecTy {
+                // in the order as described in the spec
+                fields: vec![
+                    // Query template name
+                    CoreRecField {
+                        name: b"qname",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"id",
+                        data: Val::StrTy,
+                    },
+                    // Bitwise flag
+                    CoreRecField {
+                        name: b"flag",
+                        data: Val::NumTy,
+                    },
+                    CoreRecField {
+                        name: b"flag_rec",
+                        data: Val::RecTy {
+                            fields: vec![
+                                CoreRecField {
+                                    name: b"paired",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"mapped_in_proper_pair",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"unmapped",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"mate_unmapped",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"reverse_strand",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"mate_reverse_strand",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"first_in_pair",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"second_in_pair",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"not_primary_alignment",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"fails_platform_quality_checks",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"pcr_or_optical_duplicate",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"supplementary_alignment",
+                                    data: Val::BoolTy,
+                                },
+                            ],
+                        },
+                    },
+                    // Reference sequence name
+                    CoreRecField {
+                        name: b"rname",
+                        data: Val::StrTy,
+                    },
+                    // 1-based leftmost mapping position
+                    CoreRecField {
+                        name: b"pos",
+                        data: Val::NumTy,
+                    },
+                    // Mapping quality
+                    CoreRecField {
+                        name: b"mapq",
+                        data: Val::NumTy,
+                    },
+                    // The CIGAR string
+                    CoreRecField {
+                        name: b"cigar",
+                        data: Val::StrTy,
+                    },
+                    // Reference name of the mate / next read
+                    CoreRecField {
+                        name: b"rnext",
+                        data: Val::StrTy,
+                    },
+                    // Position of the mate / next read
+                    CoreRecField {
+                        name: b"pnext",
+                        data: Val::NumTy,
+                    },
+                    // Observed template length
+                    CoreRecField {
+                        name: b"tlen",
+                        data: Val::NumTy,
+                    },
+                    // The actual sequence of the alignment
+                    CoreRecField {
+                        name: b"seq",
+                        data: Val::StrTy,
+                    },
+                    // The quality string of the alignment
+                    CoreRecField {
+                        name: b"qual",
+                        data: Val::StrTy,
+                    },
+                    // The optional tags associated with the alignment
+                    CoreRecField {
+                        name: b"tags",
+                        data: Val::ListTy {
+                            ty: Arc::new(Val::StrTy),
+                        },
+                    },
+                    // The optional tags associated with the alignment
+                    CoreRecField {
+                        name: b"desc",
+                        data: Val::ListTy {
+                            ty: Arc::new(Val::StrTy),
+                        },
+                    },
+                ],
+            }),
+
+            _ => Err(EvalError::new(
+                &location,
+                &format!(
+                    "unknown file type '{}'",
+                    String::from_utf8(filetype.to_vec()).unwrap()
+                ),
+            )),
+        },
         _ => Err(EvalError::new(
             &location,
-            "bad arguments given to function?!",
+            &format!(
+                "bad arguments given to function?! {}",
+                vtms.iter().join(",")
+            ),
         )),
     }
 }
@@ -568,9 +735,7 @@ pub fn csv_ty<'a>(
                 .map(|name| CoreRecField::new(*name, Val::StrTy))
                 .collect::<Vec<_>>();
 
-            Ok(Val::ListTy {
-                ty: Arc::new(Val::RecTy { fields }),
-            })
+            Ok(Val::RecTy { fields })
         }
 
         _ => Err(EvalError::new(
@@ -664,9 +829,7 @@ pub fn tsv_ty<'a>(
                 .map(|name| CoreRecField::new(*name, Val::StrTy))
                 .collect::<Vec<_>>();
 
-            Ok(Val::ListTy {
-                ty: Arc::new(Val::RecTy { fields }),
-            })
+            Ok(Val::RecTy { fields })
         }
 
         _ => Err(EvalError::new(
@@ -1098,6 +1261,25 @@ pub fn average_eff<'a>(
                 )]),
             },
         }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn slice_read<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Rec { rec }] => {
+            let a = todo!();
+
+            todo!()
+        }
 
         _ => Err(EvalError::new(
             &location,

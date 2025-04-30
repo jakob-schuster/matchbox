@@ -97,6 +97,20 @@ impl TryFrom<&str> for FileType {
     }
 }
 
+impl Display for FileType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileType::Fasta => "fa",
+            FileType::Fastq => "fq",
+            FileType::Sam => "sam",
+            FileType::Bam => "bam",
+            FileType::Matchbox => "mb",
+            FileType::List => "list",
+        }
+        .fmt(f)
+    }
+}
+
 /// Given a filename, gets the list of file extensions.
 pub fn get_extensions(input_file: &str) -> Vec<&str> {
     input_file.split('.').collect_vec()
@@ -148,8 +162,8 @@ pub fn read_any<'p, 'a: 'p>(
     let (filetype, buffer) = get_filetype_and_buffer(filename).unwrap();
 
     match filetype {
-        FileType::Fasta => read_fa(buffer, prog, env, cache, output_handler),
-        FileType::Fastq => read_fq(buffer, prog, env, cache, output_handler),
+        FileType::Fasta => read_fa_multithreaded(buffer, prog, env, cache, output_handler),
+        FileType::Fastq => read_fq_multithreaded(buffer, prog, env, cache, output_handler),
         _ => panic!("unexpected filetype?!"),
     }
 }
@@ -247,6 +261,45 @@ pub fn read_fq<'p, 'a: 'p>(
                 }
             }
             Err(_) => panic!("bad read?!"),
+        }
+    }
+
+    output_handler.finish();
+}
+
+pub fn read_fq_multithreaded<'p, 'a: 'p>(
+    buffer: Box<dyn BufRead>,
+    prog: &core::Prog<'p>,
+    env: &Env<Val<'p>>,
+    cache: &Cache<Val<'p>>,
+    output_handler: &mut OutputHandler,
+) {
+    let input_records = bio::io::fastq::Reader::from_bufread(buffer).records();
+
+    for chunk in &input_records.chunks(10000) {
+        let mut effects = vec![];
+
+        chunk
+            .collect_vec()
+            .into_par_iter()
+            .map(|record| match record {
+                Ok(read) => {
+                    let arena = Arena::new();
+                    let val = core::Val::Rec {
+                        rec: Arc::new(rec::FastqRead { read: &read }),
+                    };
+                    let effects = prog.eval(&arena, env, cache, val);
+
+                    effects
+                }
+                Err(_) => panic!("bad read?!"),
+            })
+            .collect_into_vec(&mut effects);
+
+        for result_effects in &effects {
+            for effect in result_effects.as_ref().expect("") {
+                output_handler.handle(effect).unwrap();
+            }
         }
     }
 

@@ -9,6 +9,7 @@ use crate::{
         EvalError,
     },
     parse,
+    read::FileType,
     util::{Arena, Cache, CoreRecField, Env, Located, Location, Ran, RecField},
     visit, GlobalConfig,
 };
@@ -344,7 +345,10 @@ impl<'a> Context<'a> {
     }
 
     /// Binds the read to a parameter in the context
-    pub fn bind_read(&self, arena: &'a Arena) -> Context<'a> {
+    pub fn bind_read(&self, arena: &'a Arena, filetype: &FileType) -> Context<'a> {
+        // filetype must be allocated since it must survive
+        let filetype_bytes = arena.alloc(filetype.to_string().as_bytes().to_vec());
+
         self.bind_param(
             "read".to_string(),
             core::Tm::new(
@@ -353,7 +357,7 @@ impl<'a> Context<'a> {
                     head: Arc::new(core::Tm::new(
                         Location::new(0, 0),
                         core::TmData::FunForeignLit {
-                            args: vec![],
+                            args: vec![core::Tm::new(Location::new(0, 0), core::TmData::StrTy)],
                             body: Arc::new(core::library::read_ty),
                             body_ty: Arc::new(core::Tm::new(
                                 Location::new(0, 0),
@@ -361,7 +365,10 @@ impl<'a> Context<'a> {
                             )),
                         },
                     )),
-                    args: vec![],
+                    args: vec![core::Tm::new(
+                        Location::new(0, 0),
+                        core::TmData::StrLit { s: filetype_bytes },
+                    )],
                 },
             )
             // WARN cache can be empty because this is pre-caching

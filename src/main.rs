@@ -96,19 +96,25 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .build_global()
         .unwrap();
 
+    // need to know filetype of reads, for read type inference
+    let filetype = if let Some(reads_filename) = &global_config.reads {
+        let (filetype, _) = get_filetype_and_buffer(reads_filename).unwrap();
+        filetype
+    } else {
+        FileType::Fasta
+    };
+
     // establish a global-level arena and context,
     // for values allocated during elaboration
     let arena = Arena::new();
     let ctx = standard_library(&arena);
 
     // parse the standard library
-    let library_prog = parse(
-        &read_code_from_script("local/standard_library.mb").unwrap(),
-        global_config,
-    )
-    .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-    // should never unwrap, because program terminates
-    .unwrap();
+    let library_code = String::from_utf8(include_bytes!("standard_library.mb").to_vec()).unwrap();
+    let library_prog = parse(&library_code, global_config)
+        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        // should never unwrap, because program terminates
+        .unwrap();
 
     // elaborate to generate the context
     let ctx = elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog))
@@ -132,14 +138,14 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .unwrap();
 
     // elaborate to a core program
-    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena), arena.alloc(prog))
+    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, &filetype), arena.alloc(prog))
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();
 
     // cache the values
     let (core_prog, cache) = core_prog
-        .cache(&arena, &ctx.bind_read(&arena).tms)
+        .cache(&arena, &ctx.bind_read(&arena, &filetype).tms)
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();

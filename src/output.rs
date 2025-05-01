@@ -134,7 +134,7 @@ impl FileHandler {
             Some(s) => match s.as_bytes() {
                 b"fq" | b"fastq" => FileType::Fastq,
                 b"fa" | b"fasta" => FileType::Fasta,
-                // b"sam" => FileType::Sam,
+                b"sam" => FileType::Sam,
                 _ => FileType::Text,
             },
             None => FileType::Text,
@@ -220,7 +220,71 @@ impl FileHandler {
                         "trying to write to a FASTA file with a value that isn't a read",
                     )),
                 },
-                FileType::Sam => todo!(),
+
+                FileType::Sam => match val {
+                    PortableVal::Rec { fields } => {
+                        if let (
+                            Some(PortableVal::Str { s: qname }),
+                            Some(PortableVal::Num { n: flag }),
+                            Some(PortableVal::Str { s: rname }),
+                            Some(PortableVal::Num { n: pos }),
+                            Some(PortableVal::Num { n: mapq }),
+                            Some(PortableVal::Str { s: cigar }),
+                            Some(PortableVal::Str { s: rnext }),
+                            Some(PortableVal::Num { n: pnext }),
+                            Some(PortableVal::Num { n: tlen }),
+                            Some(PortableVal::Str { s: seq }),
+                            Some(PortableVal::Str { s: qual }),
+                            Some(PortableVal::Str { s: tags }),
+                        ) = (
+                            fields.get(&b"qname".to_vec()),
+                            fields.get(&b"flag".to_vec()),
+                            fields.get(&b"rname".to_vec()),
+                            fields.get(&b"pos".to_vec()),
+                            fields.get(&b"mapq".to_vec()),
+                            fields.get(&b"cigar".to_vec()),
+                            fields.get(&b"rnext".to_vec()),
+                            fields.get(&b"pnext".to_vec()),
+                            fields.get(&b"tlen".to_vec()),
+                            fields.get(&b"seq".to_vec()),
+                            fields.get(&b"qual".to_vec()),
+                            fields.get(&b"tags".to_vec()),
+                        ) {
+                            file.write_all(
+                                format!(
+                                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                                    bytes_to_string(qname).unwrap(),
+                                    flag,
+                                    bytes_to_string(rname).unwrap(),
+                                    pos,
+                                    mapq,
+                                    bytes_to_string(cigar).unwrap(),
+                                    bytes_to_string(rnext).unwrap(),
+                                    pnext,
+                                    tlen,
+                                    bytes_to_string(seq).unwrap(),
+                                    bytes_to_string(qual).unwrap(),
+                                    bytes_to_string(tags).unwrap(),
+                                    // data.iter()
+                                    //     .map(|v| v.to_string())
+                                    //     .collect::<Vec<_>>()
+                                    //     .join("\t"),
+                                )
+                                .as_bytes(),
+                            )
+                            .expect("Couldn't write to file!");
+
+                            Ok(())
+                        } else {
+                            Err(InternalError::new(
+                                "read didn't have correct fields to write to FASTA",
+                            ))
+                        }
+                    }
+                    _ => Err(InternalError::new(
+                        "trying to write to a SAM file with a value that isn't a read",
+                    )),
+                },
             }
         } else {
             // file needs to be created

@@ -245,42 +245,74 @@ impl<'p> Rec<'p> for SamRead<'p> {
                 n: self.read.flags().unwrap_or_default().bits() as f32,
             }),
 
-            b"flag_rec" => Ok(Val::Rec {
-                rec: Arc::new(SamFlags {
-                    flags: self.read.flags().unwrap(),
-                }),
-            }),
-
+            // b"flag_rec" => Ok(Val::Rec {
+            //     rec: Arc::new(SamFlags {
+            //         flags: self.read.flags().unwrap(),
+            //     }),
+            // }),
             b"rname" => Ok(Val::Str {
-                s: self.read.reference_sequence_name().unwrap_or_default(),
+                s: self
+                    .read
+                    .reference_sequence_name()
+                    .map(|a| a.as_ref())
+                    .unwrap_or(b"*"),
             }),
 
             b"pos" => Ok(Val::Num {
-                n: self.read.alignment_start().unwrap().unwrap().get() as f32,
+                n: self
+                    .read
+                    .alignment_start()
+                    .map(|r| r.map(|pos| pos.get() as f32))
+                    .unwrap_or(Ok(0.0))
+                    .unwrap(),
             }),
 
             b"mapq" => Ok(Val::Num {
-                n: self.read.mapping_quality().unwrap().unwrap().get() as f32,
+                n: self
+                    .read
+                    .mapping_quality()
+                    .map(|r| r.map(|mapq| mapq.get() as f32))
+                    .unwrap_or(Ok(-1.0))
+                    .unwrap(),
             }),
 
             b"cigar" => Ok(Val::Str {
-                s: self.cigar.as_ref(),
+                s: match self.cigar.as_ref() {
+                    b"" => b"*",
+                    r => r,
+                },
             }),
 
             b"rnext" => Ok(Val::Str {
-                s: self.read.mate_reference_sequence_name().unwrap_or_default(),
+                s: self
+                    .read
+                    .mate_reference_sequence_name()
+                    .map(|a| a.as_ref())
+                    .unwrap_or(b"*"),
             }),
 
             b"pnext" => Ok(Val::Num {
-                n: self.read.mate_alignment_start().unwrap().unwrap().get() as f32,
+                n: self
+                    .read
+                    .mate_alignment_start()
+                    .map(|r| r.map(|pos| pos.get() as f32))
+                    .unwrap_or(Ok(0.0))
+                    .unwrap(),
             }),
 
             b"tlen" => Ok(Val::Num {
-                n: self.read.template_length().unwrap_or_default() as f32,
+                n: self
+                    .read
+                    .template_length()
+                    .map(|tlen| tlen as f32)
+                    .unwrap_or(0.0),
             }),
 
             b"seq" => Ok(Val::Str {
-                s: self.seq.as_ref(),
+                s: match self.seq.as_ref() {
+                    b"" => b"*",
+                    r => r,
+                },
             }),
 
             b"qual" => Ok(Val::Str {
@@ -288,7 +320,9 @@ impl<'p> Rec<'p> for SamRead<'p> {
             }),
 
             // WARN need to do this
-            b"tags" => todo!(),
+            b"tags" => Ok(Val::Str {
+                s: self.data.as_ref(),
+            }),
 
             _ => Err(InternalError {
                 message: String::from_utf8(key.to_vec()).expect("Couldn't convert vec to string!"),
@@ -301,7 +335,11 @@ impl<'p> Rec<'p> for SamRead<'p> {
         'p: 'a,
     {
         let mut map: HashMap<&'a [u8], Val<'a>> = HashMap::new();
-        let fields: Vec<&[u8]> = vec![b"seq", b"id", b"desc", b"qual"];
+        let fields: Vec<&[u8]> = vec![
+            b"qname", b"id", b"flag", // b"flag_rec",
+            b"rname", b"pos", b"mapq", b"cigar", b"rnext", b"pnext", b"tlen", b"seq", b"qual",
+            b"tags",
+        ];
 
         for field in fields {
             map.insert(field, self.get(field, arena).expect("Couldn't get field!"));
@@ -337,7 +375,18 @@ impl<'p> Rec<'p> for SamFlags {
     where
         'p: 'a,
     {
-        todo!()
+        let mut map: HashMap<&'a [u8], Val<'a>> = HashMap::new();
+        let fields: Vec<&[u8]> = vec![
+            b"qname", b"id", b"flag", // b"flag_rec",
+            b"rname", b"pos", b"mapq", b"cigar", b"rnext", b"pnext", b"tlen", b"seq", b"qual",
+            b"tags",
+        ];
+
+        for field in fields {
+            map.insert(field, self.get(field, arena).expect("Couldn't get field!"));
+        }
+
+        map
     }
 }
 

@@ -581,9 +581,10 @@ pub fn read_ty<'a>(
                     // The optional tags associated with the alignment
                     CoreRecField {
                         name: b"tags",
-                        data: Val::ListTy {
-                            ty: Arc::new(Val::StrTy),
-                        },
+                        data: Val::StrTy,
+                        // data: Val::ListTy {
+                        //     ty: Arc::new(Val::StrTy),
+                        // },
                     },
                     // The optional tags associated with the alignment
                     CoreRecField {

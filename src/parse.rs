@@ -235,10 +235,16 @@ peg::parser! {
         rule rec_pattern_field() -> util::RecField<Pattern>
             = name:name() _ "=" _ pattern:pattern() { util::RecField::new(name, pattern) }
 
+        rule str_lit_char() -> char
+            = "\\n" { '\n' }
+            / "\\t" { '\t' }
+            / "\\\\" { '\\' }
+            / c:[c if c.is_ascii() && c != '\'' && c != '{' && c != '}' && c != '\\' ] { c }
+
         rule str_lit_region() -> StrLitRegion = located(<str_lit_region_data()>)
         rule str_lit_region_data() -> StrLitRegionData
             = "{" tm:tm() "}" { StrLitRegionData::Tm { tm } }
-            / s:[c if c.is_ascii() && c != '\'' && c != '{' && c != '}']+ { StrLitRegionData::Str { s: s.into_iter().map(|c| c as u8).collect() } }
+            / s:str_lit_char()+ { StrLitRegionData::Str { s: s.into_iter().map(|c| c as u8).collect() } }
 
         //
 

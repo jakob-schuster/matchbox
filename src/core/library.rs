@@ -95,7 +95,7 @@ pub fn foreign<'a>(
         "to_upper" => Ok(Arc::new(to_upper)),
         "to_lower" => Ok(Arc::new(to_lower)),
         "describe" => Ok(Arc::new(describe)),
-        "contains" => Ok(Arc::new(to_lower)),
+        "contains" => Ok(Arc::new(contains)),
         "distance" => Ok(Arc::new(distance)),
         "to_str" => Ok(Arc::new(to_str)),
 
@@ -1178,7 +1178,10 @@ pub fn contains<'a>(
 
         _ => Err(EvalError::new(
             &location,
-            "bad arguments given to function?!",
+            &format!(
+                "bad arguments given to function: '{}'?!",
+                vtms.iter().map(|a| a.to_string()).join(",")
+            ),
         )),
     }
 }

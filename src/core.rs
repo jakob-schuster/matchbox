@@ -589,7 +589,8 @@ impl<'p> Tm<'p> {
 
                 let body_ty = body_ty.eval(arena, global_env, cache, &smaller_env)?;
 
-                if args.iter().any(|arg| arg.is_neutral()) || body_ty.is_neutral() {
+                // we DON'T care if the body type is neutral
+                if args.iter().any(|arg| arg.is_neutral()) {
                     Ok(Val::Neutral {
                         neutral: Neutral::FunForeignLit {
                             args,
@@ -1285,11 +1286,14 @@ impl<'a> Val<'a> {
             Val::FunTy { args, opts, body } => {
                 args.iter().any(|arg| arg.is_neutral()) || body.is_neutral()
             }
+
+            // note: we NO LONGER CARE whether the body type is neutral.
+            // by this point, all should be well
             Val::FunForeign {
                 args,
                 body_ty,
                 body,
-            } => args.iter().any(|arg| arg.is_neutral()) || body_ty.is_neutral(),
+            } => args.iter().any(|arg| arg.is_neutral()),
             _ => false,
         }
     }
@@ -1416,12 +1420,8 @@ pub fn app<'a>(
     head: Val<'a>,
     args: Vec<Val<'a>>,
 ) -> Result<Val<'a>, EvalError> {
-    fn is_neutral(v: &Val) -> bool {
-        matches!(v, Val::Neutral { .. })
-    }
-
     // catch if anything's neutral
-    if is_neutral(&head) || args.iter().any(|arg| is_neutral(arg)) {
+    if head.is_neutral() || args.iter().any(|arg| arg.is_neutral()) {
         Ok(Val::Neutral {
             neutral: Neutral::FunApp {
                 head: Arc::new(head.clone()),
@@ -1782,7 +1782,16 @@ impl<'a> Display for Val<'a> {
             )
             .fmt(f),
             Val::Fun { data } => format!("#func({})", data).fmt(f),
-            Val::FunForeign { .. } => "#func(foreign)".fmt(f),
+            Val::FunForeign {
+                args,
+                body_ty,
+                body,
+            } => format!(
+                "#func-foreign({}): {}",
+                args.iter().map(|arg| arg.to_string()).join(", "),
+                body_ty
+            )
+            .fmt(f),
             Val::FunReturnTyAwaiting { data } => format!("#awaiting({})", data).fmt(f),
             Val::Neutral { neutral } => format!("#neutral({})", neutral).fmt(f),
             Val::EffectTy => "Effect".fmt(f),
@@ -1807,7 +1816,7 @@ impl<'a> Display for Neutral<'a> {
             Neutral::RecProj { tm, name } => {
                 format!("{}.{}", tm, bytes_to_string(name).unwrap()).fmt(f)
             }
-            Neutral::ListTy { ty } => format!("[{}]", ty).fmt(f),
+            Neutral::ListTy { ty } => format!("listty[{}]", ty).fmt(f),
             Neutral::ListLit { tms } => format!("[{}]", tms.into_iter().join(", ")).fmt(f),
             Neutral::RecTy { fields } => format!(
                 "{{ {} }}",
@@ -1935,7 +1944,6 @@ impl<'a> Display for PortableVal {
                 "{{ {} }}",
                 fields
                     .iter()
-                    .sorted_by_key(|(name, _)| *name)
                     .map(|(name, val)| format!(
                         "{} = {}",
                         String::from_utf8(name.clone()).unwrap(),

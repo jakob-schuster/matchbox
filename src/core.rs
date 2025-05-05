@@ -1907,6 +1907,7 @@ impl<'a> Display for PortableVal {
                 "{{ {} }}",
                 fields
                     .iter()
+                    .sorted_by_key(|(name, _)| *name)
                     .map(|(name, val)| format!(
                         "{} : {}",
                         String::from_utf8(name.clone()).unwrap(),
@@ -1920,6 +1921,7 @@ impl<'a> Display for PortableVal {
                 "{{ {} .. }}",
                 fields
                     .iter()
+                    .sorted_by_key(|(name, _)| *name)
                     .map(|(name, val)| format!(
                         "{} : {}",
                         String::from_utf8(name.clone()).unwrap(),
@@ -1933,6 +1935,7 @@ impl<'a> Display for PortableVal {
                 "{{ {} }}",
                 fields
                     .iter()
+                    .sorted_by_key(|(name, _)| *name)
                     .map(|(name, val)| format!(
                         "{} = {}",
                         String::from_utf8(name.clone()).unwrap(),

@@ -128,6 +128,86 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
         .collect::<Vec<_>>()
         .join(","))
 }
+/// Execute some given code on one given sequence,
+/// printing the resulting effects as a string.
+#[cfg(test)]
+fn eval_one_fastq_read_test(code: &str, seq: &[u8], qual: &[u8]) -> Result<String, GenericError> {
+    use std::sync::Arc;
+
+    use crate::{
+        core::{library::standard_library, rec::FullyConcreteRec},
+        read::FileType,
+        read_code_from_script,
+        surface::elab_prog_for_ctx,
+        GenericError,
+    };
+
+    let global_config = GlobalConfig::default();
+
+    let prog = parse(code, &global_config).map_err(GenericError::from)?;
+
+    // establish a global-level arena and context,
+    // for values allocated during elaboration
+    let arena = Arena::new();
+    let ctx = standard_library(&arena);
+
+    // parse the standard library
+    let library_code = String::from_utf8(include_bytes!("standard_library.mb").to_vec()).unwrap();
+    let library_prog = parse(&library_code, &global_config).map_err(GenericError::from)?;
+
+    // elaborate to generate the context
+    let ctx =
+        elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
+
+    // elaborate to a core program
+    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, &FileType::Fasta), &prog)
+        .map_err(GenericError::from)?;
+    let (core_prog, cache) =
+        core_prog.cache(&arena, &ctx.bind_read(&arena, &FileType::Fasta).tms)?;
+
+    // create a toy read
+    let read = core::Val::Rec {
+        rec: Arc::new(FullyConcreteRec {
+            map: [
+                (
+                    b"seq".to_vec(),
+                    core::Val::Str {
+                        s: arena.alloc(seq.to_vec()),
+                    } as Val,
+                ),
+                (
+                    b"id".to_vec(),
+                    core::Val::Str {
+                        s: arena.alloc(b"read1".to_vec()),
+                    } as Val,
+                ),
+                (
+                    b"desc".to_vec(),
+                    core::Val::Str {
+                        s: arena.alloc(b"".to_vec()),
+                    } as Val,
+                ),
+                (
+                    b"qual".to_vec(),
+                    core::Val::Str {
+                        s: arena.alloc(qual.to_vec()),
+                    } as Val,
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        }),
+    };
+
+    // evaluate the program
+    Ok(core_prog
+        .eval(&arena, &ctx.tms, &cache, read)
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string())
+        .collect::<Vec<_>>()
+        .join(","))
+}
 
 #[test]
 fn parse_assignment() {
@@ -206,6 +286,15 @@ fn eval_rec_lit_pass2() {
 #[test]
 fn eval_rec_lit_pass3() {
     insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.seq.len() }; if rec.a > 10 => 'long'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("long |> { output = stdout }")"#)
+}
+
+#[test]
+fn eval_fastq_trim_pass1() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read is [start:|10| _] => start.out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("{ desc = , id = read1, qual = !@#$%^&*&^, seq = AAAAAAAAAG } |> { filename = trimmed.fq, output = file }")"#)
+}
+#[test]
+fn eval_fastq_trim_pass2() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read is [start:|10| _] => (-start).out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("{ desc = , id = read1, qual = ^&*&^%$#@!, seq = CTTTTTTTTT } |> { filename = trimmed.fq, output = file }")"#)
 }
 
 #[test]

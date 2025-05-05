@@ -50,13 +50,48 @@ pub trait Rec<'p>: Display + Send + Sync {
     }
 
     fn is_neutral(&self) -> bool {
-        let b = self
-            .all()
-            .iter()
-            .map(|(_, val)| val.is_neutral())
-            .any(|a| a);
+        self.all().iter().any(|(_, val)| val.is_neutral())
+    }
 
-        b
+    fn slice<'a>(&self, start: usize, end: usize) -> Result<Val<'a>, InternalError>
+    where
+        'p: 'a,
+    {
+        // record must have a sequence to be sliced
+        if let Val::Str { s: seq } = self
+            .get(b"seq")
+            .map_err(|_| InternalError::new("trying to slice a non-read record?!"))?
+            as Val<'p>
+        {
+            match self.get(b"qual") {
+                Ok(Val::Str { s: qual }) => Ok(Val::Rec {
+                    rec: Arc::new(self.with_all(&[
+                        (
+                            b"seq",
+                            Val::Str {
+                                s: &seq[start..end] as &'a [u8],
+                            },
+                        ),
+                        (
+                            b"qual",
+                            Val::Str {
+                                s: &qual[start..end] as &'a [u8],
+                            },
+                        ),
+                    ])),
+                }),
+                _ => Ok(Val::Rec {
+                    rec: Arc::new(self.with(
+                        b"seq",
+                        Val::Str {
+                            s: &seq[start..end],
+                        },
+                    )),
+                }),
+            }
+        } else {
+            Err(InternalError::new("message"))
+        }
     }
 }
 

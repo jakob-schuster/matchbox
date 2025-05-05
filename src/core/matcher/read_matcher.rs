@@ -3,10 +3,10 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 use itertools::Itertools;
 
 use crate::{
-    core::{self, matcher, EvalError, Val},
+    core::{self, matcher, EvalError, InternalError, Val},
     myers::VarMyers,
     surface::{self, check_tm, Context, ElabError, Region, RegionData},
-    util::{Arena, Cache, Env, Ran},
+    util::{Arena, Cache, Env, Location, Ran},
     visit,
 };
 
@@ -55,29 +55,23 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                         .map
                         .iter()
                         .sorted_by_key(|(id, _)| **id)
-                        .map(|(_, val)| (*val).clone())
+                        .map(|(_, val)| Ok((*val).clone()))
                         .chain(
                             // then make the other sequence binds
                             self.binds.iter().map(|ran| {
                                 let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                let sliced = Val::Rec {
-                                    rec: Arc::new(rec.with(
-                                        b"seq",
-                                        Val::Str {
-                                            s: &seq[pos_ran.start..pos_ran.end],
-                                        },
-                                    )),
-                                };
+                                let sliced = rec.slice(pos_ran.start, pos_ran.end)?;
 
-                                sliced as Val<'a>
+                                Ok(sliced as Val<'a>)
                             }),
                         )
-                        .collect::<Vec<_>>();
+                        .collect::<Result<Vec<_>, InternalError>>()
+                        .map_err(|e| EvalError::from_internal(e, Location::new(0, 0)));
 
                     vals
                 });
 
-                Ok(envs.collect::<Vec<_>>())
+                envs.collect::<Result<Vec<_>, _>>()
             } else {
                 panic!("gave non-read value {} to read matcher?!", val)
             }

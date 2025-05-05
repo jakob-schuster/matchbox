@@ -94,7 +94,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
     // set up the thread pool
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(global_config.threads)
-        .build()
+        .build_global()
         .unwrap();
 
     // need to know filetype of reads, for read type inference

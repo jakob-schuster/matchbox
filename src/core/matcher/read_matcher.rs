@@ -32,7 +32,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
         'p: 'a,
     {
         if let Val::Rec { rec } = val {
-            if let Val::Str { s: seq } = rec.get(b"seq", arena).expect("") {
+            if let Val::Str { s: seq } = rec.get(b"seq").expect("") {
                 // first, generate all the worlds from the operations
                 let loc_ctx = LocCtx::default().with(0, 0).with(self.end, seq.len());
                 let worlds =
@@ -66,7 +66,6 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                                         Val::Str {
                                             s: &seq[pos_ran.start..pos_ran.end],
                                         },
-                                        arena,
                                     )),
                                 };
 
@@ -80,10 +79,10 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
 
                 Ok(envs.collect::<Vec<_>>())
             } else {
-                panic!("gave non-read value to read matcher?!")
+                panic!("gave non-read value {} to read matcher?!", val)
             }
         } else {
-            panic!("gave non-record value to read matcher?!")
+            panic!("gave non-record value {} to read matcher?!", val)
         }
     }
 }
@@ -634,7 +633,7 @@ impl<'p> OpVal<'p> {
                     .filter(|(bs, _)| {
                         bs.iter().all(|(id, val)| {
                             if let Some(val2) = bind_ctx.get(id) {
-                                (*val).eq(arena, val2)
+                                (*val).eq(val2)
                             } else {
                                 true
                             }
@@ -663,7 +662,7 @@ impl<'p> OpVal<'p> {
                                     local_binds.iter().fold(
                                         bind_ctx.clone(),
                                         |old_bind_ctx, (id, val)| {
-                                            old_bind_ctx.with(*id, val.coerce(arena))
+                                            old_bind_ctx.with(*id, val.coerce())
                                         },
                                     ) as BindCtx<'a>,
                                     c.iter().enumerate().fold(

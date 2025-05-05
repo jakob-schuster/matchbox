@@ -112,7 +112,7 @@ peg::parser! {
         pub rule tm() -> Tm = located(<tm_data()>)
         #[cache_left_rec]
         rule tm_data() -> TmData
-            = arg1:tm() _ "|>" _ head:tm9() "(" _ args:list(<tm()>, <",">) _ ")" { TmData::FunApp { head: Rc::new(head), args: [arg1].into_iter().chain(args.into_iter()).collect::<Vec<_>>() } }
+            = arg1:tm() _ "|>" _ head:tm9() "(" _ args:list(<tm()>, <",">) _ ")" { TmData::FunApp { head: Rc::new(head), args: [arg1].into_iter().chain(args.into_iter()).collect::<Vec<_>>(), opts: vec![] } }
             / tm_data1()
 
         rule tm1() -> Tm = located(<tm_data1()>)
@@ -173,11 +173,11 @@ peg::parser! {
             // these three all need to be on the same precedence level - not sure why. investigate more later
 
             // method application
-            = arg1:tm8() "." head:tm9() "(" _ args:list(<tm()>, <",">) _ ")" { TmData::FunApp { head: Rc::new(head), args: [arg1].into_iter().chain(args.into_iter()).collect::<Vec<_>>() } }
+            = arg1:tm8() "." head:tm9() "(" _ args:list(<tm()>, <",">) _ ")" { TmData::FunApp { head: Rc::new(head), args: [arg1].into_iter().chain(args.into_iter()).collect::<Vec<_>>(), opts: vec![] } }
             // record projection
             / tm:tm8() "." name:name() { TmData::RecProj { tm: Rc::new(tm), name } }
             // function application
-            / head:tm8() "(" _ args:list(<tm()>, <",">) _ ")" { TmData::FunApp { head: Rc::new(head), args } }
+            / head:tm8() "(" _ args:list(<tm()>, <",">) _ ")" { TmData::FunApp { head: Rc::new(head), args, opts: vec![] } }
             / tm_data9()
 
         rule tm9() -> Tm = located(<tm_data9()>)
@@ -208,11 +208,11 @@ peg::parser! {
             // WARN there's no syntax yet for list literals, because how would we distinguish a singleton list from a list type literal?
 
             // function type literals
-            / "(" _ args:list(<tm()>, <",">) _ ")" _ "->" _ body:tm() { TmData::FunTy { args, body: Rc::new(body) } }
+            / "(" _ args:list(<tm()>, <",">) _ ")" _ "->" _ body:tm() { TmData::FunTy { args, body: Rc::new(body), opts: vec![] } }
             // function literals
-            / "(" _ args:list(<param()>, <",">) _ ")" _ "=>" _ body:tm() { TmData::FunLit { args, body: Rc::new(body) }}
+            / "(" _ args:list(<param()>, <",">) _ ")" _ "=>" _ body:tm() { TmData::FunLit { args, body: Rc::new(body), opts: vec![] }}
             // foreign function literals
-            / "$(" _ args:list(<param()>, <",">) _ ")" _ ":" _ ty:tm() _ "=>" _ name:name() { TmData::FunLitForeign { args, ty: Rc::new(ty), name } }
+            / "$(" _ args:list(<param()>, <",">) _ ")" _ ":" _ ty:tm() _ "=>" _ name:name() { TmData::FunLitForeign { args, ty: Rc::new(ty), name, opts: vec![] } }
             // function application
 
             // named things

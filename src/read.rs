@@ -8,13 +8,16 @@ use std::{
 };
 
 use itertools::Itertools;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelBridge,
+    ParallelIterator,
+};
 
 use crate::{
     core::{
         self,
         rec::{self, ConcreteRec, FastaRead, Rec},
-        Effect, Val,
+        Effect, EvalError, Val,
     },
     output::OutputHandler,
     util::{Arena, Cache, Env},
@@ -209,32 +212,67 @@ pub fn read_fa_multithreaded<'p, 'a: 'p>(
 ) {
     let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
 
-    for chunk in &input_records.chunks(10000) {
-        let mut effects = vec![];
+    input_records
+        .into_iter()
+        .chunks(10000)
+        .into_iter()
+        .for_each(|chunk| {
+            // println!("chunk of {}", chunk.collect_vec().len());
+            let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+            chunk
+                .collect_vec()
+                .par_iter()
+                .map(|record| match record {
+                    Ok(read) => {
+                        let arena = Arena::new();
+                        let val = core::Val::Rec {
+                            rec: Arc::new(rec::FastaRead { read }),
+                        };
+                        prog.eval(&arena, env, cache, val)
+                        // Ok(vec![])
+                    }
+                    Err(_) => panic!("bad read?!"),
+                })
+                .collect_into_vec(&mut vec);
 
-        chunk
-            .collect_vec()
-            .into_par_iter()
-            .map(|record| match record {
-                Ok(read) => {
-                    let arena = Arena::new();
-                    let val = core::Val::Rec {
-                        rec: Arc::new(rec::FastaRead { read: &read }),
-                    };
-                    let effects = prog.eval(&arena, env, cache, val);
-
-                    effects
+            for result_effects in &vec {
+                for effect in result_effects.as_ref().expect("") {
+                    output_handler.handle(effect).unwrap();
                 }
-                Err(_) => panic!("bad read?!"),
-            })
-            .collect_into_vec(&mut effects);
-
-        for result_effects in &effects {
-            for effect in result_effects.as_ref().expect("") {
-                output_handler.handle(effect).unwrap();
             }
-        }
-    }
+        });
+
+    // for chunk in &input_records.chunks(10000) {
+    //     let vec = chunk.collect_vec();
+    //     println!("dealing with chunk of {} length", vec.len());
+    //     let mut effects: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+    //     vec.par_iter().for_each(|_| println!("hello"));
+    //     //     vec.par_iter()
+    //     //         .inspect(|_| println!("before the hang"))
+    //     //         .map(|record| {
+    //     //             println!("record");
+    //     //             match record {
+    //     //                 Ok(read) => {
+    //     //                     println!("dealing with read");
+    //     //                     // let arena = Arena::new();
+    //     //                     // let val = core::Val::Rec {
+    //     //                     //     rec: Arc::new(rec::FastaRead { read }),
+    //     //                     // };
+
+    //     //                     // prog.eval(&arena, env, cache, val)
+    //     //                     Ok(vec![])
+    //     //                 }
+    //     //                 Err(_) => panic!("bad read?!"),
+    //     //             }
+    //     //         })
+    //     //         .collect_into_vec(&mut effects);
+
+    //     //     for result_effects in &effects {
+    //     //         for effect in result_effects.as_ref().expect("") {
+    //     //             output_handler.handle(effect).unwrap();
+    //     //         }
+    //     //     }
+    // }
 
     output_handler.finish();
 }

@@ -105,7 +105,7 @@ pub struct Cache<A> {
     vec: Vec<A>,
 }
 
-impl<A: Clone> Cache<A> {
+impl<A: Clone + Display> Cache<A> {
     pub fn push(&self, a: A) -> (Cache<A>, usize) {
         let index = self.vec.len();
         let mut vec = self.vec.clone();
@@ -116,6 +116,20 @@ impl<A: Clone> Cache<A> {
 
     pub fn get(&self, index: usize) -> &A {
         self.vec.get(index).expect("Bad index in cache!")
+    }
+}
+
+impl<A: Display> Display for Cache<A> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        format!(
+            "[{}]",
+            self.vec
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .fmt(f)
     }
 }
 

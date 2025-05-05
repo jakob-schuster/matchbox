@@ -204,9 +204,7 @@ pub fn binary_equal<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [v0, v1] => Ok(Val::Bool {
-            b: v0.eq(arena, v1),
-        }),
+        [v0, v1] => Ok(Val::Bool { b: v0.eq(v1) }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -221,9 +219,7 @@ pub fn binary_not_equal<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [v0, v1] => Ok(Val::Bool {
-            b: !v0.eq(arena, v1),
-        }),
+        [v0, v1] => Ok(Val::Bool { b: !v0.eq(v1) }),
 
         _ => Err(EvalError {
             location: location.clone(),
@@ -361,29 +357,26 @@ pub fn unary_read_reverse_complement<'a>(
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Rec { rec }] => {
-            if let Ok(Val::Str { s: seq }) = rec.get(b"seq", arena) {
-                if let Ok(Val::Str { s: qual }) = rec.get(b"qual", arena) {
+            if let Ok(Val::Str { s: seq }) = rec.get(b"seq") {
+                if let Ok(Val::Str { s: qual }) = rec.get(b"qual") {
                     let mut rev_qual = qual.to_vec();
                     rev_qual.reverse();
 
                     Ok(Val::Rec {
-                        rec: Arc::new(rec.with_all(
-                            &[
-                                (
-                                    b"seq",
-                                    Val::Str {
-                                        s: arena.alloc(util::rev_comp(seq)),
-                                    },
-                                ),
-                                (
-                                    b"qual",
-                                    Val::Str {
-                                        s: arena.alloc(rev_qual),
-                                    },
-                                ),
-                            ],
-                            arena,
-                        )),
+                        rec: Arc::new(rec.with_all(&[
+                            (
+                                b"seq",
+                                Val::Str {
+                                    s: arena.alloc(util::rev_comp(seq)),
+                                },
+                            ),
+                            (
+                                b"qual",
+                                Val::Str {
+                                    s: arena.alloc(rev_qual),
+                                },
+                            ),
+                        ])),
                     })
                 } else {
                     Ok(Val::Rec {
@@ -392,7 +385,6 @@ pub fn unary_read_reverse_complement<'a>(
                             Val::Str {
                                 s: arena.alloc(util::rev_comp(seq)),
                             },
-                            arena,
                         )),
                     })
                 }
@@ -652,7 +644,7 @@ pub fn tag<'a>(
     match vtms {
         [Val::Rec { rec }, Val::Str { s }] => {
             let desc = rec
-                .get(b"desc", arena)
+                .get(b"desc")
                 .expect("record with no desc given to tag?!");
 
             match desc {
@@ -669,7 +661,6 @@ pub fn tag<'a>(
                                     ))
                                     .as_bytes(),
                             },
-                            arena,
                         ),
                     ),
                 }),
@@ -711,7 +702,7 @@ pub fn concat<'a>(
         [Val::Rec { rec: read0 }, Val::Rec { rec: read1 }] => {
             // Get sequences from both structs
             let seq0 = match read0
-                .get(b"seq", arena)
+                .get(b"seq")
                 .map_err(|e| EvalError::new(location, "read did not have a sequence field"))?
             {
                 Val::Str { s } => Ok(s),
@@ -721,7 +712,7 @@ pub fn concat<'a>(
                 )),
             }?;
             let seq1 = match read1
-                .get(b"seq", arena)
+                .get(b"seq")
                 .map_err(|e| EvalError::new(location, "read did not have a sequence field"))?
             {
                 Val::Str { s } => Ok(s),
@@ -736,20 +727,18 @@ pub fn concat<'a>(
                 s: arena.alloc(seq0.iter().chain(seq1).cloned().collect::<Vec<_>>()),
             };
 
-            match (read0.get(b"qual", arena), read1.get(b"qual", arena)) {
+            match (read0.get(b"qual"), read1.get(b"qual")) {
                 (Ok(Val::Str { s: qual0 }), Ok(Val::Str { s: qual1 })) => {
                     let new_qual = Val::Str {
                         s: arena.alloc(qual0.iter().chain(qual1).cloned().collect::<Vec<_>>()),
                     };
 
                     Ok(Val::Rec {
-                        rec: Arc::new(
-                            read1.with_all(&[(b"seq", new_seq), (b"qual", new_qual)], arena),
-                        ),
+                        rec: Arc::new(read1.with_all(&[(b"seq", new_seq), (b"qual", new_qual)])),
                     })
                 }
                 _ => Ok(Val::Rec {
-                    rec: Arc::new(read1.with(b"seq", new_seq, arena)),
+                    rec: Arc::new(read1.with(b"seq", new_seq)),
                 }),
             }
         }
@@ -1095,13 +1084,13 @@ pub fn describe<'a>(
     match vtms {
         [Val::Rec { rec: read }, Val::Rec { rec: search_terms }, Val::Num { n: error_rate }] => {
             if let Val::Str { s: read_seq } = read
-                .get(b"seq", arena)
+                .get(b"seq")
                 .map_err(|e| EvalError::from_internal(e, location.clone()))?
             {
                 // parse the struct, making sure its structure is good
                 let mut map = HashMap::new();
 
-                for (name, val) in search_terms.all(arena) {
+                for (name, val) in search_terms.all() {
                     if let Val::Str { s: seq } = val {
                         map.insert(name, seq);
                     } else {
@@ -1119,9 +1108,9 @@ pub fn describe<'a>(
                     let mut new_map = map.clone();
                     for (id, seq) in &map {
                         new_map.insert(
-                            little_arena
-                                .alloc(format!("-{}", util::bytes_to_string(id).unwrap()))
-                                .as_bytes(),
+                            format!("-{}", util::bytes_to_string(id).unwrap())
+                                .as_bytes()
+                                .to_vec(),
                             little_arena.alloc(util::rev_comp(seq)),
                         );
                     }
@@ -1179,7 +1168,7 @@ pub fn contains<'a>(
         [Val::List { v }, v0] => {
             // look for the query value in the list
             for v1 in v {
-                if v1.eq(arena, v0) {
+                if v1.eq(v0) {
                     // if you find it, return early
                     return Ok(Val::Bool { b: true });
                 }

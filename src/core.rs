@@ -4,9 +4,11 @@ use bio::stats::probs;
 use itertools::Itertools;
 use matcher::Matcher;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use rec::{ConcreteRec, FastaRead, Rec};
+use rec::{ConcreteRec, FastaRead, FullyConcreteRec, Rec};
 
-use crate::util::{self, Arena, Cache, CoreRecField, Env, Located, Location, RecField};
+use crate::util::{
+    self, bytes_to_string, Arena, Cache, CoreRecField, Env, Located, Location, RecField,
+};
 
 pub mod library;
 pub mod matcher;
@@ -161,18 +163,22 @@ impl<'p> Stmt<'p> {
     {
         match &self.data {
             StmtData::Let { tm, next } => {
+                // cache the term
+                let (tm_cached, cache) = tm.cache(arena, global_env, cache, env)?;
+
                 // evaluate the term (with no cache, as this is before caching anyway)
-                let val = tm.eval(arena, global_env, &Cache::default(), env)?;
-                // and also cache the term
-                let (tm, cache) = tm.cache(arena, global_env, cache, env)?;
-                // and then evaluate the statement with that binding
-                let (stmt, cache) = next.cache(arena, global_env, &cache, &env.with(val))?;
+                let (stmt, cache) = match tm.eval(arena, global_env, &Cache::default(), env) {
+                    // then evaluate the statement with that binding
+                    Ok(val) => next.cache(arena, global_env, &cache, &env.with(val))?,
+                    // otherwise, evaluate the statement with no new binding
+                    _ => next.cache(arena, global_env, &cache, env)?,
+                };
 
                 Ok((
                     Stmt::new(
                         self.location.clone(),
                         StmtData::Let {
-                            tm,
+                            tm: tm_cached,
                             next: Arc::new(stmt),
                         },
                     ),
@@ -262,9 +268,9 @@ impl<'p> Branch<'p> {
                     true => Ok(Some(stmt.eval(arena, global_env, cache, env)?)),
                     false => Ok(None),
                 },
-                _ => Err(EvalError::from_internal(
+                v @ _ => Err(EvalError::from_internal(
                     InternalError {
-                        message: "expected bool in branch?!".to_string(),
+                        message: format!("expected bool in branch, found {}?!", v),
                     },
                     tm.location.clone(),
                 )),
@@ -441,6 +447,7 @@ pub enum TmData<'a> {
 
     FunTy {
         args: Vec<Tm<'a>>,
+        opts: Vec<(&'a [u8], Tm<'a>, Tm<'a>)>,
         body: Arc<Tm<'a>>,
     },
     // can't remember why we need args still...
@@ -493,7 +500,7 @@ impl<'p> Tm<'p> {
     {
         match &self.data {
             // WARN clumsy and wasteful coercion
-            TmData::Cached { index } => Ok(cache.get(*index).coerce(arena)),
+            TmData::Cached { index } => Ok(cache.get(*index).coerce()),
 
             // look up the variable in the environment
             TmData::Var { index } => {
@@ -501,10 +508,7 @@ impl<'p> Tm<'p> {
                     (*env.get_index(*index)).clone()
                 } else {
                     // WARN clumsy and wasteful coercion
-
-                    global_env
-                        .get_index(*index - env.iter().len())
-                        .coerce(arena)
+                    global_env.get_index(*index - env.iter().len()).coerce()
                 })
             }
 
@@ -518,13 +522,47 @@ impl<'p> Tm<'p> {
             TmData::StrTy => Ok(Val::StrTy),
             TmData::StrLit { s } => Ok(Val::Str { s }),
 
-            TmData::FunTy { args, body } => Ok(Val::FunTy {
-                args: args
+            TmData::FunTy { args, opts, body } => {
+                let args = args
                     .iter()
                     .map(|arg| arg.eval(arena, global_env, cache, env))
-                    .collect::<Result<Vec<_>, EvalError>>()?,
-                body: Arc::new(body.eval(arena, global_env, cache, env)?),
-            }),
+                    .collect::<Result<Vec<_>, EvalError>>()?;
+
+                let opts = opts
+                    .iter()
+                    .map(|(name, ty, val)| {
+                        Ok((
+                            *name,
+                            ty.eval(arena, global_env, cache, env)?,
+                            val.eval(arena, global_env, cache, env)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let body = body.eval(arena, global_env, cache, env)?;
+
+                if args.iter().any(|arg| arg.is_neutral())
+                    || opts
+                        .iter()
+                        .any(|(_, ty, val)| ty.is_neutral() || val.is_neutral())
+                    || body.is_neutral()
+                {
+                    Ok(Val::Neutral {
+                        neutral: Neutral::FunTy {
+                            args,
+                            opts,
+                            body: Arc::new(body),
+                        },
+                    })
+                } else {
+                    Ok(Val::FunTy {
+                        args,
+                        opts,
+                        body: Arc::new(body),
+                    })
+                }
+            }
+            // WARN we aren't giving an option for this to be neutral yet. is this a problem?
             TmData::FunLit { args, body } => Ok(Val::Fun {
                 data: FunData {
                     env: env.clone() as Env<Val<'a>>,
@@ -549,11 +587,23 @@ impl<'p> Tm<'p> {
                     })
                 });
 
-                Ok(Val::FunForeign {
-                    args,
-                    body_ty: Arc::new(body_ty.eval(arena, global_env, cache, &smaller_env)?),
-                    body: body.clone(),
-                })
+                let body_ty = body_ty.eval(arena, global_env, cache, &smaller_env)?;
+
+                if args.iter().any(|arg| arg.is_neutral()) || body_ty.is_neutral() {
+                    Ok(Val::Neutral {
+                        neutral: Neutral::FunForeignLit {
+                            args,
+                            body_ty: Arc::new(body_ty),
+                            body: body.clone(),
+                        },
+                    })
+                } else {
+                    Ok(Val::FunForeign {
+                        args,
+                        body_ty: Arc::new(body_ty),
+                        body: body.clone(),
+                    })
+                }
             }
             TmData::FunApp { head, args } => app(
                 arena,
@@ -564,18 +614,35 @@ impl<'p> Tm<'p> {
                     .collect::<Result<Vec<_>, _>>()?,
             ),
 
-            TmData::ListTy { ty } => Ok(Val::ListTy {
-                ty: Arc::new(ty.eval(arena, global_env, cache, env)?),
-            }),
-            TmData::ListLit { tms } => Ok(Val::List {
-                v: tms
+            TmData::ListTy { ty } => {
+                let val = ty.eval(arena, global_env, cache, env)?;
+                if val.is_neutral() {
+                    Ok(Val::Neutral {
+                        neutral: Neutral::ListTy { ty: Arc::new(val) },
+                    })
+                } else {
+                    Ok(Val::ListTy {
+                        ty: Arc::new(ty.eval(arena, global_env, cache, env)?),
+                    })
+                }
+            }
+            TmData::ListLit { tms } => {
+                let v = tms
                     .iter()
                     .map(|tm| tm.eval(arena, global_env, cache, env))
-                    .collect::<Result<Vec<_>, _>>()?,
-            }),
+                    .collect::<Result<Vec<_>, _>>()?;
 
-            TmData::RecTy { fields } => Ok(Val::RecTy {
-                fields: fields
+                if v.iter().any(|val| val.is_neutral()) {
+                    Ok(Val::Neutral {
+                        neutral: Neutral::ListLit { tms: v },
+                    })
+                } else {
+                    Ok(Val::List { v })
+                }
+            }
+
+            TmData::RecTy { fields } => {
+                let fields = fields
                     .iter()
                     .map(|field| {
                         Ok(CoreRecField::new(
@@ -583,10 +650,17 @@ impl<'p> Tm<'p> {
                             field.data.eval(arena, global_env, cache, env)?,
                         ))
                     })
-                    .collect::<Result<Vec<_>, EvalError>>()?,
-            }),
-            TmData::RecWithTy { fields } => Ok(Val::RecWithTy {
-                fields: fields
+                    .collect::<Result<Vec<_>, EvalError>>()?;
+                if fields.iter().any(|field| field.data.is_neutral()) {
+                    Ok(Val::Neutral {
+                        neutral: Neutral::RecTy { fields },
+                    })
+                } else {
+                    Ok(Val::RecTy { fields })
+                }
+            }
+            TmData::RecWithTy { fields } => {
+                let fields = fields
                     .iter()
                     .map(|field| {
                         Ok(CoreRecField::new(
@@ -594,33 +668,68 @@ impl<'p> Tm<'p> {
                             field.data.eval(arena, global_env, cache, env)?,
                         ))
                     })
-                    .collect::<Result<Vec<_>, EvalError>>()?,
-            }),
+                    .collect::<Result<Vec<_>, EvalError>>()?;
+                if fields.iter().any(|field| field.data.is_neutral()) {
+                    Ok(Val::Neutral {
+                        neutral: Neutral::RecWithTy { fields },
+                    })
+                } else {
+                    Ok(Val::RecWithTy { fields })
+                }
+            }
 
             // allocate a RecLit as a ConcreteRec
-            TmData::RecLit { fields } => Ok(Val::Rec {
-                rec: Arc::new(ConcreteRec {
-                    map: fields
-                        .iter()
-                        .map(|field| {
-                            Ok((
-                                field.name as &'a [u8],
-                                field.data.eval(arena, global_env, cache, env)? as Val<'a>,
-                            ))
-                        })
-                        .collect::<Result<HashMap<_, _>, EvalError>>()?,
-                }) as Arc<dyn Rec<'a> + 'a>,
-            }),
+            TmData::RecLit { fields } => {
+                let new_fields = fields
+                    .iter()
+                    .map(|field| {
+                        Ok((
+                            field.name.to_vec(),
+                            field.data.eval(arena, global_env, cache, env)? as Val<'a>,
+                        ))
+                    })
+                    .collect::<Result<HashMap<_, _>, EvalError>>()?;
+
+                if new_fields.iter().any(|(_, val)| val.is_neutral()) {
+                    // if any value is neutral, the whole record is neutral
+                    Ok(Val::Neutral {
+                        neutral: Neutral::RecLit {
+                            fields: fields
+                                .iter()
+                                .map(|field| {
+                                    Ok(CoreRecField::new(
+                                        field.name,
+                                        field.data.eval(arena, global_env, cache, env)? as Val<'a>,
+                                    ))
+                                })
+                                .collect::<Result<Vec<_>, EvalError>>()?,
+                        },
+                    })
+                } else {
+                    Ok(Val::Rec {
+                        rec: Arc::new(FullyConcreteRec { map: new_fields })
+                            as Arc<dyn Rec<'a> + 'a>,
+                    })
+                }
+            }
             TmData::RecProj { tm: head_tm, name } => {
                 match head_tm.eval(arena, global_env, cache, env)? {
                     Val::Rec { rec: r } => {
                         let e = r
-                            .get(name, arena)
+                            .get(name)
                             .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
                             .clone();
 
                         Ok(e)
                     }
+                    Val::Neutral { neutral } => Ok(Val::Neutral {
+                        neutral: Neutral::RecProj {
+                            tm: Arc::new(Val::Neutral {
+                                neutral: neutral.clone(),
+                            }),
+                            name: *name,
+                        },
+                    }),
                     val @ _ => Err(EvalError::from_internal(
                         InternalError {
                             message: format!(
@@ -692,8 +801,12 @@ impl<'p> Tm<'p> {
             TmData::ListLit { tms } => TmData::ListLit {
                 tms: tms.iter().map(|tm| tm.coerce(arena)).collect(),
             },
-            TmData::FunTy { args, body } => TmData::FunTy {
+            TmData::FunTy { args, opts, body } => TmData::FunTy {
                 args: args.iter().map(|tm| tm.coerce(arena)).collect(),
+                opts: opts
+                    .iter()
+                    .map(|(name, ty, val)| (*name as &'a [u8], ty.coerce(arena), val.coerce(arena)))
+                    .collect(),
                 body: Arc::new(body.coerce(arena)),
             },
             TmData::FunLit { args, body } => TmData::FunLit {
@@ -808,6 +921,7 @@ pub enum Val<'a> {
     /// context and any arguments.
     FunTy {
         args: Vec<Val<'a>>,
+        opts: Vec<(&'a [u8], Val<'a>, Val<'a>)>,
         body: Arc<Val<'a>>,
     },
     Fun {
@@ -841,6 +955,25 @@ pub enum Val<'a> {
     },
 }
 
+struct OptionalArgs<'a> {
+    v: Vec<(&'a [u8], Val<'a>)>,
+}
+
+impl<'a> OptionalArgs<'a> {
+    fn get(&self, name: &[u8]) -> Result<&Val<'a>, InternalError> {
+        for (arg_name, arg_val) in &self.v {
+            if (*arg_name).eq(name) {
+                return Ok(arg_val);
+            }
+        }
+
+        Err(InternalError::new(&format!(
+            "couldn't find argument '{}' in function type!?",
+            String::from_utf8(name.to_vec()).unwrap()
+        )))
+    }
+}
+
 impl<'a> Val<'a> {
     pub fn equiv(&self, other: &Val<'a>) -> bool {
         // takes a field name, and looks it up in the list of fields,
@@ -854,6 +987,16 @@ impl<'a> Val<'a> {
             }
             out
         };
+        let get_opt =
+            |fields: &[(&[u8], Val<'a>, Val<'a>)], name: &[u8]| -> Option<(Val<'a>, Val<'a>)> {
+                let mut out = None;
+                for (field_name, ty, val) in fields {
+                    if field_name.eq(&name) {
+                        out = Some((ty.clone(), val.clone()))
+                    }
+                }
+                out
+            };
 
         match (self, other) {
             // Neutrals we just let through; what else can we do?
@@ -871,20 +1014,36 @@ impl<'a> Val<'a> {
             | (Val::StrTy, Val::StrTy)
             | (Val::EffectTy, Val::EffectTy) => true,
 
+            // list types must have equivalent inner types
+            (Val::ListTy { ty: ty1 }, Val::ListTy { ty: ty2 }) => ty1.equiv(ty2),
+
             // equivalent if argument types are the same
             // and return types are the same
             (
                 Val::FunTy {
                     args: args1,
+                    opts: opts1,
                     body: body1,
                 },
                 Val::FunTy {
                     args: args2,
+                    opts: opts2,
                     body: body2,
                 },
             ) => {
+                let mut names = opts1
+                    .iter()
+                    .chain(opts2)
+                    .map(|(name, _, _)| name.clone())
+                    .unique();
+
                 args1.len().eq(&args2.len())
                     && args1.iter().zip(args2).all(|(arg1, arg2)| arg1.equiv(arg2))
+                    && names.all(|name| match (get_opt(opts1, name), get_opt(opts2, name)) {
+                        (Some((ty1, val1)), Some((ty2, val2))) => ty1.equiv(&ty2) && val1.eq(&val2),
+                        // any optional arguments missing is a type error
+                        _ => false,
+                    })
                     && body1.equiv(body2)
             }
 
@@ -957,7 +1116,7 @@ impl<'a> Val<'a> {
         }
     }
 
-    pub fn eq<'b, 'c>(&self, arena: &'b Arena, other: &Val<'c>) -> bool {
+    pub fn eq<'b, 'c>(&self, other: &Val<'c>) -> bool {
         match (self, other) {
             (Val::Univ, Val::Univ)
             | (Val::AnyTy, Val::AnyTy)
@@ -972,14 +1131,14 @@ impl<'a> Val<'a> {
 
             // check that all the fields of r1 and all the fields of r2 are the same
             (Val::Rec { rec: r1 }, Val::Rec { rec: r2 }) => {
-                let fields1 = r1.all(arena);
-                let fields2 = r2.all(arena);
+                let fields1 = r1.all();
+                let fields2 = r2.all();
                 let mut names = fields1.iter().chain(fields2.iter()).map(|(name, _)| name);
 
                 fields1.len().eq(&fields2.len())
                     && names.all(|name| match (fields1.get(name), fields2.get(name)) {
                         // both recs must contain all fields, and the values must be equal
-                        (Some(val1), Some(val2)) => val1.eq(arena, val2),
+                        (Some(val1), Some(val2)) => val1.eq(val2),
                         // any fields missing is unequal
                         _ => false,
                     })
@@ -1049,7 +1208,7 @@ impl<'a> Val<'a> {
     /// A clumsy function to move a value from one arena to another,
     /// necessitated by ConcreteRec, which has its values from a static arena and then needs to produce values in the dynamic arena.
     /// Probably shockingly inefficient and could be removed with better design.
-    fn coerce<'b>(&self, arena: &'b Arena) -> Val<'b>
+    fn coerce<'b>(&self) -> Val<'b>
     where
         'a: 'b,
     {
@@ -1063,34 +1222,31 @@ impl<'a> Val<'a> {
             Val::StrTy => Val::StrTy,
             Val::Str { s } => Val::Str { s: s as &'b [u8] },
             Val::ListTy { ty } => Val::ListTy {
-                ty: Arc::new(ty.coerce(arena)),
+                ty: Arc::new(ty.coerce()),
             },
             Val::List { v } => Val::List {
-                v: v.iter()
-                    .map(|v| v.coerce(arena) as Val<'b>)
-                    .collect::<Vec<_>>(),
+                v: v.iter().map(|v| v.coerce() as Val<'b>).collect::<Vec<_>>(),
             },
             Val::RecTy { fields } => Val::RecTy {
                 fields: fields
                     .iter()
-                    .map(|a| CoreRecField::new(a.name, a.data.coerce(arena) as Val<'b>))
+                    .map(|a| CoreRecField::new(a.name, a.data.coerce() as Val<'b>))
                     .collect(),
             },
             Val::RecWithTy { fields } => Val::RecWithTy {
                 fields: fields
                     .iter()
-                    .map(|a| CoreRecField::new(a.name, a.data.coerce(arena) as Val<'b>))
+                    .map(|a| CoreRecField::new(a.name, a.data.coerce() as Val<'b>))
                     .collect(),
             },
-            Val::Rec { rec } => Val::Rec {
-                rec: rec.coerce(arena),
-            },
-            Val::FunTy { args, body } => Val::FunTy {
-                args: args
+            Val::Rec { rec } => Val::Rec { rec: rec.coerce() },
+            Val::FunTy { args, opts, body } => Val::FunTy {
+                args: args.iter().map(|arg| arg.coerce() as Val<'b>).collect(),
+                body: Arc::new(body.coerce()),
+                opts: opts
                     .iter()
-                    .map(|arg| arg.coerce(arena) as Val<'b>)
+                    .map(|(a, b, c)| (a as &'a [u8], b.coerce(), c.coerce()))
                     .collect(),
-                body: Arc::new(body.coerce(arena)),
             },
             Val::Fun { data } => todo!(),
             Val::FunForeign {
@@ -1101,13 +1257,13 @@ impl<'a> Val<'a> {
                 body: f.clone(),
                 args: args
                     .iter()
-                    .map(|val| val.coerce(arena) as Val<'b>)
+                    .map(|val| val.coerce() as Val<'b>)
                     .collect::<Vec<_>>(),
-                body_ty: Arc::new(body_ty.coerce(arena)),
+                body_ty: Arc::new(body_ty.coerce()),
             },
             Val::FunReturnTyAwaiting { data } => todo!(),
             Val::Neutral { neutral } => Val::Neutral {
-                neutral: neutral.coerce(arena),
+                neutral: neutral.coerce(),
             },
             Val::EffectTy => Val::EffectTy,
             Val::Effect { val, handler } => Val::Effect {
@@ -1126,7 +1282,7 @@ impl<'a> Val<'a> {
             Val::RecTy { fields } => fields.iter().any(|field| field.data.is_neutral()),
             Val::RecWithTy { fields } => fields.iter().any(|field| field.data.is_neutral()),
             Val::Rec { rec } => rec.is_neutral(),
-            Val::FunTy { args, body } => {
+            Val::FunTy { args, opts, body } => {
                 args.iter().any(|arg| arg.is_neutral()) || body.is_neutral()
             }
             Val::FunForeign {
@@ -1144,30 +1300,111 @@ pub enum Neutral<'a> {
     Var {
         level: usize,
     },
+    //
+    ListTy {
+        ty: Arc<Val<'a>>,
+    },
+    ListLit {
+        tms: Vec<Val<'a>>,
+    },
+    //
+    FunTy {
+        args: Vec<Val<'a>>,
+        opts: Vec<(&'a [u8], Val<'a>, Val<'a>)>,
+        body: Arc<Val<'a>>,
+    },
+    FunLit {
+        args: Vec<Val<'a>>,
+        body: Arc<Val<'a>>,
+    },
+    FunForeignLit {
+        args: Vec<Val<'a>>,
+        body_ty: Arc<Val<'a>>,
+        body: Arc<
+            dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>
+                + Send
+                + Sync,
+        >,
+    },
     FunApp {
         head: Arc<Val<'a>>,
         args: Vec<Val<'a>>,
     },
+    //
+    RecTy {
+        fields: Vec<CoreRecField<'a, Val<'a>>>,
+    },
+    RecWithTy {
+        fields: Vec<CoreRecField<'a, Val<'a>>>,
+    },
+    RecLit {
+        fields: Vec<CoreRecField<'a, Val<'a>>>,
+    },
     RecProj {
         tm: Arc<Val<'a>>,
-        name: String,
+        name: &'a [u8],
     },
 }
 
 impl<'a> Neutral<'a> {
-    fn coerce<'b>(&self, arena: &'b Arena) -> Neutral<'b>
+    fn coerce<'b>(&self) -> Neutral<'b>
     where
         'a: 'b,
     {
         match self {
             Neutral::Var { level } => Neutral::Var { level: *level },
             Neutral::FunApp { head, args } => Neutral::FunApp {
-                head: Arc::new(head.coerce(arena)),
-                args: args.iter().map(|arg| arg.coerce(arena)).collect(),
+                head: Arc::new(head.coerce()),
+                args: args.iter().map(|arg| arg.coerce()).collect(),
             },
             Neutral::RecProj { tm, name } => Neutral::RecProj {
-                tm: Arc::new(tm.coerce(arena)),
+                tm: Arc::new(tm.coerce()),
                 name: name.clone(),
+            },
+            Neutral::ListTy { ty } => Neutral::ListTy {
+                ty: Arc::new(ty.coerce()),
+            },
+            Neutral::ListLit { tms } => Neutral::ListLit {
+                tms: tms.iter().map(|tm| tm.coerce()).collect(),
+            },
+            Neutral::FunTy { args, opts, body } => Neutral::FunTy {
+                args: args.iter().map(|arg| arg.coerce()).collect(),
+                opts: opts
+                    .iter()
+                    .map(|(a, b, c)| (a as &'a [u8], b.coerce(), c.coerce()))
+                    .collect(),
+                body: Arc::new(body.coerce()),
+            },
+            Neutral::FunLit { args, body } => Neutral::FunLit {
+                args: args.iter().map(|arg| arg.coerce()).collect(),
+                body: Arc::new(body.coerce()),
+            },
+            Neutral::FunForeignLit {
+                args,
+                body_ty,
+                body,
+            } => Neutral::FunForeignLit {
+                args: args.iter().map(|arg| arg.coerce()).collect(),
+                body_ty: Arc::new(body_ty.coerce()),
+                body: body.clone(),
+            },
+            Neutral::RecTy { fields } => Neutral::RecTy {
+                fields: fields
+                    .iter()
+                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
+                    .collect(),
+            },
+            Neutral::RecWithTy { fields } => Neutral::RecWithTy {
+                fields: fields
+                    .iter()
+                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
+                    .collect(),
+            },
+            Neutral::RecLit { fields } => Neutral::RecLit {
+                fields: fields
+                    .iter()
+                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
+                    .collect(),
             },
         }
     }
@@ -1249,13 +1486,13 @@ pub fn make_portable<'a>(arena: &'a Arena, val: &Val<'a>) -> PortableVal {
         },
         Val::Rec { rec } => PortableVal::Rec {
             fields: rec
-                .all(arena)
+                .all()
                 .iter()
                 .map(|(name, val)| (name.to_vec(), make_portable(arena, val)))
                 .collect(),
         },
 
-        Val::FunTy { args, body } => PortableVal::FunTy {
+        Val::FunTy { args, opts, body } => PortableVal::FunTy {
             args: args.iter().map(|arg| make_portable(arena, arg)).collect(),
             body: Arc::new(make_portable(arena, body)),
         },
@@ -1408,10 +1645,16 @@ impl<'a> Display for TmData<'a> {
             TmData::NumLit { n } => n.fmt(f),
             TmData::StrTy => "Str".fmt(f),
             TmData::StrLit { s } => format!("'{}'", util::bytes_to_string(s).unwrap()).fmt(f),
-            TmData::FunTy { args, body } => format!(
+            TmData::FunTy { args, opts, body } => format!(
                 "({}) -> {}",
                 args.iter()
                     .map(|a| a.to_string())
+                    .chain(opts.iter().map(|(name, ty, val)| format!(
+                        "{}: {} = {}",
+                        bytes_to_string(name).unwrap(),
+                        ty,
+                        val
+                    )))
                     .collect::<Vec<_>>()
                     .join(", "),
                 body
@@ -1523,10 +1766,16 @@ impl<'a> Display for Val<'a> {
             )
             .fmt(f),
             Val::Rec { rec } => rec.fmt(f),
-            Val::FunTy { args, body } => format!(
+            Val::FunTy { args, opts, body } => format!(
                 "({}) -> {}",
                 args.iter()
                     .map(|arg| arg.to_string())
+                    .chain(opts.iter().map(|(name, ty, val)| format!(
+                        "{}: {} = {}",
+                        bytes_to_string(name).unwrap(),
+                        ty,
+                        val
+                    )))
                     .collect::<Vec<_>>()
                     .join(", "),
                 body
@@ -1555,7 +1804,76 @@ impl<'a> Display for Neutral<'a> {
                     .join(", ")
             )
             .fmt(f),
-            Neutral::RecProj { tm, name } => format!("{}.{}", tm, name).fmt(f),
+            Neutral::RecProj { tm, name } => {
+                format!("{}.{}", tm, bytes_to_string(name).unwrap()).fmt(f)
+            }
+            Neutral::ListTy { ty } => format!("[{}]", ty).fmt(f),
+            Neutral::ListLit { tms } => format!("[{}]", tms.into_iter().join(", ")).fmt(f),
+            Neutral::RecTy { fields } => format!(
+                "{{ {} }}",
+                fields
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .fmt(f),
+            Neutral::RecWithTy { fields } => format!(
+                "{{ {} .. }}",
+                fields
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .fmt(f),
+            Neutral::RecLit { fields } => format!(
+                "{{ {} }}",
+                fields
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .fmt(f),
+
+            Neutral::FunTy { args, opts, body } => format!(
+                "({}) -> {}",
+                args.iter()
+                    .map(|a| a.to_string())
+                    .chain(opts.iter().map(|(name, ty, val)| format!(
+                        "{}: {} = {}",
+                        bytes_to_string(name).unwrap(),
+                        ty,
+                        val
+                    )))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                body
+            )
+            .fmt(f),
+            Neutral::FunLit { args, body } => format!(
+                "({}) => {}",
+                args.iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                body
+            )
+            .fmt(f),
+            Neutral::FunForeignLit {
+                args,
+                body,
+                body_ty,
+            } => format!(
+                "({}): {} => #foreign",
+                args.iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                body_ty
+            )
+            .fmt(f),
         }
     }
 }

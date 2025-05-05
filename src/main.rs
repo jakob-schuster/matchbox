@@ -8,6 +8,7 @@ use codespan_reporting::{
 };
 use output::OutputHandler;
 use parse::{parse, ParseError};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use read::{
     get_extensions, get_filetype_and_buffer, read_any, read_fa, FileType, FileTypeError, InputError,
 };
@@ -91,9 +92,9 @@ fn run_script(global_config: &GlobalConfig) {
 /// Panic on evaluation errors or internal errors.
 fn run(code: &str, global_config: &GlobalConfig) {
     // set up the thread pool
-    rayon::ThreadPoolBuilder::new()
+    let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(global_config.threads)
-        .build_global()
+        .build()
         .unwrap();
 
     // need to know filetype of reads, for read type inference
@@ -153,7 +154,6 @@ fn run(code: &str, global_config: &GlobalConfig) {
 
     // create an output handler, to receive output effects
     let mut output_handler = OutputHandler::new();
-
     // create the standard library
     let env = ctx.tms;
 

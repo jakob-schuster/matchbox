@@ -61,8 +61,11 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
     use std::sync::Arc;
 
     use crate::{
-        core::library::standard_library, read::FileType, read_code_from_script,
-        surface::elab_prog_for_ctx, GenericError,
+        core::{library::standard_library, rec::FullyConcreteRec},
+        read::FileType,
+        read_code_from_script,
+        surface::elab_prog_for_ctx,
+        GenericError,
     };
 
     let global_config = GlobalConfig::default();
@@ -85,26 +88,27 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
     // elaborate to a core program
     let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, &FileType::Fasta), &prog)
         .map_err(GenericError::from)?;
-    let (core_prog, cache) = core_prog.cache(&arena, &ctx.tms)?;
+    let (core_prog, cache) =
+        core_prog.cache(&arena, &ctx.bind_read(&arena, &FileType::Fasta).tms)?;
 
     // create a toy read
     let read = core::Val::Rec {
-        rec: Arc::new(ConcreteRec {
+        rec: Arc::new(FullyConcreteRec {
             map: [
                 (
-                    b"seq" as &[u8],
+                    b"seq".to_vec(),
                     core::Val::Str {
                         s: arena.alloc(seq.to_vec()),
                     } as Val,
                 ),
                 (
-                    b"id" as &[u8],
+                    b"id".to_vec(),
                     core::Val::Str {
                         s: arena.alloc(b"read1".to_vec()),
                     } as Val,
                 ),
                 (
-                    b"desc" as &[u8],
+                    b"desc".to_vec(),
                     core::Val::Str {
                         s: arena.alloc(b"".to_vec()),
                     } as Val,
@@ -157,43 +161,57 @@ fn elab_assignment_pass3() {
 
 #[test]
 fn elab_assignment_pass4() {
-    insta::assert_snapshot!(format!("{:?}", elab_test(r"a = 1; b = a + 10 * 10")), @r#"Ok("push 1; push (#[41])(#[0], (#[40])(10, 10)); ")"#)
+    insta::assert_snapshot!(format!("{:?}", elab_test(r"a = 1; b = a + 10 * 10")), @r#"Ok("push 1; push (#[42])(#[0], (#[41])(10, 10)); ")"#)
 }
 
 #[test]
 fn eval_read_name_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"read.id |> stdout()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("read1 |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"read.id |> stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("read1 |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_assignment_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"a = 'hello'; b = 10; c = '{a} and {b}'; c |> stdout()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("hello and 10 |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"a = 'hello'; b = 10; c = '{a} and {b}'; c |> stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("hello and 10 |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_pattern_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [_ GGGG rest:_] => {rest.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCCCCCCCCCCC |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [_ GGGG rest:_] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCCCCCCCCCCC |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_pattern_pass2() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [_ GGGG rest:|3| _] => {rest.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [_ GGGG rest:|3| _] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_pattern_pass3() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [first:|3| _] => {first.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("AAA |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [first:|3| _] => {first.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("AAA |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_pattern_pass4() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [_ last:|3|] => {last.seq |> stdout()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [_ last:|3|] => {last.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
+}
+
+#[test]
+fn eval_rec_lit_pass1() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.id }; 'hello'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("hello |> { output = stdout }")"#)
+}
+
+#[test]
+fn eval_rec_lit_pass2() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.id }; rec.a.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("read1 |> { output = stdout }")"#)
+}
+#[test]
+fn eval_rec_lit_pass3() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.seq.len() }; if rec.a > 10 => 'long'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("long |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_stmt_after_conditional_pass1() {
     insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"
-        if read is [_] => 'a' |> stdout()
-        'b' |> stdout()
+        if read is [_] => 'a' |> stdout!()
+        'b' |> stdout!()
         ", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("a |> { output = stdout },b |> { output = stdout }")"#)
 }

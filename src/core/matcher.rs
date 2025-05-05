@@ -59,7 +59,7 @@ impl<'p> Matcher<'p> for FieldAccess<'p> {
         'p: 'a,
     {
         match val {
-            Val::Rec { rec } => match rec.get(self.name.as_bytes(), arena) {
+            Val::Rec { rec } => match rec.get(self.name.as_bytes()) {
                 Ok(field) => self.inner.evaluate(arena, env, &field),
                 // such errors are actually OK when pattern matching,
                 // just means the pattern didn't match!
@@ -121,7 +121,7 @@ impl<'p> Matcher<'p> for Equal<'p> {
     where
         'p: 'a,
     {
-        if val.eq(arena, &self.val) {
+        if val.eq(&self.val) {
             // one world, with no binds
             Ok(vec![vec![]])
         } else {

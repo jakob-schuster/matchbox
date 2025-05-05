@@ -11,51 +11,47 @@ pub enum RecError {
 }
 
 pub trait Rec<'p>: Display + Send + Sync {
-    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<Val<'a>, InternalError>
+    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
     where
         'p: 'a;
-    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], Val<'a>>
+    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
     where
         'p: 'a;
-    fn with<'a>(&self, key: &[u8], val: Val<'a>, arena: &'a Arena) -> ConcreteRec<'a>
+    fn with<'a>(&self, key: &[u8], val: Val<'a>) -> FullyConcreteRec<'a>
     where
         'p: 'a,
     {
-        let mut map = self.all(arena);
-        map.insert(arena.alloc(key.to_vec()), val);
+        let mut map = self.all();
+        map.insert(key.to_vec(), val);
 
-        ConcreteRec { map }
+        FullyConcreteRec { map }
     }
-    fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)], arena: &'a Arena) -> ConcreteRec<'a>
+    fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> FullyConcreteRec<'a>
     where
         'p: 'a,
     {
-        let mut map = self.all(arena);
+        let mut map = self.all();
 
         for (key, val) in entries {
-            map.insert(arena.alloc(key.to_vec()), val.clone());
+            map.insert(key.to_vec(), val.clone());
         }
 
-        ConcreteRec { map }
+        FullyConcreteRec { map }
     }
 
-    fn coerce<'a>(&self, arena: &'a Arena) -> Arc<dyn Rec<'a> + 'a>
+    fn coerce<'a>(&self) -> Arc<dyn Rec<'a> + 'a>
     where
         'p: 'a,
     {
-        let rec: ConcreteRec<'a> = ConcreteRec {
-            map: self.all(arena) as HashMap<&'a [u8], Val<'a>>,
-        } as ConcreteRec<'a>;
+        let rec: FullyConcreteRec<'a> =
+            FullyConcreteRec { map: self.all() } as FullyConcreteRec<'a>;
 
         Arc::new(rec) as Arc<dyn Rec<'a>>
     }
 
     fn is_neutral(&self) -> bool {
-        // this is a bit unhinged but we can just make a quick arena for this,
-        // since we're just returning a bool out
-        let arena = Arena::new();
         let b = self
-            .all(&arena)
+            .all()
             .iter()
             .map(|(_, val)| val.is_neutral())
             .any(|a| a);
@@ -69,12 +65,62 @@ pub struct ConcreteRec<'p> {
 }
 
 impl<'p> Rec<'p> for ConcreteRec<'p> {
-    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<Val<'a>, InternalError>
+    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
+    where
+        'p: 'a,
+    {
+        todo!()
+        // match self.map.get(key) {
+        //     Some(val) => Ok(val.coerce(arena)),
+        //     None => Err(InternalError {
+        //         message: format!(
+        //             "could not find field '{}'",
+        //             String::from_utf8(key.to_vec()).expect("bad field name?!")
+        //         ),
+        //     }),
+        // }
+    }
+
+    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
+    where
+        'p: 'a,
+    {
+        self.map
+            .iter()
+            .map(|(a, b)| (a.to_vec(), b.coerce()))
+            .collect()
+        // self.map
+        //     .iter()
+        //     .map(|(a, b)| (a as &'a [u8], b.coerce(arena) as Val<'a>))
+        //     .collect()
+    }
+}
+
+impl<'a> Display for ConcreteRec<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!(
+            "{{ {} }}",
+            self.map
+                .iter()
+                .map(|(name, val)| format!("{} = {}", util::bytes_to_string(name).unwrap(), val))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .fmt(f)
+    }
+}
+
+pub struct FullyConcreteRec<'p> {
+    pub map: HashMap<Vec<u8>, Val<'p>>,
+}
+
+impl<'p> Rec<'p> for FullyConcreteRec<'p> {
+    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
     where
         'p: 'a,
     {
         match self.map.get(key) {
-            Some(val) => Ok(val.coerce(arena)),
+            Some(val) => Ok(val.coerce()),
             None => Err(InternalError {
                 message: format!(
                     "could not find field '{}'",
@@ -84,18 +130,18 @@ impl<'p> Rec<'p> for ConcreteRec<'p> {
         }
     }
 
-    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], Val<'a>>
+    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
     where
         'p: 'a,
     {
         self.map
             .iter()
-            .map(|(a, b)| (a as &'a [u8], b.coerce(arena) as Val<'a>))
+            .map(|(a, b)| (a.clone(), b.coerce() as Val<'a>))
             .collect()
     }
 }
 
-impl<'a> Display for ConcreteRec<'a> {
+impl<'a> Display for FullyConcreteRec<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         format!(
             "{{ {} }}",
@@ -114,7 +160,7 @@ pub struct FastaRead<'a> {
 }
 
 impl<'p> Rec<'p> for FastaRead<'p> {
-    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<Val<'a>, InternalError>
+    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
     where
         'p: 'a,
     {
@@ -133,15 +179,18 @@ impl<'p> Rec<'p> for FastaRead<'p> {
         }
     }
 
-    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], Val<'a>>
+    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
     where
         'p: 'a,
     {
-        let mut map: HashMap<&'a [u8], Val<'a>> = HashMap::new();
-        let fields: Vec<&[u8]> = vec![b"seq", b"id", b"desc"];
+        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+        let fields: Vec<Vec<u8>> = vec![b"seq".to_vec(), b"id".to_vec(), b"desc".to_vec()];
 
-        for field in fields {
-            map.insert(field, self.get(field, arena).expect("Couldn't get field!"));
+        for field in &fields {
+            map.insert(
+                field.clone(),
+                self.get(&field).expect("Couldn't get field!"),
+            );
         }
 
         map
@@ -150,10 +199,8 @@ impl<'p> Rec<'p> for FastaRead<'p> {
 
 impl<'a> Display for FastaRead<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // note: this seems highly wasteful
-        let arena = Arena::new();
-        let map = self.all(&arena);
-        let s = ConcreteRec { map }.fmt(f);
+        let map = self.all();
+        let s = FullyConcreteRec { map }.fmt(f);
         s
     }
 }
@@ -163,7 +210,7 @@ pub struct FastqRead<'a> {
 }
 
 impl<'p> Rec<'p> for FastqRead<'p> {
-    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<Val<'a>, InternalError>
+    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
     where
         'p: 'a,
     {
@@ -185,15 +232,23 @@ impl<'p> Rec<'p> for FastqRead<'p> {
         }
     }
 
-    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], Val<'a>>
+    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
     where
         'p: 'a,
     {
-        let mut map: HashMap<&'a [u8], Val<'a>> = HashMap::new();
-        let fields: Vec<&[u8]> = vec![b"seq", b"id", b"desc", b"qual"];
+        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+        let fields: Vec<Vec<u8>> = vec![
+            b"seq".to_vec(),
+            b"id".to_vec(),
+            b"desc".to_vec(),
+            b"qual".to_vec(),
+        ];
 
-        for field in fields {
-            map.insert(field, self.get(field, arena).expect("Couldn't get field!"));
+        for field in &fields {
+            map.insert(
+                field.clone(),
+                self.get(&field).expect("Couldn't get field!"),
+            );
         }
 
         map
@@ -203,9 +258,8 @@ impl<'p> Rec<'p> for FastqRead<'p> {
 impl<'a> Display for FastqRead<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // note: this seems highly wasteful
-        let arena = Arena::new();
-        let map = self.all(&arena);
-        let s = ConcreteRec { map }.fmt(f);
+        let map = self.all();
+        let s = FullyConcreteRec { map }.fmt(f);
         s
     }
 }
@@ -232,7 +286,7 @@ impl<'a> SamRead<'a> {
 }
 
 impl<'p> Rec<'p> for SamRead<'p> {
-    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<Val<'a>, InternalError>
+    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
     where
         'p: 'a,
     {
@@ -330,19 +384,29 @@ impl<'p> Rec<'p> for SamRead<'p> {
         }
     }
 
-    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], Val<'a>>
+    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
     where
         'p: 'a,
     {
-        let mut map: HashMap<&'a [u8], Val<'a>> = HashMap::new();
-        let fields: Vec<&[u8]> = vec![
-            b"qname", b"id", b"flag", // b"flag_rec",
-            b"rname", b"pos", b"mapq", b"cigar", b"rnext", b"pnext", b"tlen", b"seq", b"qual",
-            b"tags",
+        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+        let fields: Vec<Vec<u8>> = vec![
+            b"qname".to_vec(),
+            b"id".to_vec(),
+            b"flag".to_vec(), // b"flag_rec".to_vec(),
+            b"rname".to_vec(),
+            b"pos".to_vec(),
+            b"mapq".to_vec(),
+            b"cigar".to_vec(),
+            b"rnext".to_vec(),
+            b"pnext".to_vec(),
+            b"tlen".to_vec(),
+            b"seq".to_vec(),
+            b"qual".to_vec(),
+            b"tags".to_vec(),
         ];
 
-        for field in fields {
-            map.insert(field, self.get(field, arena).expect("Couldn't get field!"));
+        for field in &fields {
+            map.insert(field.clone(), self.get(field).expect("Couldn't get field!"));
         }
 
         map
@@ -352,9 +416,8 @@ impl<'p> Rec<'p> for SamRead<'p> {
 impl<'p> Display for SamRead<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // note: this seems highly wasteful
-        let arena = Arena::new();
-        let map = self.all(&arena);
-        let s = ConcreteRec { map }.fmt(f);
+        let map = self.all();
+        let s = FullyConcreteRec { map }.fmt(f);
         s
     }
 }
@@ -364,26 +427,36 @@ pub struct SamFlags {
 }
 
 impl<'p> Rec<'p> for SamFlags {
-    fn get<'a>(&self, key: &[u8], arena: &'a Arena) -> Result<Val<'a>, InternalError>
+    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
     where
         'p: 'a,
     {
         todo!()
     }
 
-    fn all<'a>(&self, arena: &'a Arena) -> HashMap<&'a [u8], Val<'a>>
+    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
     where
         'p: 'a,
     {
-        let mut map: HashMap<&'a [u8], Val<'a>> = HashMap::new();
-        let fields: Vec<&[u8]> = vec![
-            b"qname", b"id", b"flag", // b"flag_rec",
-            b"rname", b"pos", b"mapq", b"cigar", b"rnext", b"pnext", b"tlen", b"seq", b"qual",
-            b"tags",
+        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+        let fields: Vec<Vec<u8>> = vec![
+            b"qname".to_vec(),
+            b"id".to_vec(),
+            b"flag".to_vec(), // b"flag_rec".to_vec(),
+            b"rname".to_vec(),
+            b"pos".to_vec(),
+            b"mapq".to_vec(),
+            b"cigar".to_vec(),
+            b"rnext".to_vec(),
+            b"pnext".to_vec(),
+            b"tlen".to_vec(),
+            b"seq".to_vec(),
+            b"qual".to_vec(),
+            b"tags".to_vec(),
         ];
 
-        for field in fields {
-            map.insert(field, self.get(field, arena).expect("Couldn't get field!"));
+        for field in &fields {
+            map.insert(field.clone(), self.get(field).expect("Couldn't get field!"));
         }
 
         map

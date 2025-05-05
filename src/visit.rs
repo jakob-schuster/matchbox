@@ -24,24 +24,64 @@ pub fn ids_tm(tm: &Tm) -> Vec<String> {
             .flat_map(|field| ids_tm(&field.data))
             .collect(),
         crate::surface::TmData::RecProj { tm, name } => ids_tm(&tm),
-        crate::surface::TmData::FunTy { args, body } => args
+        crate::surface::TmData::FunTy { args, body, opts } => args
             .iter()
             .flat_map(|arg| ids_tm(arg))
+            .chain(
+                opts.into_iter()
+                    .flat_map(|(name, ty, val)| {
+                        ids_tm(ty)
+                            .into_iter()
+                            .chain(ids_tm(val))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            )
             .chain(ids_tm(&body))
             .collect(),
-        crate::surface::TmData::FunLit { args, body } => args
+        crate::surface::TmData::FunLit { args, opts, body } => args
             .iter()
             .flat_map(|arg| ids_tm(&arg.ty))
+            .chain(
+                opts.into_iter()
+                    .flat_map(|param| {
+                        ids_tm(&param.ty)
+                            .into_iter()
+                            .chain(ids_tm(&param.tm))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            )
             .chain(ids_tm(&body))
             .collect(),
-        crate::surface::TmData::FunLitForeign { args, ty, name } => args
+        crate::surface::TmData::FunLitForeign {
+            args,
+            ty,
+            name,
+            opts,
+        } => args
             .iter()
             .flat_map(|arg| ids_tm(&arg.ty))
+            .chain(
+                opts.into_iter()
+                    .flat_map(|param| {
+                        ids_tm(&param.ty)
+                            .into_iter()
+                            .chain(ids_tm(&param.tm))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            )
             .chain(ids_tm(&ty))
             .collect(),
-        crate::surface::TmData::FunApp { head, args } => ids_tm(&head)
+        crate::surface::TmData::FunApp { head, args, opts } => ids_tm(&head)
             .into_iter()
             .chain(args.iter().flat_map(|arg| ids_tm(arg)).collect::<Vec<_>>())
+            .chain(
+                opts.into_iter()
+                    .flat_map(|(name, val)| ids_tm(val))
+                    .collect::<Vec<_>>(),
+            )
             .collect(),
         crate::surface::TmData::BinOp { tm0, tm1, op } => {
             ids_tm(&tm0).into_iter().chain(ids_tm(&tm1)).collect()

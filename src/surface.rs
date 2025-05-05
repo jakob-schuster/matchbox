@@ -10,7 +10,7 @@ use crate::{
     },
     parse,
     read::FileType,
-    util::{Arena, Cache, CoreRecField, Env, Located, Location, Ran, RecField},
+    util::{bytes_to_string, Arena, Cache, CoreRecField, Env, Located, Location, Ran, RecField},
     visit, GlobalConfig,
 };
 
@@ -199,14 +199,17 @@ pub enum TmData {
 
     FunTy {
         args: Vec<Tm>,
+        opts: Vec<(String, Tm, Tm)>,
         body: Rc<Tm>,
     },
     FunLit {
         args: Vec<Param>,
+        opts: Vec<OptParam>,
         body: Rc<Tm>,
     },
     FunLitForeign {
         args: Vec<Param>,
+        opts: Vec<OptParam>,
         ty: Rc<Tm>,
         name: String,
     },
@@ -214,6 +217,7 @@ pub enum TmData {
     FunApp {
         head: Rc<Tm>,
         args: Vec<Tm>,
+        opts: Vec<(String, Tm)>,
     },
     /// Binary operations
     BinOp {
@@ -237,6 +241,13 @@ pub enum TmData {
 pub struct Param {
     pub name: String,
     pub ty: Tm,
+}
+
+#[derive(Clone, Debug)]
+pub struct OptParam {
+    pub name: String,
+    pub ty: Tm,
+    pub tm: Tm,
 }
 
 #[derive(Clone, Debug)]
@@ -414,7 +425,7 @@ fn elab_stmt<'a>(
                 first_stmt,
                 &rest_stmts
                     .iter()
-                    .chain(rest.iter().map(|a| *a))
+                    .chain(rest.iter().copied())
                     .collect::<Vec<_>>(),
             ),
             [] => match rest {
@@ -425,7 +436,6 @@ fn elab_stmt<'a>(
 
         StmtData::Let { name, tm } => {
             let (ctm, ty) = infer_tm(arena, ctx, tm)?;
-
             // now we evaluate the terms as best we can, in case we need them at the static stage (we probably will)
             let new_ctx = ctx.bind_def(
                 name.clone(),
@@ -949,7 +959,7 @@ pub fn infer_tm<'a>(
             ))
         }
 
-        TmData::FunTy { args, body } => Ok((
+        TmData::FunTy { args, opts, body } => Ok((
             core::Tm::new(
                 tm.location.clone(),
                 core::TmData::FunTy {
@@ -957,12 +967,13 @@ pub fn infer_tm<'a>(
                         .iter()
                         .map(|arg| check_tm(arena, ctx, arg, &core::Val::Univ))
                         .collect::<Result<Vec<_>, ElabError>>()?,
+                    opts: todo!(),
                     body: Arc::new(check_tm(arena, ctx, body, &core::Val::Univ)?),
                 },
             ),
             core::Val::Univ,
         )),
-        TmData::FunLit { args, body } => {
+        TmData::FunLit { args, opts, body } => {
             // then, make sure each param has a type associated which is actually a type
             let param_tms = args
                 .iter()
@@ -1013,7 +1024,12 @@ pub fn infer_tm<'a>(
                 body_ty,
             ))
         }
-        TmData::FunLitForeign { args, ty, name } => {
+        TmData::FunLitForeign {
+            args,
+            opts,
+            ty,
+            name,
+        } => {
             // then, make sure each param has a type associated which is actually a type
             let param_tms = args
                 .iter()
@@ -1082,11 +1098,12 @@ pub fn infer_tm<'a>(
                 ),
                 core::Val::FunTy {
                     args: arg_vals,
+                    opts: vec![],
                     body: Arc::new(final_ty),
                 },
             ))
         }
-        TmData::FunApp { head, args } => {
+        TmData::FunApp { head, args, opts } => {
             let (head_tm, head_ty) = infer_tm(arena, ctx, head)?;
 
             match head_ty {
@@ -1129,6 +1146,7 @@ pub fn infer_tm<'a>(
                 }
                 core::Val::FunTy {
                     args: args_ty,
+                    opts,
                     body,
                 } => {
                     // first make sure the argument lists are the same length
@@ -1236,7 +1254,7 @@ fn infer_bin_op<'a>(
 
         match ctx.lookup(name.to_string()) {
             Some((index, ty)) => match ty {
-                core::Val::FunTy { args, body } => Ok((
+                core::Val::FunTy { args, body, opts } => Ok((
                     core::Tm::new(
                         location.clone(),
                         core::TmData::FunApp {
@@ -1313,7 +1331,7 @@ fn infer_un_op<'a>(
 
             match ctx.lookup(name.to_string()) {
                 Some((index, ty)) => match ty {
-                    core::Val::FunTy { args, body } => Ok((
+                    core::Val::FunTy { args, body, opts } => Ok((
                         core::Tm::new(
                             location.clone(),
                             core::TmData::FunApp {
@@ -1340,7 +1358,7 @@ fn infer_un_op<'a>(
             if cty0.equiv(&core::Val::NumTy) {
                 match ctx.lookup("unary_minus".to_string()) {
                     Some((index, ty)) => match ty {
-                        core::Val::FunTy { args, body } => Ok((
+                        core::Val::FunTy { args, body, opts } => Ok((
                             core::Tm::new(
                                 location.clone(),
                                 core::TmData::FunApp {
@@ -1442,6 +1460,7 @@ fn elab_str_lit_regs<'a>(
                             )),
                             &core::Val::FunTy {
                                 args: vec![core::Val::StrTy, core::Val::StrTy],
+                                opts: vec![],
                                 body: Arc::new(core::Val::StrTy),
                             },
                         )?),
@@ -1490,6 +1509,7 @@ fn elab_str_lit_reg<'a>(
                         )),
                         &core::Val::FunTy {
                             args: vec![core::Val::AnyTy],
+                            opts: vec![],
                             body: Arc::new(core::Val::StrTy),
                         },
                     )?),

@@ -16,4 +16,4 @@ Currently you'll have a (slightly!) more stable experience with the original pro
 - [x] make standard library on compile
 - [x] make reverse complement work for reads as well
 - [x] add pipe operator again
-- [ ] add sam support
+- [x] add sam support

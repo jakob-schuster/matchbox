@@ -92,7 +92,7 @@ fn run_script(global_config: &GlobalConfig) {
 /// Panic on evaluation errors or internal errors.
 fn run(code: &str, global_config: &GlobalConfig) {
     // set up the thread pool
-    let pool = rayon::ThreadPoolBuilder::new()
+    rayon::ThreadPoolBuilder::new()
         .num_threads(global_config.threads)
         .build_global()
         .unwrap();

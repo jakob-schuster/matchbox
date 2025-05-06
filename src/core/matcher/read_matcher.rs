@@ -772,11 +772,11 @@ impl<'p> LocTm<'p> {
             LocTm::Var { loc } => LocTm::Var { loc: *loc },
             LocTm::Plus { loc_tm, offset } => LocTm::Plus {
                 loc_tm: Arc::new(loc_tm.coerce(arena)),
-                offset: offset.coerce(arena),
+                offset: offset.coerce(),
             },
             LocTm::Minus { loc_tm, offset } => LocTm::Minus {
                 loc_tm: Arc::new(loc_tm.coerce(arena)),
-                offset: offset.coerce(arena),
+                offset: offset.coerce(),
             },
         }
     }

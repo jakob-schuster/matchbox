@@ -98,6 +98,10 @@ impl<A> Env<A> {
             None => panic!("Bad index in env!"),
         }
     }
+
+    pub fn from_vec(vec: Vec<A>) -> Env<A> {
+        Env { vec }
+    }
 }
 
 #[derive(Clone, Debug)]

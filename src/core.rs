@@ -452,12 +452,9 @@ pub enum TmData<'a> {
     },
     // can't remember why we need args still...
     FunLit {
-        args: Vec<Tm<'a>>,
         body: Arc<Tm<'a>>,
     },
     FunForeignLit {
-        args: Vec<Tm<'a>>,
-        body_ty: Arc<Tm<'a>>,
         body: Arc<
             dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>
                 + Send
@@ -485,6 +482,13 @@ pub enum TmData<'a> {
 
     // the return type of effectful functions
     EffectTy,
+}
+
+#[derive(Clone)]
+struct FunSig<'a> {
+    args: Vec<Tm<'a>>,
+    opts: Vec<(&'a [u8], Tm<'a>, Tm<'a>)>,
+    body: Arc<Tm<'a>>,
 }
 
 impl<'p> Tm<'p> {
@@ -534,7 +538,8 @@ impl<'p> Tm<'p> {
                         Ok((
                             *name,
                             ty.eval(arena, global_env, cache, env)?,
-                            val.eval(arena, global_env, cache, env)?,
+                            // val.eval(arena, global_env, cache, env)?,
+                            val.clone(),
                         ))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -542,9 +547,7 @@ impl<'p> Tm<'p> {
                 let body = body.eval(arena, global_env, cache, env)?;
 
                 if args.iter().any(|arg| arg.is_neutral())
-                    || opts
-                        .iter()
-                        .any(|(_, ty, val)| ty.is_neutral() || val.is_neutral())
+                    || opts.iter().any(|(_, ty, val)| ty.is_neutral())
                     || body.is_neutral()
                 {
                     Ok(Val::Neutral {
@@ -563,48 +566,48 @@ impl<'p> Tm<'p> {
                 }
             }
             // WARN we aren't giving an option for this to be neutral yet. is this a problem?
-            TmData::FunLit { args, body } => Ok(Val::Fun {
+            TmData::FunLit { body } => Ok(Val::Fun {
                 data: FunData {
                     env: env.clone() as Env<Val<'a>>,
-                    body: body.coerce(arena),
+                    body: body.coerce(),
                 },
             }),
             TmData::FunForeignLit {
-                args,
-                body_ty,
+                // args,
+                // body_ty,
                 body,
             } => {
-                let args = args
-                    .iter()
-                    .map(|arg| arg.eval(arena, global_env, cache, env))
-                    .collect::<Result<Vec<_>, _>>()?;
+                // let args = args
+                //     .iter()
+                //     .map(|arg| arg.eval(arena, global_env, cache, env))
+                //     .collect::<Result<Vec<_>, _>>()?;
 
-                let smaller_env = args.iter().fold(env.clone(), |env0, _| {
-                    env0.with(Val::Neutral {
-                        neutral: Neutral::Var {
-                            level: env0.iter().len(),
-                        },
-                    })
-                });
+                // let smaller_env = args.iter().fold(env.clone(), |env0, _| {
+                //     env0.with(Val::Neutral {
+                //         neutral: Neutral::Var {
+                //             level: env0.iter().len(),
+                //         },
+                //     })
+                // });
 
-                let body_ty = body_ty.eval(arena, global_env, cache, &smaller_env)?;
+                // let body_ty = body_ty.eval(arena, global_env, cache, &smaller_env)?;
 
                 // we DON'T care if the body type is neutral
-                if args.iter().any(|arg| arg.is_neutral()) {
-                    Ok(Val::Neutral {
-                        neutral: Neutral::FunForeignLit {
-                            args,
-                            body_ty: Arc::new(body_ty),
-                            body: body.clone(),
-                        },
-                    })
-                } else {
-                    Ok(Val::FunForeign {
-                        args,
-                        body_ty: Arc::new(body_ty),
-                        body: body.clone(),
-                    })
-                }
+                // if args.iter().any(|arg| arg.is_neutral()) {
+                //     Ok(Val::Neutral {
+                //         neutral: Neutral::FunForeignLit {
+                //             // args,
+                //             // body_ty: Arc::new(body_ty),
+                //             body: body.clone(),
+                //         },
+                //     })
+                // } else {
+                Ok(Val::FunForeign {
+                    // args,
+                    // body_ty: Arc::new(body_ty),
+                    body: body.clone(),
+                })
+                // }
             }
             TmData::FunApp { head, args } => app(
                 arena,
@@ -781,7 +784,7 @@ impl<'p> Tm<'p> {
         }
     }
 
-    fn coerce<'a>(&self, arena: &'a Arena) -> Tm<'a>
+    fn coerce<'a>(&self) -> Tm<'a>
     where
         'p: 'a,
     {
@@ -797,56 +800,47 @@ impl<'p> Tm<'p> {
             TmData::StrTy => TmData::StrTy,
             TmData::StrLit { s } => TmData::StrLit { s },
             TmData::ListTy { ty } => TmData::ListTy {
-                ty: Arc::new(ty.coerce(arena)),
+                ty: Arc::new(ty.coerce()),
             },
             TmData::ListLit { tms } => TmData::ListLit {
-                tms: tms.iter().map(|tm| tm.coerce(arena)).collect(),
+                tms: tms.iter().map(|tm| tm.coerce()).collect(),
             },
             TmData::FunTy { args, opts, body } => TmData::FunTy {
-                args: args.iter().map(|tm| tm.coerce(arena)).collect(),
+                args: args.iter().map(|tm| tm.coerce()).collect(),
                 opts: opts
                     .iter()
-                    .map(|(name, ty, val)| (*name as &'a [u8], ty.coerce(arena), val.coerce(arena)))
+                    .map(|(name, ty, val)| (*name as &'a [u8], ty.coerce(), val.coerce()))
                     .collect(),
-                body: Arc::new(body.coerce(arena)),
+                body: Arc::new(body.coerce()),
             },
-            TmData::FunLit { args, body } => TmData::FunLit {
-                args: args.iter().map(|tm| tm.coerce(arena)).collect(),
-                body: Arc::new(body.coerce(arena)),
+            TmData::FunLit { body } => TmData::FunLit {
+                body: Arc::new(body.coerce()),
             },
-            TmData::FunForeignLit {
-                args,
-                body_ty,
-                body,
-            } => TmData::FunForeignLit {
-                args: args.iter().map(|tm| tm.coerce(arena)).collect(),
-                body_ty: Arc::new(body_ty.coerce(arena)),
-                body: body.clone(),
-            },
+            TmData::FunForeignLit { body } => TmData::FunForeignLit { body: body.clone() },
             TmData::FunApp { head, args } => TmData::FunApp {
-                head: Arc::new(head.coerce(arena)),
-                args: args.iter().map(|arg| arg.coerce(arena)).collect(),
+                head: Arc::new(head.coerce()),
+                args: args.iter().map(|arg| arg.coerce()).collect(),
             },
             TmData::RecTy { fields } => TmData::RecTy {
                 fields: fields
                     .iter()
-                    .map(|field| CoreRecField::new(field.name, field.data.coerce(arena)))
+                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
                     .collect(),
             },
             TmData::RecWithTy { fields } => TmData::RecWithTy {
                 fields: fields
                     .iter()
-                    .map(|field| CoreRecField::new(field.name, field.data.coerce(arena)))
+                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
                     .collect(),
             },
             TmData::RecLit { fields } => TmData::RecLit {
                 fields: fields
                     .iter()
-                    .map(|field| CoreRecField::new(field.name, field.data.coerce(arena)))
+                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
                     .collect(),
             },
             TmData::RecProj { tm, name } => TmData::RecProj {
-                tm: Arc::new(tm.coerce(arena)),
+                tm: Arc::new(tm.coerce()),
                 name,
             },
             TmData::EffectTy => TmData::EffectTy,
@@ -929,9 +923,6 @@ pub enum Val<'a> {
         data: FunData<'a>,
     },
     FunForeign {
-        args: Vec<Val<'a>>,
-        opts: Vec<(&'a [u8], Val<'a>, Tm<'a>)>,
-        body_ty: Arc<Val<'a>>,
         body: Arc<
             dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>
                 + Send
@@ -990,7 +981,7 @@ impl<'a> Val<'a> {
             out
         };
         let get_opt =
-            |fields: &[(&[u8], Val<'a>, Val<'a>)], name: &[u8]| -> Option<(Val<'a>, Val<'a>)> {
+            |fields: &[(&[u8], Val<'a>, Tm<'a>)], name: &[u8]| -> Option<(Val<'a>, Tm<'a>)> {
                 let mut out = None;
                 for (field_name, ty, val) in fields {
                     if field_name.eq(&name) {
@@ -1042,7 +1033,9 @@ impl<'a> Val<'a> {
                 args1.len().eq(&args2.len())
                     && args1.iter().zip(args2).all(|(arg1, arg2)| arg1.equiv(arg2))
                     && names.all(|name| match (get_opt(opts1, name), get_opt(opts2, name)) {
-                        (Some((ty1, val1)), Some((ty2, val2))) => ty1.equiv(&ty2) && val1.eq(&val2),
+                        // WARN for now do not verify that the values themselves are the same
+                        // just check the types and the names of all the fields
+                        (Some((ty1, val1)), Some((ty2, val2))) => ty1.equiv(&ty2),
                         // any optional arguments missing is a type error
                         _ => false,
                     })
@@ -1250,19 +1243,13 @@ impl<'a> Val<'a> {
                     .map(|(a, b, c)| (a as &'a [u8], b.coerce(), c.coerce()))
                     .collect(),
             },
-            Val::Fun { data } => todo!(),
-            Val::FunForeign {
-                body: f,
-                args,
-                body_ty,
-            } => Val::FunForeign {
-                body: f.clone(),
-                args: args
-                    .iter()
-                    .map(|val| val.coerce() as Val<'b>)
-                    .collect::<Vec<_>>(),
-                body_ty: Arc::new(body_ty.coerce()),
+            Val::Fun { data } => Val::Fun {
+                data: FunData {
+                    env: Env::from_vec(data.env.iter().map(|val| val.coerce()).collect_vec()),
+                    body: data.body.coerce(),
+                },
             },
+            Val::FunForeign { body: f } => Val::FunForeign { body: f.clone() },
             Val::FunReturnTyAwaiting { data } => todo!(),
             Val::Neutral { neutral } => Val::Neutral {
                 neutral: neutral.coerce(),
@@ -1288,13 +1275,6 @@ impl<'a> Val<'a> {
                 args.iter().any(|arg| arg.is_neutral()) || body.is_neutral()
             }
 
-            // note: we NO LONGER CARE whether the body type is neutral.
-            // by this point, all should be well
-            Val::FunForeign {
-                args,
-                body_ty,
-                body,
-            } => args.iter().any(|arg| arg.is_neutral()),
             _ => false,
         }
     }
@@ -1315,16 +1295,13 @@ pub enum Neutral<'a> {
     //
     FunTy {
         args: Vec<Val<'a>>,
-        opts: Vec<(&'a [u8], Val<'a>, Val<'a>)>,
+        opts: Vec<(&'a [u8], Val<'a>, Tm<'a>)>,
         body: Arc<Val<'a>>,
     },
     FunLit {
-        args: Vec<Val<'a>>,
         body: Arc<Val<'a>>,
     },
     FunForeignLit {
-        args: Vec<Val<'a>>,
-        body_ty: Arc<Val<'a>>,
         body: Arc<
             dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>
                 + Send
@@ -1380,19 +1357,10 @@ impl<'a> Neutral<'a> {
                     .collect(),
                 body: Arc::new(body.coerce()),
             },
-            Neutral::FunLit { args, body } => Neutral::FunLit {
-                args: args.iter().map(|arg| arg.coerce()).collect(),
+            Neutral::FunLit { body } => Neutral::FunLit {
                 body: Arc::new(body.coerce()),
             },
-            Neutral::FunForeignLit {
-                args,
-                body_ty,
-                body,
-            } => Neutral::FunForeignLit {
-                args: args.iter().map(|arg| arg.coerce()).collect(),
-                body_ty: Arc::new(body_ty.coerce()),
-                body: body.clone(),
-            },
+            Neutral::FunForeignLit { body } => Neutral::FunForeignLit { body: body.clone() },
             Neutral::RecTy { fields } => Neutral::RecTy {
                 fields: fields
                     .iter()
@@ -1495,6 +1463,11 @@ pub fn make_portable<'a>(arena: &'a Arena, val: &Val<'a>) -> PortableVal {
 
         Val::FunTy { args, opts, body } => PortableVal::FunTy {
             args: args.iter().map(|arg| make_portable(arena, arg)).collect(),
+            opts: opts
+                .iter()
+                // WARN to make tms portable, for now just serialise them as strings
+                .map(|(name, ty, tm)| (name.to_vec(), make_portable(arena, ty), tm.to_string()))
+                .collect(),
             body: Arc::new(make_portable(arena, body)),
         },
         Val::Fun { .. } => PortableVal::Fun {
@@ -1555,6 +1528,9 @@ pub enum PortableVal {
     /// Functions just become description strings
     FunTy {
         args: Vec<PortableVal>,
+        // WARN here, the term has been serialised as a string
+        // because I have no idea what else to do
+        opts: Vec<(Vec<u8>, PortableVal, String)>,
         body: Arc<PortableVal>,
     },
     Fun {
@@ -1661,28 +1637,8 @@ impl<'a> Display for TmData<'a> {
                 body
             )
             .fmt(f),
-            TmData::FunLit { args, body } => format!(
-                "({}) => {}",
-                args.iter()
-                    .map(|a| a.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                body
-            )
-            .fmt(f),
-            TmData::FunForeignLit {
-                args,
-                body,
-                body_ty,
-            } => format!(
-                "({}): {} => #foreign",
-                args.iter()
-                    .map(|a| a.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                body_ty
-            )
-            .fmt(f),
+            TmData::FunLit { body } => format!("#fun({})", body).fmt(f),
+            TmData::FunForeignLit { body } => "#fun-foreign".fmt(f),
             TmData::FunApp { head, args } => format!(
                 "({})({})",
                 head,
@@ -1752,6 +1708,7 @@ impl<'a> Display for Val<'a> {
                 "{{ {} }}",
                 fields
                     .iter()
+                    .sorted_by_key(|field| field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1761,6 +1718,7 @@ impl<'a> Display for Val<'a> {
                 "{{ {} .. }}",
                 fields
                     .iter()
+                    .sorted_by_key(|field| field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1782,17 +1740,8 @@ impl<'a> Display for Val<'a> {
                 body
             )
             .fmt(f),
-            Val::Fun { data } => format!("#func({})", data).fmt(f),
-            Val::FunForeign {
-                args,
-                body_ty,
-                body,
-            } => format!(
-                "#func-foreign({}): {}",
-                args.iter().map(|arg| arg.to_string()).join(", "),
-                body_ty
-            )
-            .fmt(f),
+            Val::Fun { data } => format!("#fun({})", data).fmt(f),
+            Val::FunForeign { body } => format!("#fun-foreign",).fmt(f),
             Val::FunReturnTyAwaiting { data } => format!("#awaiting({})", data).fmt(f),
             Val::Neutral { neutral } => format!("#neutral({})", neutral).fmt(f),
             Val::EffectTy => "Effect".fmt(f),
@@ -1823,6 +1772,7 @@ impl<'a> Display for Neutral<'a> {
                 "{{ {} }}",
                 fields
                     .iter()
+                    .sorted_by_key(|field| field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1832,6 +1782,7 @@ impl<'a> Display for Neutral<'a> {
                 "{{ {} .. }}",
                 fields
                     .iter()
+                    .sorted_by_key(|field| field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1841,6 +1792,7 @@ impl<'a> Display for Neutral<'a> {
                 "{{ {} }}",
                 fields
                     .iter()
+                    .sorted_by_key(|field| field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1862,28 +1814,8 @@ impl<'a> Display for Neutral<'a> {
                 body
             )
             .fmt(f),
-            Neutral::FunLit { args, body } => format!(
-                "({}) => {}",
-                args.iter()
-                    .map(|a| a.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                body
-            )
-            .fmt(f),
-            Neutral::FunForeignLit {
-                args,
-                body,
-                body_ty,
-            } => format!(
-                "({}): {} => #foreign",
-                args.iter()
-                    .map(|a| a.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                body_ty
-            )
-            .fmt(f),
+            Neutral::FunLit { body } => format!("#fun({})", body).fmt(f),
+            Neutral::FunForeignLit { body } => format!("#fun-foreign",).fmt(f),
         }
     }
 }
@@ -1945,6 +1877,7 @@ impl<'a> Display for PortableVal {
                 "{{ {} }}",
                 fields
                     .iter()
+                    .sorted_by_key(|(name, _)| *name)
                     .map(|(name, val)| format!(
                         "{} = {}",
                         String::from_utf8(name.clone()).unwrap(),
@@ -1954,10 +1887,16 @@ impl<'a> Display for PortableVal {
                     .join(", ")
             )
             .fmt(f),
-            PortableVal::FunTy { args, body } => format!(
+            PortableVal::FunTy { args, opts, body } => format!(
                 "({}) -> {}",
                 args.iter()
                     .map(|arg| arg.to_string())
+                    .chain(opts.iter().map(|(name, ty, val)| format!(
+                        "{}: {} = {}",
+                        bytes_to_string(name).unwrap(),
+                        ty,
+                        val
+                    )))
                     .collect::<Vec<_>>()
                     .join(", "),
                 body

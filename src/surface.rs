@@ -368,12 +368,7 @@ impl<'a> Context<'a> {
                     head: Arc::new(core::Tm::new(
                         Location::new(0, 0),
                         core::TmData::FunForeignLit {
-                            args: vec![core::Tm::new(Location::new(0, 0), core::TmData::StrTy)],
                             body: Arc::new(core::library::read_ty),
-                            body_ty: Arc::new(core::Tm::new(
-                                Location::new(0, 0),
-                                core::TmData::Univ,
-                            )),
                         },
                     )),
                     args: vec![core::Tm::new(
@@ -1044,7 +1039,6 @@ pub fn infer_tm<'a>(
                 core::Tm::new(
                     tm.location.clone(),
                     core::TmData::FunLit {
-                        args: all_arg_tms,
                         body: Arc::new(body_tm),
                     },
                 ),
@@ -1095,7 +1089,7 @@ pub fn infer_tm<'a>(
                 })?;
 
             // then, get the type of the body
-            // (note that this might be FunReturnTyAwaiting, as it may include parameters)
+            // (note that this MIGHT be FunReturnTyAwaiting, as it may include parameters)
             let ty = check_tm(arena, &new_ctx, ty, &core::Val::Univ)?;
             let val = ty
                 .eval(arena, &new_ctx.tms, &Cache::default(), &Env::default())
@@ -1121,8 +1115,6 @@ pub fn infer_tm<'a>(
                 core::Tm::new(
                     tm.location.clone(),
                     core::TmData::FunForeignLit {
-                        args: arg_tms,
-                        body_ty: Arc::new(ty),
                         body: library::foreign(&tm.location, name)
                             .map_err(ElabError::from_eval_error)?,
                     },
@@ -1138,79 +1130,6 @@ pub fn infer_tm<'a>(
             let (head_tm, head_ty) = infer_tm(arena, ctx, head)?;
 
             match head_ty {
-                core::Val::FunForeign {
-                    args: args_ty,
-                    opts: opts_ty,
-                    body_ty,
-                    body,
-                } => {
-                    // first make sure the argument lists are the same length
-                    if !args.len().eq(&args_ty.len()) {
-                        return Err(ElabError::new(
-                            &tm.location,
-                            &format!(
-                                "function was given {} arguments, expected {}",
-                                args.len(),
-                                args_ty.len()
-                            ),
-                        ));
-                    }
-
-                    // then, make sure that every optional argument was one of the ones provided for by the type
-                    opts.iter().map(|(name, _)| {
-                        match opts_ty
-                            .iter()
-                            .find(|(name1, _, _)| (*name1).eq(name.as_bytes()))
-                        {
-                            Some(_) => Ok(()),
-                            None => Err(
-                                ElabError::new(&tm.location, &format!("found optional argument named '{}'; only expected optional arguments {}", name, opts_ty.iter().map(|(name, ty, _)| format!("{}: {}", bytes_to_string(name).unwrap(), ty)).join(", ")))
-                            ),
-                        }
-                    }).collect::<Result<Vec<_>,_>>()?;
-
-                    // then, go through the optional arguments from the type.
-                    // where they have been provided in this application, overwrite their associated term
-                    let opt_tms = opts_ty
-                        .iter()
-                        .map(|(name, ty, val)| {
-                            match opts
-                                .iter()
-                                .find(|(name_in_app, _)| (*name_in_app.as_bytes()).eq(*name))
-                            {
-                                Some((_, tm)) => {
-                                    let core_tm = check_tm(arena, ctx, tm, &ty)?;
-
-                                    Ok(core_tm)
-                                }
-                                None => Ok(val.clone()),
-                            }
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-
-                    let arg_tms = args
-                        .iter()
-                        .zip(args_ty)
-                        .map(|(arg, arg_ty)| {
-                            let arg_tm = check_tm(arena, ctx, arg, &arg_ty)?;
-                            Ok(arg_tm)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-
-                    // combine mandatory positional and optional named fields
-                    let all_arg_tms = arg_tms.into_iter().chain(opt_tms).collect();
-
-                    Ok((
-                        core::Tm::new(
-                            tm.location.clone(),
-                            core::TmData::FunApp {
-                                head: Arc::new(head_tm),
-                                args: all_arg_tms,
-                            },
-                        ),
-                        body_ty.as_ref().clone(),
-                    ))
-                }
                 core::Val::FunTy {
                     args: args_ty,
                     opts: opts_ty,

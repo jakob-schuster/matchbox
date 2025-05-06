@@ -197,11 +197,13 @@ peg::parser! {
             // nucleotide sequence literals
             / s:located(<['G'|'T'|'A'|'C']+>) &[c if !c.is_alphanumeric() && c != '_'] { TmData::StrLit { regs: vec![StrLitRegion::new(s.location, StrLitRegionData::Str { s: s.data.into_iter().map(|c| c as u8).collect() })] } }
 
+            // record literals
+            // WARN currently the empty record {} and the empty record type {} are indistinguishable.
+            // preference the empty record (because who is even writing empty record types?)
+            / "{" _ fields:whitespace_sensitive_list(<rec_lit_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { TmData::RecLit { fields }}
             // record type literals
             / "{" _ fields:whitespace_sensitive_list(<rec_ty_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { TmData::RecTy { fields }}
             / "{" _ fields:whitespace_sensitive_list(<rec_ty_field()>,<whitespace_except_newline() [','|'\n']() _>) _ ".." _ "}" { TmData::RecWithTy { fields }}
-            // record literals
-            / "{" _ fields:whitespace_sensitive_list(<rec_lit_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { TmData::RecLit { fields }}
 
             // list type literals
             / "[" _ tm:tm() _ "]" { TmData::ListTy { tm: Rc::new(tm) } }
@@ -276,7 +278,8 @@ peg::parser! {
             = "true" { true }
             / "false" { false }
         rule num_val() -> Num
-            = n:$(['0'..='9']+) { Num::Int(n.parse::<i32>().unwrap()) }
+            = n:$(['0'..='9']+ "." ['0'..='9']+) { Num::Float(n.parse::<f32>().unwrap()) }
+            / n:$(['0'..='9']+) { Num::Int(n.parse::<i32>().unwrap()) }
 
         rule name() -> String
             = s:$(['a'..='z' | 'A'..='Z' | '_']['a'..='z' | 'A'..='Z' | '_' | '0'..='9' | '!']*) { s.to_string() }

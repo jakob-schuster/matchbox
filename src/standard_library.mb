@@ -48,7 +48,7 @@ find_last = $(s0: Str, s1: Str): Num => find_last
 to_upper = $(s: Str): Str => to_upper
 to_lower = $(s: Str): Str => to_lower
 
-describe = $(r: { seq: Str }, search_terms: {..}): Str => describe
+describe = $(r: { seq: Str ..}, search_terms: {..}, reverse_complement: Bool = false, error_rate: Num = 0): Str => describe
 
 contains = $(list: [Any], val: Any): Bool => contains
 distance = $(s0: Str, s1: Str): Num => distance

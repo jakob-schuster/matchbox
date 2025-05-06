@@ -383,6 +383,21 @@ impl<'a> Context<'a> {
             arena,
         )
     }
+
+    pub fn assert_unique_name(&self, location: &Location, name: &String) -> Result<(), ElabError> {
+        // check that the name isn't already assigned
+        if self.names.iter().contains(name) {
+            Err(ElabError::new(
+                &location,
+                &format!(
+                    "tried to name a variable '{}', but that name is already in use!",
+                    name
+                ),
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl<'a> Display for Context<'a> {
@@ -446,6 +461,9 @@ fn elab_stmt<'a>(
         },
 
         StmtData::Let { name, tm } => {
+            // check that the name isn't already assigned
+            ctx.assert_unique_name(&tm.location, name)?;
+
             let (ctm, ty) = infer_tm(arena, ctx, tm)?;
             // now we evaluate the terms as best we can, in case we need them at the static stage (we probably will)
             let new_ctx = ctx.bind_def(
@@ -669,6 +687,9 @@ fn infer_pattern<'a>(
 > {
     match &pattern.data {
         PatternData::Named { name, pattern } => {
+            // check that the name isn't already assigned
+            ctx.assert_unique_name(&pattern.location, name)?;
+
             let (matcher, ty, binds) = infer_pattern(arena, ctx, pattern, ty)?;
 
             let mut new_binds = binds;
@@ -703,6 +724,21 @@ fn infer_pattern<'a>(
             vec![],
         )),
         PatternData::RecLit { fields } => {
+            // first, check that all the names are new
+            fields.iter().map(|field|
+                // check that the name isn't already assigned
+                match ctx.names.iter().contains(&field.name) {
+                    true => Err(ElabError::new(
+                                        &pattern.location,
+                                        &format!(
+                                            "tried to bind a variable to name '{}', but that name is already in use!",
+                                            field.name
+                                        ),
+                                    )),
+                    false => Ok(()),
+                }
+                ).collect::<Result<Vec<_>,_>>()?;
+
             // for each field, infer the pattern
             let (matcher, tys, names): (
                 Arc<dyn core::matcher::Matcher<'a> + 'a>,
@@ -784,6 +820,12 @@ fn infer_pattern<'a>(
                         .collect::<Vec<_>>(),
                 )
                 .collect::<Vec<_>>();
+
+            // assert that all the names are unique
+            new_binds
+                .iter()
+                .map(|(name, _)| ctx.assert_unique_name(&pattern.location, name))
+                .collect::<Result<Vec<_>, ElabError>>()?;
 
             // need to get a vector of just the tys of each param and each bind
             // which should be constant across worlds

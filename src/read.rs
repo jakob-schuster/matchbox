@@ -217,7 +217,6 @@ pub fn read_fa_multithreaded<'p, 'a: 'p>(
         .chunks(10000)
         .into_iter()
         .for_each(|chunk| {
-            // println!("chunk of {}", chunk.collect_vec().len());
             let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
             chunk
                 .collect_vec()
@@ -229,7 +228,6 @@ pub fn read_fa_multithreaded<'p, 'a: 'p>(
                             rec: Arc::new(rec::FastaRead { read }),
                         };
                         prog.eval(&arena, env, cache, val)
-                        // Ok(vec![])
                     }
                     Err(_) => panic!("bad read?!"),
                 })
@@ -241,38 +239,6 @@ pub fn read_fa_multithreaded<'p, 'a: 'p>(
                 }
             }
         });
-
-    // for chunk in &input_records.chunks(10000) {
-    //     let vec = chunk.collect_vec();
-    //     println!("dealing with chunk of {} length", vec.len());
-    //     let mut effects: Vec<Result<Vec<Effect>, EvalError>> = vec![];
-    //     vec.par_iter().for_each(|_| println!("hello"));
-    //     //     vec.par_iter()
-    //     //         .inspect(|_| println!("before the hang"))
-    //     //         .map(|record| {
-    //     //             println!("record");
-    //     //             match record {
-    //     //                 Ok(read) => {
-    //     //                     println!("dealing with read");
-    //     //                     // let arena = Arena::new();
-    //     //                     // let val = core::Val::Rec {
-    //     //                     //     rec: Arc::new(rec::FastaRead { read }),
-    //     //                     // };
-
-    //     //                     // prog.eval(&arena, env, cache, val)
-    //     //                     Ok(vec![])
-    //     //                 }
-    //     //                 Err(_) => panic!("bad read?!"),
-    //     //             }
-    //     //         })
-    //     //         .collect_into_vec(&mut effects);
-
-    //     //     for result_effects in &effects {
-    //     //         for effect in result_effects.as_ref().expect("") {
-    //     //             output_handler.handle(effect).unwrap();
-    //     //         }
-    //     //     }
-    // }
 
     output_handler.finish();
 }
@@ -286,22 +252,33 @@ pub fn read_fq<'p, 'a: 'p>(
 ) {
     let input_records = bio::io::fastq::Reader::from_bufread(buffer).records();
 
-    for record in input_records {
-        match record {
-            Ok(read) => {
-                let arena = Arena::new();
-                let val = core::Val::Rec {
-                    rec: Arc::new(rec::FastqRead { read: &read }),
-                };
-                let effects = prog.eval(&arena, env, cache, val);
+    input_records
+        .into_iter()
+        .chunks(10000)
+        .into_iter()
+        .for_each(|chunk| {
+            let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+            chunk
+                .collect_vec()
+                .par_iter()
+                .map(|record| match record {
+                    Ok(read) => {
+                        let arena = Arena::new();
+                        let val = core::Val::Rec {
+                            rec: Arc::new(rec::FastqRead { read }),
+                        };
+                        prog.eval(&arena, env, cache, val)
+                    }
+                    Err(_) => panic!("bad read?!"),
+                })
+                .collect_into_vec(&mut vec);
 
-                for effect in &effects.expect("") {
-                    output_handler.handle(effect);
+            for result_effects in &vec {
+                for effect in result_effects.as_ref().expect("") {
+                    output_handler.handle(effect).unwrap();
                 }
             }
-            Err(_) => panic!("bad read?!"),
-        }
-    }
+        });
 
     output_handler.finish();
 }

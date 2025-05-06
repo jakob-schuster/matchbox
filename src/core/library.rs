@@ -1082,7 +1082,9 @@ pub fn describe<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Rec { rec: read }, Val::Rec { rec: search_terms }, Val::Num { n: error_rate }] => {
+        [Val::Rec { rec: read }, Val::Rec { rec: search_terms }, Val::Bool {
+            b: reverse_complement,
+        }, Val::Num { n: error_rate }] => {
             if let Val::Str { s: read_seq } = read
                 .get(b"seq")
                 .map_err(|e| EvalError::from_internal(e, location.clone()))?
@@ -1103,7 +1105,6 @@ pub fn describe<'a>(
 
                 // if necessary, add the reverse complements
                 let little_arena = Arena::new();
-                let reverse_complement = &false;
                 if *reverse_complement {
                     let mut new_map = map.clone();
                     for (id, seq) in &map {

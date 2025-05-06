@@ -922,7 +922,7 @@ pub enum Val<'a> {
     /// context and any arguments.
     FunTy {
         args: Vec<Val<'a>>,
-        opts: Vec<(&'a [u8], Val<'a>, Val<'a>)>,
+        opts: Vec<(&'a [u8], Val<'a>, Tm<'a>)>,
         body: Arc<Val<'a>>,
     },
     Fun {
@@ -930,6 +930,7 @@ pub enum Val<'a> {
     },
     FunForeign {
         args: Vec<Val<'a>>,
+        opts: Vec<(&'a [u8], Val<'a>, Tm<'a>)>,
         body_ty: Arc<Val<'a>>,
         body: Arc<
             dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>

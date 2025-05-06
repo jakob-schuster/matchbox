@@ -385,6 +385,22 @@ impl<'a> Context<'a> {
     }
 }
 
+impl<'a> Display for Context<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (0..self.size)
+            .map(|i| {
+                format!(
+                    "{}: {} = {}",
+                    self.names.get_index(i),
+                    self.tys.get_index(i),
+                    self.tms.get_index(i)
+                )
+            })
+            .join("\n")
+            .fmt(f)
+    }
+}
+
 pub fn elab_prog<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -1030,6 +1046,13 @@ pub fn infer_tm<'a>(
                     Ok(ctx0.bind_param(name.clone(), val, arena))
                 })?;
 
+            // then, bind all the opts too
+            let new_ctx = core_opts
+                .iter()
+                .fold(new_ctx.clone(), |ctx0, (name, ty, core_tm)| {
+                    ctx0.bind_param(bytes_to_string(name).unwrap(), (*ty).clone(), arena)
+                });
+
             // then, get the type of the body
             // (note that this WON'T be FunReturnTyAwaiting, as it's all inferred;
             // that only happens in the return type of foreign functions, which are specified)
@@ -1067,6 +1090,19 @@ pub fn infer_tm<'a>(
                 .collect::<Result<Vec<_>, _>>()?;
 
             let arg_tms = param_tms.iter().map(|(_, a)| a.clone()).collect::<Vec<_>>();
+            let core_opts = opts
+                .iter()
+                .map(|opt| {
+                    let core_ty = check_tm(arena, ctx, &opt.ty, &core::Val::Univ)?;
+                    let core_ty_val = core_ty
+                        .eval(arena, &ctx.tms, &Cache::default(), &Env::default())
+                        .map_err(ElabError::from_eval_error)?;
+                    let core_tm = check_tm(arena, ctx, &opt.tm, &core_ty_val)?;
+
+                    Ok((opt.name.as_bytes(), core_ty_val, core_tm))
+                })
+                .collect::<Result<Vec<_>, ElabError>>()?;
+
             let arg_vals = arg_tms
                 .clone()
                 .iter()
@@ -1087,6 +1123,13 @@ pub fn infer_tm<'a>(
                     // bind it in the context
                     Ok(ctx0.bind_param(name.clone(), val, arena))
                 })?;
+
+            // then, bind all the opts too
+            let new_ctx = core_opts
+                .iter()
+                .fold(new_ctx.clone(), |ctx0, (name, ty, core_tm)| {
+                    ctx0.bind_param(bytes_to_string(name).unwrap(), (*ty).clone(), arena)
+                });
 
             // then, get the type of the body
             // (note that this MIGHT be FunReturnTyAwaiting, as it may include parameters)
@@ -1121,7 +1164,7 @@ pub fn infer_tm<'a>(
                 ),
                 core::Val::FunTy {
                     args: arg_vals,
-                    opts: vec![],
+                    opts: core_opts,
                     body: Arc::new(final_ty),
                 },
             ))
@@ -1155,7 +1198,7 @@ pub fn infer_tm<'a>(
                         {
                             Some(_) => Ok(()),
                             None => Err(
-                                ElabError::new(&tm.location, &format!("found optional argument named '{}'; only expected optional arguments {}", name, opts_ty.iter().map(|(name, ty, _)| format!("{}: {}", bytes_to_string(name).unwrap(), ty)).join(", ")))
+                                ElabError::new(&tm.location, &format!("found optional argument named '{}'; only expected optional arguments {{ {} }}", name, opts_ty.iter().map(|(name, ty, _)| format!("{}: {}", bytes_to_string(name).unwrap(), ty)).join(", ")))
                             ),
                         }
                     }).collect::<Result<Vec<_>,_>>()?;

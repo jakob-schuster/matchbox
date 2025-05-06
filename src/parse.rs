@@ -78,7 +78,7 @@ peg::parser! {
             / "{" _ fields:whitespace_sensitive_list(<rec_pattern_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { PatternData::RecLit { fields } }
             / "[" _ regs:list(<region()>, <_()>) _ "]" _ binds:read_parameters() { PatternData::Read { regs, binds, error: global_config.error } }
 
-        //z
+        //
 
         rule region() -> Region = located(<region_data()>)
         rule region_data() -> RegionData
@@ -173,11 +173,11 @@ peg::parser! {
             // these three all need to be on the same precedence level - not sure why. investigate more later
 
             // method application
-            = arg1:tm8() "." head:tm9() "(" _ args:list(<tm()>, <",">) _ ")" { TmData::FunApp { head: Rc::new(head), args: [arg1].into_iter().chain(args.into_iter()).collect::<Vec<_>>(), opts: vec![] } }
+            = arg1:tm8() "." head:tm9() "(" _ args_opts:arg_list() _ ")" { TmData::FunApp { head: Rc::new(head), args: [arg1].into_iter().chain(args_opts.0.into_iter()).collect::<Vec<_>>(), opts: args_opts.1 } }
             // record projection
             / tm:tm8() "." name:name() { TmData::RecProj { tm: Rc::new(tm), name } }
             // function application
-            / head:tm8() "(" _ args:list(<tm()>, <",">) _ ")" { TmData::FunApp { head: Rc::new(head), args, opts: vec![] } }
+            / head:tm8() "(" _ args_opts:arg_list()_ ")" { TmData::FunApp { head: Rc::new(head), args: args_opts.0, opts: args_opts.1 } }
             / tm_data9()
 
         rule tm9() -> Tm = located(<tm_data9()>)
@@ -208,12 +208,11 @@ peg::parser! {
             // WARN there's no syntax yet for list literals, because how would we distinguish a singleton list from a list type literal?
 
             // function type literals
-            / "(" _ args:list(<tm()>, <",">) _ ")" _ "->" _ body:tm() { TmData::FunTy { args, body: Rc::new(body), opts: vec![] } }
+            / "(" _ args_opts:list_then(<tm()>, <opt_param()>, <",">) _ ")" _ "->" _ body:tm() { TmData::FunTy { args: args_opts.0, body: Rc::new(body), opts: args_opts.1 } }
             // function literals
-            / "(" _ args:list(<param()>, <",">) _ ")" _ "=>" _ body:tm() { TmData::FunLit { args, body: Rc::new(body), opts: vec![] }}
+            / "(" _ args_opts:param_list() _ ")" _ "=>" _ body:tm() { TmData::FunLit { args: args_opts.0, opts: args_opts.1, body: Rc::new(body) }}
             // foreign function literals
-            / "$(" _ args:list(<param()>, <",">) _ ")" _ ":" _ ty:tm() _ "=>" _ name:name() { TmData::FunLitForeign { args, ty: Rc::new(ty), name, opts: vec![] } }
-            // function application
+            / "$(" _ args_opts:param_list() _ ")" _ ":" _ ty:tm() _ "=>" _ name:name() { TmData::FunLitForeign { args: args_opts.0, opts: args_opts.1, ty: Rc::new(ty), name } }
 
             // named things
             / name:name() { TmData::Name { name } }
@@ -225,6 +224,29 @@ peg::parser! {
 
         rule param() -> Param
             = name:name() _ ":" _ ty:tm() { Param { name, ty } }
+        rule opt_param() -> OptParam
+            = name:name() _ ":" _ ty:tm() _ "=" _ tm:tm() { OptParam { name, ty, tm } }
+        rule opt_arg() -> (String, Tm)
+            = name:name() _ "=" _ tm:tm() { (name, tm) }
+
+        // WARN this feels like a stupid way to parse parameter lists; revise this
+        rule param_list() -> (Vec<Param>, Vec<OptParam>)
+            = rest:opt_param_list() { (vec![], rest) }
+            / p:param() _ "," _ rest:param_list() { (vec![p].into_iter().chain(rest.0).collect(), rest.1) }
+            / p:param() { (vec![p], vec![]) }
+            / "" { (vec![], vec![]) }
+        rule opt_param_list() -> Vec<OptParam>
+            = o:opt_param() _ "," _ rest:opt_param_list() { vec![o].into_iter().chain(rest).collect() }
+            / o:opt_param() (_ ",")? { vec![o] }
+
+        rule arg_list() -> (Vec<Tm>, Vec<(String, Tm)>)
+            = rest:opt_arg_list() { (vec![], rest) }
+            / p:tm() _ "," _ rest:arg_list() { (vec![p].into_iter().chain(rest.0).collect(), rest.1) }
+            / p:tm() { (vec![p], vec![]) }
+            / "" { (vec![], vec![]) }
+        rule opt_arg_list() -> Vec<(String, Tm)>
+            = o:opt_arg() _ "," _ rest:opt_arg_list() { vec![o].into_iter().chain(rest).collect() }
+            / o:opt_arg() (_ ",")? { vec![o] }
 
         rule rec_lit_field() -> util::RecField<Tm>
             = name:name() _ "=" _ tm:tm() { util::RecField::new(name, tm) }
@@ -234,6 +256,8 @@ peg::parser! {
 
         rule rec_pattern_field() -> util::RecField<Pattern>
             = name:name() _ "=" _ pattern:pattern() { util::RecField::new(name, pattern) }
+
+
 
         rule str_lit_char() -> char
             = "\\n" { '\n' }
@@ -262,6 +286,12 @@ peg::parser! {
         rule located<T>(tr: rule<T>) -> util::Located<T>
             = start:position!() t:tr() end:position!() { util::Located::new(util::Location::new(start, end), t) }
 
+        // WARN doesn't work
+        rule list_then<T,V>(tr: rule<T>, tr2: rule<V>, sepr: rule<()>) -> (Vec<T>, Vec<V>)
+            = v:(t:tr() ** (_ sepr() _) {t}) _ sepr() _ v2:list(<tr2()>, <sepr()>)
+                { (v, v2) }
+            / v:list(<tr()>, <sepr()>)
+                { (v, vec![]) }
         rule list<T>(tr: rule<T>, sepr: rule<()>) -> Vec<T>
             = v:(t:tr() ** (_ sepr() _) {t}) (_ sepr() _)?
                 { v }

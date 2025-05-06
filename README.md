@@ -11,7 +11,7 @@ Currently you'll have a (slightly!) more stable experience with the original pro
 - [x] fix memory leak
 - [x] fix script parsing statements after conditionals
 - [x] make terms effectful
-- [ ] add optional arguments
+- [x] add optional arguments
 - [ ] add search term parameters
 - [x] make standard library on compile
 - [x] make reverse complement work for reads as well

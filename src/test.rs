@@ -298,6 +298,31 @@ fn eval_fastq_trim_pass2() {
 }
 
 #[test]
+fn eval_opt_pass1() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 7) => n; if f() > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("greater |> { output = stdout }")"#)
+}
+#[test]
+fn eval_opt_pass2() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 7) => n; if f(n = 1) > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("")"#)
+}
+#[test]
+fn eval_opt_pass3() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 3) => n; if f() > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("")"#)
+}
+#[test]
+fn eval_opt_fail1() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 3) => n; if f(m = 1) > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Err(GenericError { location: Some(Location { start: 26, end: 34 }), message: "found optional argument named 'm'; only expected optional arguments { n: Num }" })"#)
+}
+#[test]
+fn eval_opt_fail2() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 3) => n; if f(n = true) > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Err(GenericError { location: Some(Location { start: 32, end: 36 }), message: "mismatched types: expected Num, found Bool" })"#)
+}
+#[test]
+fn eval_opt_fail3() {
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = true) => n; if f() > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Err(GenericError { location: Some(Location { start: 14, end: 18 }), message: "mismatched types: expected Num, found Bool" })"#)
+}
+
+#[test]
 fn eval_stmt_after_conditional_pass1() {
     insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"
         if read is [_] => 'a' |> stdout!()

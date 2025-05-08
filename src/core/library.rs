@@ -642,7 +642,7 @@ pub fn tag<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Rec { rec }, Val::Str { s }] => {
+        [Val::Rec { rec }, Val::Str { s }, Val::Str { s: prefix }] => {
             let desc = rec
                 .get(b"desc")
                 .expect("record with no desc given to tag?!");
@@ -655,8 +655,9 @@ pub fn tag<'a>(
                             Val::Str {
                                 s: arena
                                     .alloc(format!(
-                                        "{} {}",
+                                        "{}{}{}",
                                         util::bytes_to_string(old_s).unwrap(),
+                                        util::bytes_to_string(prefix).unwrap(),
                                         util::bytes_to_string(s).unwrap()
                                     ))
                                     .as_bytes(),

@@ -26,7 +26,7 @@ read_ty = $(filetype: Str): Type => read_ty
 len = $(s: Str): Num => len
 slice = $(s: Str, start: Num, end: Num): Str => slice
 
-tag = $(r: { desc: Str .. }, tag: Str): { desc: Str ..} => tag
+tag = $(r: { desc: Str .. }, tag: Str, prefix: Str = ' '): { desc: Str ..} => tag
 
 translate = $(seq: Str): Str => translate
 

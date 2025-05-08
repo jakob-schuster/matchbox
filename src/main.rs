@@ -39,7 +39,7 @@ fn main() {
 #[derive(Parser)]
 pub struct GlobalConfig {
     /// Default error rate permitted when searching for sequences. Given as a proportion of total search sequence length.
-    #[arg(short, long, default_value_t = 0.2)]
+    #[arg(short, long, default_value_t = 0.0)]
     error: f32,
 
     /// Number of threads to use when processing reads.
@@ -65,7 +65,7 @@ pub struct GlobalConfig {
 impl GlobalConfig {
     pub fn default() -> GlobalConfig {
         GlobalConfig {
-            error: 0.2,
+            error: 0.0,
             threads: 1,
             script: "".to_string(),
             reads: None,

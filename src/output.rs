@@ -18,6 +18,13 @@ pub struct OutputHandler<'a> {
     file_handler: FileHandler,
 }
 
+pub struct OutputHandlerSummary {
+    stdout_handler: StdoutHandlerSummary,
+    counts_handler: CountsHandlerSummary,
+    average_handler: AverageHandlerSummary,
+    file_handler: FileHandlerSummary,
+}
+
 impl<'a> OutputHandler<'a> {
     pub fn new() -> OutputHandler<'a> {
         OutputHandler {
@@ -69,6 +76,15 @@ impl<'a> OutputHandler<'a> {
         self.counts_handler.print();
         self.average_handler.print();
     }
+
+    pub fn summarize(&self) -> OutputHandlerSummary {
+        OutputHandlerSummary {
+            stdout_handler: self.stdout_handler.summarize(),
+            counts_handler: self.counts_handler.summarize(),
+            average_handler: self.average_handler.summarize(),
+            file_handler: self.file_handler.summarize(),
+        }
+    }
 }
 
 struct BufferedStdoutHandler<'a> {
@@ -98,6 +114,10 @@ impl<'a> BufferedStdoutHandler<'a> {
         self.stdout.write_all(self.vec.join("\n").as_bytes());
         self.vec = vec![];
     }
+
+    fn summarize(&self) -> StdoutHandlerSummary {
+        StdoutHandlerSummary { lines: vec![] }
+    }
 }
 
 /// Naive stdout handler; simply prints to stdout with println!
@@ -113,8 +133,17 @@ impl StdoutHandler {
     }
 
     pub fn finish(&mut self) {}
+
+    fn summarize(&self) -> StdoutHandlerSummary {
+        StdoutHandlerSummary { lines: vec![] }
+    }
 }
 
+pub struct StdoutHandlerSummary {
+    lines: Vec<String>,
+}
+
+#[derive(Clone)]
 enum FileType {
     Text,
     Fasta,
@@ -303,6 +332,22 @@ impl FileHandler {
             }
         }
     }
+
+    fn summarize(&self) -> FileHandlerSummary {
+        let mut files = vec![];
+
+        for (filename, _) in &self.files {
+            let filetype = self.types.get(filename).expect("file without type?!");
+
+            files.push((filename.clone(), filetype.clone(), "".to_string()));
+        }
+
+        FileHandlerSummary { files }
+    }
+}
+
+pub struct FileHandlerSummary {
+    files: Vec<(String, FileType, String)>,
 }
 
 #[derive(Default, PartialEq)]
@@ -329,6 +374,16 @@ impl CountsHandler {
             }
         }
     }
+
+    fn summarize(&self) -> CountsHandlerSummary {
+        CountsHandlerSummary {
+            top: self.map.clone().into_iter().collect::<Vec<_>>(),
+        }
+    }
+}
+
+pub struct CountsHandlerSummary {
+    top: Vec<(String, i32)>,
 }
 
 #[derive(Default, PartialEq)]
@@ -356,4 +411,16 @@ impl AverageHandler {
             );
         }
     }
+
+    fn summarize(&self) -> AverageHandlerSummary {
+        AverageHandlerSummary {
+            mean: self.mean,
+            variance: (self.m2 / self.count as f32).sqrt(),
+        }
+    }
+}
+
+pub struct AverageHandlerSummary {
+    mean: f32,
+    variance: f32,
 }

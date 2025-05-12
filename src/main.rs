@@ -10,7 +10,7 @@ use output::OutputHandler;
 use parse::{parse, ParseError};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use read::{
-    get_extensions, get_filetype_and_buffer, read_any, read_fa, FileType, FileTypeError, InputError,
+    get_extensions, get_filetype_and_buffer, FileType, FileTypeError, InputError, ReaderWithBar,
 };
 use surface::{elab_prog, elab_prog_for_ctx, Context, ElabError};
 use util::{Arena, Cache, Env, Location};
@@ -172,9 +172,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
 
     // process the reads
     if let Some(reads_filename) = &global_config.reads {
-        read_any(
-            reads_filename,
-            global_config.paired_with.clone(),
+        ReaderWithBar::new(reads_filename, global_config.paired_with.clone()).map(
             &core_prog,
             &env,
             &cache,

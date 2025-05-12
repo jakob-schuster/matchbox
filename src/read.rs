@@ -7,6 +7,7 @@ use std::{
     sync::Arc,
 };
 
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelBridge,
@@ -155,619 +156,577 @@ pub fn get_filetype_and_buffer(
     }
 }
 
-pub fn read_any<'p, 'a: 'p>(
+pub struct ReaderWithBar {
+    bar: ProgressBar,
+    reader: Box<dyn Reader>,
+}
+
+impl ReaderWithBar {
+    pub fn new(filename: &str, paired_filename_opt: Option<String>) -> ReaderWithBar {
+        let estimate = estimate_reads(filename, 1000000).unwrap();
+
+        // make the bar
+        let style = ProgressStyle::with_template(
+            "{prefix} {elapsed_precise} [{bar:40.red/yellow}] {percent}% {msg}",
+        )
+        .unwrap()
+        .progress_chars(" @=");
+        let bar = ProgressBar::new(estimate)
+            .with_style(style)
+            .with_prefix(String::from(filename));
+        bar.set_draw_target(ProgressDrawTarget::stderr());
+
+        // just use bio parsers for now; can't use seq_io in parallel on gzipped files
+        let reader = reader_from_filename(filename, paired_filename_opt);
+
+        ReaderWithBar { bar, reader }
+    }
+
+    pub fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+    ) {
+        self.reader
+            .map(prog, env, cache, output_handler, Some(&self.bar));
+    }
+}
+
+fn estimate_reads(filename: &str, buffer_len: u64) -> Result<u64, InputError> {
+    use std::io::Read;
+
+    let (filetype, _) = get_filetype_and_buffer(filename)?;
+
+    let f = File::open(filename).map_err(|e| InputError::FileOpenError {
+        filename: filename.to_string(),
+    })?;
+
+    // get the length of the file in bytes
+    let file_len = f
+        .metadata()
+        .map_err(|e| InputError::FileOpenError {
+            filename: filename.to_string(),
+        })?
+        .len();
+
+    // establish a buffer of buffer_len bytes
+    let short_bufread = BufReader::new(f).take(buffer_len);
+
+    // read in that buffer and count the records you find
+    let count = reader_from_buffer_and_filetype(filetype, Box::new(short_bufread), None).count();
+
+    // calculate the estimate
+    let estimate = (count as f32 * file_len as f32 / buffer_len as f32) as u64;
+
+    Ok(estimate)
+}
+
+pub trait Reader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        opt_bar: Option<&ProgressBar>,
+    );
+
+    fn count(&mut self) -> usize;
+}
+
+pub fn reader_from_filename(
     filename: &str,
     paired_filename_opt: Option<String>,
-    prog: &core::Prog<'p>,
-    env: &Env<Val<'p>>,
-    cache: &Cache<Val<'p>>,
-    output_handler: &mut OutputHandler,
-) {
+) -> Box<dyn Reader> {
     let (filetype, buffer) = get_filetype_and_buffer(filename).unwrap();
+    let paired_file_opt =
+        paired_filename_opt.map(|filename| get_filetype_and_buffer(&filename).unwrap());
 
-    match paired_filename_opt {
+    reader_from_buffer_and_filetype(filetype, buffer, paired_file_opt)
+}
+
+pub fn reader_from_buffer_and_filetype(
+    filetype: FileType,
+    buffer: Box<dyn BufRead>,
+    paired_file: Option<(FileType, Box<dyn BufRead>)>,
+) -> Box<dyn Reader> {
+    match paired_file {
         // currently, handle paired reads through this clumsy other means
-        Some(paired_filename) => {
-            let (paired_filetype, paired_buffer) =
-                get_filetype_and_buffer(&paired_filename).unwrap();
-
-            match (&filetype, &paired_filetype) {
-                (FileType::Fasta, FileType::Fasta) => read_paired_fa_multithreaded(
-                    buffer,
-                    paired_buffer,
-                    prog,
-                    env,
-                    cache,
-                    output_handler,
-                ),
-                (FileType::Fastq, FileType::Fastq) => read_paired_fq_multithreaded(
-                    buffer,
-                    paired_buffer,
-                    prog,
-                    env,
-                    cache,
-                    output_handler,
-                ),
-                (FileType::Sam, FileType::Sam) => todo!(),
-                _ => panic!(
-                    "unexpected combination of {} and {}",
-                    filetype, paired_filetype
-                ),
-            }
-        }
+        Some((paired_filetype, paired_buffer)) => match (&filetype, &paired_filetype) {
+            (FileType::Fasta, FileType::Fasta) => Box::new(PairedFastaReader {
+                buffer,
+                paired_buffer,
+            }),
+            (FileType::Fastq, FileType::Fastq) => Box::new(PairedFastqReader {
+                buffer,
+                paired_buffer,
+            }),
+            (FileType::Sam, FileType::Sam) => Box::new(PairedSamReader {
+                buffer,
+                paired_buffer,
+            }),
+            _ => panic!(
+                "unexpected combination of {} and {}",
+                filetype, paired_filetype
+            ),
+        },
         None => match filetype {
-            FileType::Fasta => read_fa_multithreaded(buffer, prog, env, cache, output_handler),
-            FileType::Fastq => read_fq_multithreaded(buffer, prog, env, cache, output_handler),
-            FileType::Sam => read_sam_multithreaded(buffer, prog, env, cache, output_handler),
+            FileType::Fasta => Box::new(FastaReader { buffer }),
+            FileType::Fastq => Box::new(FastqReader { buffer }),
+            FileType::Sam => Box::new(SamReader { buffer }),
             _ => panic!("unexpected filetype?!"),
         },
     }
 }
 
-pub fn read_fa<'p, 'a: 'p>(
+pub struct FastaReader {
     buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
-    env: &Env<Val<'p>>,
-    cache: &Cache<Val<'p>>,
-    output_handler: &mut OutputHandler,
-) {
-    let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
-
-    for record in input_records {
-        match record {
-            Ok(read) => {
-                let mut arena = Arena::new();
-                let val = core::Val::Rec {
-                    rec: Arc::new(rec::FastaRead { read: &read }),
-                };
-                let effects = prog.eval(&arena, env, cache, val).expect("");
-
-                for effect in &effects {
-                    output_handler.handle(effect).unwrap();
-                }
-
-                arena.reset();
-            }
-            Err(_) => panic!("bad read?!"),
-        }
-    }
-
-    output_handler.finish();
 }
 
-pub fn read_fa_multithreaded<'p, 'a: 'p>(
-    buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
-    env: &Env<Val<'p>>,
-    cache: &Cache<Val<'p>>,
-    output_handler: &mut OutputHandler,
-) {
-    let input_records = bio::io::fasta::Reader::from_bufread(buffer).records();
+impl Reader for FastaReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        opt_bar: Option<&ProgressBar>,
+    ) {
+        let input_records = bio::io::fasta::Reader::from_bufread(&mut self.buffer).records();
 
-    input_records
-        .into_iter()
-        .chunks(10000)
-        .into_iter()
-        .for_each(|chunk| {
-            let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+        input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .for_each(|chunk| {
+                let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+                chunk
+                    .collect_vec()
+                    .par_iter()
+                    .map(|record| match record {
+                        Ok(read) => {
+                            let arena = Arena::new();
+                            let val = core::Val::Rec {
+                                rec: Arc::new(rec::FastaRead { read }),
+                            };
+                            prog.eval(&arena, env, cache, val)
+                        }
+                        Err(_) => panic!("bad read?!"),
+                    })
+                    .collect_into_vec(&mut vec);
+
+                for result_effects in &vec {
+                    for effect in result_effects.as_ref().expect("") {
+                        output_handler.handle(effect).unwrap();
+                    }
+                }
+
+                // update the bar, if there is one
+                if let Some(bar) = opt_bar {
+                    bar.inc(10000 as u64);
+                }
+            });
+
+        output_handler.finish();
+    }
+
+    fn count(&mut self) -> usize {
+        let input_records = bio::io::fasta::Reader::from_bufread(&mut self.buffer).records();
+
+        input_records.count()
+    }
+}
+
+pub struct PairedFastaReader {
+    buffer: Box<dyn BufRead>,
+    paired_buffer: Box<dyn BufRead>,
+}
+
+impl Reader for PairedFastaReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        opt_bar: Option<&ProgressBar>,
+    ) {
+        let input_records = bio::io::fasta::Reader::from_bufread(&mut self.buffer)
+            .records()
+            .zip(bio::io::fasta::Reader::from_bufread(&mut self.paired_buffer).records());
+
+        input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .for_each(|chunk| {
+                let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+                chunk
+                    .collect_vec()
+                    .par_iter()
+                    .map(|(record, paired_record)| match (record, paired_record) {
+                        (Ok(read), Ok(paired_read)) => {
+                            let arena = Arena::new();
+                            let val = core::Val::Rec {
+                                rec: Arc::new(FullyConcreteRec {
+                                    map: HashMap::from([
+                                        (
+                                            b"r1".to_vec(),
+                                            core::Val::Rec {
+                                                rec: Arc::new(rec::FastaRead { read }),
+                                            },
+                                        ),
+                                        (
+                                            b"r2".to_vec(),
+                                            core::Val::Rec {
+                                                rec: Arc::new(rec::FastaRead { read: paired_read }),
+                                            },
+                                        ),
+                                    ]),
+                                }),
+                            };
+
+                            prog.eval(&arena, env, cache, val)
+                        }
+                        _ => panic!("bad read?!"),
+                    })
+                    .collect_into_vec(&mut vec);
+
+                for result_effects in &vec {
+                    for effect in result_effects.as_ref().expect("") {
+                        output_handler.handle(effect).unwrap();
+                    }
+                }
+
+                // update the bar, if there is one
+                if let Some(bar) = opt_bar {
+                    bar.inc(10000 as u64);
+                }
+            });
+
+        output_handler.finish();
+    }
+
+    fn count(&mut self) -> usize {
+        let input_records = bio::io::fasta::Reader::from_bufread(&mut self.buffer).records();
+
+        input_records.count()
+    }
+}
+
+pub struct FastqReader {
+    buffer: Box<dyn BufRead>,
+}
+
+impl Reader for FastqReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        opt_bar: Option<&ProgressBar>,
+    ) {
+        let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
+
+        input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .for_each(|chunk| {
+                let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+                chunk
+                    .collect_vec()
+                    .par_iter()
+                    .map(|record| match record {
+                        Ok(read) => {
+                            let arena = Arena::new();
+                            let val = core::Val::Rec {
+                                rec: Arc::new(rec::FastqRead { read }),
+                            };
+                            prog.eval(&arena, env, cache, val)
+                        }
+                        Err(_) => panic!("bad read?!"),
+                    })
+                    .collect_into_vec(&mut vec);
+
+                for result_effects in &vec {
+                    for effect in result_effects.as_ref().expect("") {
+                        output_handler.handle(effect).unwrap();
+                    }
+                }
+
+                // update the bar, if there is one
+                if let Some(bar) = opt_bar {
+                    bar.inc(10000 as u64);
+                }
+            });
+
+        output_handler.finish();
+    }
+
+    fn count(&mut self) -> usize {
+        let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
+
+        input_records.count()
+    }
+}
+
+pub struct PairedFastqReader {
+    buffer: Box<dyn BufRead>,
+    paired_buffer: Box<dyn BufRead>,
+}
+
+impl Reader for PairedFastqReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        opt_bar: Option<&ProgressBar>,
+    ) {
+        let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer)
+            .records()
+            .zip(bio::io::fastq::Reader::from_bufread(&mut self.paired_buffer).records());
+
+        input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .for_each(|chunk| {
+                let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+                chunk
+                    .collect_vec()
+                    .par_iter()
+                    .map(|(record, paired_record)| match (record, paired_record) {
+                        (Ok(read), Ok(paired_read)) => {
+                            let arena = Arena::new();
+                            let val = core::Val::Rec {
+                                rec: Arc::new(FullyConcreteRec {
+                                    map: HashMap::from([
+                                        (
+                                            b"r1".to_vec(),
+                                            core::Val::Rec {
+                                                rec: Arc::new(rec::FastqRead { read }),
+                                            },
+                                        ),
+                                        (
+                                            b"r2".to_vec(),
+                                            core::Val::Rec {
+                                                rec: Arc::new(rec::FastqRead { read: paired_read }),
+                                            },
+                                        ),
+                                    ]),
+                                }),
+                            };
+
+                            prog.eval(&arena, env, cache, val)
+                        }
+                        _ => panic!("bad read?!"),
+                    })
+                    .collect_into_vec(&mut vec);
+
+                for result_effects in &vec {
+                    for effect in result_effects.as_ref().expect("") {
+                        output_handler.handle(effect).unwrap();
+                    }
+                }
+
+                // update the bar, if there is one
+                if let Some(bar) = opt_bar {
+                    bar.inc(10000 as u64);
+                }
+            });
+
+        output_handler.finish();
+    }
+
+    fn count(&mut self) -> usize {
+        let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
+
+        input_records.count()
+    }
+}
+
+pub struct SamReader {
+    buffer: Box<dyn BufRead>,
+}
+
+impl Reader for SamReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        opt_bar: Option<&ProgressBar>,
+    ) {
+        let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
+        let header = reader.read_header();
+        let input_records = reader.records();
+
+        for chunk in &input_records.chunks(10000) {
+            let mut effects = vec![];
+
             chunk
                 .collect_vec()
-                .par_iter()
+                .into_par_iter()
                 .map(|record| match record {
                     Ok(read) => {
                         let arena = Arena::new();
-                        let val = core::Val::Rec {
-                            rec: Arc::new(rec::FastaRead { read }),
-                        };
-                        prog.eval(&arena, env, cache, val)
-                    }
-                    Err(_) => panic!("bad read?!"),
-                })
-                .collect_into_vec(&mut vec);
-
-            for result_effects in &vec {
-                for effect in result_effects.as_ref().expect("") {
-                    output_handler.handle(effect).unwrap();
-                }
-            }
-        });
-
-    output_handler.finish();
-}
-
-pub fn read_paired_fa_multithreaded<'p, 'a: 'p>(
-    buffer: Box<dyn BufRead>,
-    paired_buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
-    env: &Env<Val<'p>>,
-    cache: &Cache<Val<'p>>,
-    output_handler: &mut OutputHandler,
-) {
-    let input_records = bio::io::fasta::Reader::from_bufread(buffer)
-        .records()
-        .zip(bio::io::fasta::Reader::from_bufread(paired_buffer).records());
-
-    input_records
-        .into_iter()
-        .chunks(10000)
-        .into_iter()
-        .for_each(|chunk| {
-            let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
-            chunk
-                .collect_vec()
-                .par_iter()
-                .map(|(record, paired_record)| match (record, paired_record) {
-                    (Ok(read), Ok(paired_read)) => {
-                        let arena = Arena::new();
-                        let val = core::Val::Rec {
-                            rec: Arc::new(FullyConcreteRec {
-                                map: HashMap::from([
-                                    (
-                                        b"r1".to_vec(),
-                                        core::Val::Rec {
-                                            rec: Arc::new(rec::FastaRead { read }),
-                                        },
-                                    ),
-                                    (
-                                        b"r2".to_vec(),
-                                        core::Val::Rec {
-                                            rec: Arc::new(rec::FastaRead { read: paired_read }),
-                                        },
-                                    ),
-                                ]),
-                            }),
-                        };
-
-                        prog.eval(&arena, env, cache, val)
-                    }
-                    _ => panic!("bad read?!"),
-                })
-                .collect_into_vec(&mut vec);
-
-            for result_effects in &vec {
-                for effect in result_effects.as_ref().expect("") {
-                    output_handler.handle(effect).unwrap();
-                }
-            }
-        });
-
-    output_handler.finish();
-}
-
-pub fn read_fq<'p, 'a: 'p>(
-    buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
-    env: &Env<Val<'p>>,
-    cache: &Cache<Val<'p>>,
-    output_handler: &mut OutputHandler,
-) {
-    let input_records = bio::io::fastq::Reader::from_bufread(buffer).records();
-
-    input_records
-        .into_iter()
-        .chunks(10000)
-        .into_iter()
-        .for_each(|chunk| {
-            let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
-            chunk
-                .collect_vec()
-                .par_iter()
-                .map(|record| match record {
-                    Ok(read) => {
-                        let arena = Arena::new();
-                        let val = core::Val::Rec {
-                            rec: Arc::new(rec::FastqRead { read }),
-                        };
-                        prog.eval(&arena, env, cache, val)
-                    }
-                    Err(_) => panic!("bad read?!"),
-                })
-                .collect_into_vec(&mut vec);
-
-            for result_effects in &vec {
-                for effect in result_effects.as_ref().expect("") {
-                    output_handler.handle(effect).unwrap();
-                }
-            }
-        });
-
-    output_handler.finish();
-}
-
-pub fn read_fq_multithreaded<'p, 'a: 'p>(
-    buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
-    env: &Env<Val<'p>>,
-    cache: &Cache<Val<'p>>,
-    output_handler: &mut OutputHandler,
-) {
-    let input_records = bio::io::fastq::Reader::from_bufread(buffer).records();
-
-    for chunk in &input_records.chunks(10000) {
-        let mut effects = vec![];
-
-        chunk
-            .collect_vec()
-            .into_par_iter()
-            .map(|record| match record {
-                Ok(read) => {
-                    let arena = Arena::new();
-                    let val = core::Val::Rec {
-                        rec: Arc::new(rec::FastqRead { read: &read }),
-                    };
-                    let effects = prog.eval(&arena, env, cache, val);
-
-                    effects
-                }
-                Err(_) => panic!("bad read?!"),
-            })
-            .collect_into_vec(&mut effects);
-
-        for result_effects in &effects {
-            for effect in result_effects.as_ref().expect("") {
-                output_handler.handle(effect).unwrap();
-            }
-        }
-    }
-
-    output_handler.finish();
-}
-
-pub fn read_paired_fq_multithreaded<'p, 'a: 'p>(
-    buffer: Box<dyn BufRead>,
-    paired_buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
-    env: &Env<Val<'p>>,
-    cache: &Cache<Val<'p>>,
-    output_handler: &mut OutputHandler,
-) {
-    let input_records = bio::io::fastq::Reader::from_bufread(buffer)
-        .records()
-        .zip(bio::io::fastq::Reader::from_bufread(paired_buffer).records());
-
-    input_records
-        .into_iter()
-        .chunks(10000)
-        .into_iter()
-        .for_each(|chunk| {
-            let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
-            chunk
-                .collect_vec()
-                .par_iter()
-                .map(|(record, paired_record)| match (record, paired_record) {
-                    (Ok(read), Ok(paired_read)) => {
-                        let arena = Arena::new();
-                        let val = core::Val::Rec {
-                            rec: Arc::new(FullyConcreteRec {
-                                map: HashMap::from([
-                                    (
-                                        b"r1".to_vec(),
-                                        core::Val::Rec {
-                                            rec: Arc::new(rec::FastqRead { read }),
-                                        },
-                                    ),
-                                    (
-                                        b"r2".to_vec(),
-                                        core::Val::Rec {
-                                            rec: Arc::new(rec::FastqRead { read: paired_read }),
-                                        },
-                                    ),
-                                ]),
-                            }),
-                        };
-
-                        prog.eval(&arena, env, cache, val)
-                    }
-                    _ => panic!("bad read?!"),
-                })
-                .collect_into_vec(&mut vec);
-
-            for result_effects in &vec {
-                for effect in result_effects.as_ref().expect("") {
-                    output_handler.handle(effect).unwrap();
-                }
-            }
-        });
-
-    output_handler.finish();
-}
-
-pub fn read_sam_multithreaded<'p, 'a: 'p>(
-    buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
-    env: &Env<Val<'p>>,
-    cache: &Cache<Val<'p>>,
-    output_handler: &mut OutputHandler,
-) {
-    let mut reader = noodles::sam::io::Reader::new(buffer);
-    let header = reader.read_header();
-    let input_records = reader.records();
-
-    for chunk in &input_records.chunks(10000) {
-        let mut effects = vec![];
-
-        chunk
-            .collect_vec()
-            .into_par_iter()
-            .map(|record| match record {
-                Ok(read) => {
-                    let arena = Arena::new();
-                    let cigar = read.cigar();
-                    let seq = read.sequence();
-                    let qual = read.quality_scores();
-                    let data = read.data();
-
-                    let val = core::Val::Rec {
-                        rec: Arc::new(rec::SamRead {
-                            read: &read,
-                            cigar: &cigar,
-                            seq: &seq,
-                            qual: &qual,
-                            data: &data,
-                        }),
-                    };
-                    let effects = prog.eval(&arena, env, cache, val);
-
-                    effects
-                }
-                Err(_) => panic!("bad read?!"),
-            })
-            .collect_into_vec(&mut effects);
-
-        for result_effects in &effects {
-            for effect in result_effects.as_ref().expect("") {
-                output_handler.handle(effect).unwrap();
-            }
-        }
-    }
-
-    output_handler.finish();
-}
-
-pub fn read_paired_sam_multithreaded<'p, 'a: 'p>(
-    buffer: Box<dyn BufRead>,
-    paired_buffer: Box<dyn BufRead>,
-    prog: &core::Prog<'p>,
-    env: &Env<Val<'p>>,
-    cache: &Cache<Val<'p>>,
-    output_handler: &mut OutputHandler,
-) {
-    let mut reader = noodles::sam::io::Reader::new(buffer);
-    let mut paired_reader = noodles::sam::io::Reader::new(paired_buffer);
-
-    let header = reader.read_header();
-    let paired_header = paired_reader.read_header();
-
-    let input_records = reader.records().zip(paired_reader.records());
-
-    input_records
-        .into_iter()
-        .chunks(10000)
-        .into_iter()
-        .for_each(|chunk| {
-            let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
-            chunk
-                .collect_vec()
-                .par_iter()
-                .map(|(record, paired_record)| match (record, paired_record) {
-                    (Ok(read), Ok(paired_read)) => {
-                        let arena = Arena::new();
-
                         let cigar = read.cigar();
-                        let paired_cigar = paired_read.cigar();
-
                         let seq = read.sequence();
-                        let paired_seq = paired_read.sequence();
-
                         let qual = read.quality_scores();
-                        let paired_qual = paired_read.quality_scores();
-
                         let data = read.data();
-                        let paired_data = paired_read.data();
 
                         let val = core::Val::Rec {
-                            rec: Arc::new(FullyConcreteRec {
-                                map: HashMap::from([
-                                    (
-                                        b"r1".to_vec(),
-                                        core::Val::Rec {
-                                            rec: Arc::new(rec::SamRead {
-                                                read,
-                                                cigar: &cigar,
-                                                seq: &seq,
-                                                qual: &qual,
-                                                data: &data,
-                                            }),
-                                        },
-                                    ),
-                                    (
-                                        b"r2".to_vec(),
-                                        core::Val::Rec {
-                                            rec: Arc::new(rec::SamRead {
-                                                read: paired_read,
-                                                cigar: &paired_cigar,
-                                                seq: &paired_seq,
-                                                qual: &paired_qual,
-                                                data: &paired_data,
-                                            }),
-                                        },
-                                    ),
-                                ]),
+                            rec: Arc::new(rec::SamRead {
+                                read: &read,
+                                cigar: &cigar,
+                                seq: &seq,
+                                qual: &qual,
+                                data: &data,
                             }),
                         };
+                        let effects = prog.eval(&arena, env, cache, val);
 
-                        prog.eval(&arena, env, cache, val)
+                        effects
                     }
-                    _ => panic!("bad read?!"),
+                    Err(_) => panic!("bad read?!"),
                 })
-                .collect_into_vec(&mut vec);
+                .collect_into_vec(&mut effects);
 
-            for result_effects in &vec {
+            for result_effects in &effects {
                 for effect in result_effects.as_ref().expect("") {
                     output_handler.handle(effect).unwrap();
                 }
             }
-        });
 
-    output_handler.finish();
+            // update the bar, if there is one
+            if let Some(bar) = opt_bar {
+                bar.inc(10000 as u64);
+            }
+        }
+
+        output_handler.finish();
+    }
+
+    fn count(&mut self) -> usize {
+        let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
+        let header = reader.read_header();
+        let input_records = reader.records();
+
+        input_records.count()
+    }
 }
 
-// enum RecordIterable {
-//     Fasta {
-//         recs: bio::io::fasta::Records<Box<dyn BufRead>>,
-//         fun: Arc<dyn for<'a> Fn(&'a bio::io::fasta::Record) -> Val<'a>>,
-//     },
+pub struct PairedSamReader {
+    buffer: Box<dyn BufRead>,
+    paired_buffer: Box<dyn BufRead>,
+}
 
-//     Fastq {
-//         recs: bio::io::fastq::Records<Box<dyn BufRead>>,
-//     },
+impl Reader for PairedSamReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        opt_bar: Option<&ProgressBar>,
+    ) {
+        let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
+        let mut paired_reader = noodles::sam::io::Reader::new(&mut self.paired_buffer);
 
-//     Sam {
-//         recs: Box<dyn Iterator<Item = Result<noodles::sam::Record, Error>>>,
-//     },
+        let header = reader.read_header();
+        let paired_header = paired_reader.read_header();
 
-//     Paired {
-//         recs1: Arc<RecordIterable>,
-//         recs2: Arc<RecordIterable>,
-//     },
-// }
+        let input_records = reader.records().zip(paired_reader.records());
 
-// impl RecordIterable {
-//     fn get_fun(&self) {
-//         match self {
-//             RecordIterable::Fasta { recs, fun } => todo!(),
-//             RecordIterable::Fastq { recs } => todo!(),
-//             RecordIterable::Sam { recs } => todo!(),
-//             RecordIterable::Paired { recs1, recs2 } => todo!(),
-//         }
-//     }
-// }
+        input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .for_each(|chunk| {
+                let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+                chunk
+                    .collect_vec()
+                    .par_iter()
+                    .map(|(record, paired_record)| match (record, paired_record) {
+                        (Ok(read), Ok(paired_read)) => {
+                            let arena = Arena::new();
 
-// pub struct ReaderIterator {
-//     recs: RecordIterable,
-//     fun: Arc<dyn Fn(i32) -> str>,
-// }
+                            let cigar = read.cigar();
+                            let paired_cigar = paired_read.cigar();
 
-// impl ReaderIterator {
-//     fn map<'p>(
-//         &mut self,
-//         prog: &core::Prog<'p>,
-//         env: &Env<Val<'p>>,
-//         cache: &Cache<Val<'p>>,
-//         output_handler: &mut OutputHandler,
-//     ) {
-//         match &mut self.recs {
-//             RecordIterable::Fasta { recs, .. } => recs
-//                 .into_iter()
-//                 .chunks(10000)
-//                 .into_iter()
-//                 .for_each(|chunk| {
-//                     let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
-//                     chunk
-//                         .collect_vec()
-//                         .par_iter()
-//                         .map(|record| match record {
-//                             Ok(read) => {
-//                                 let arena = Arena::new();
-//                                 let val = core::Val::Rec {
-//                                     rec: Arc::new(rec::FastaRead { read }),
-//                                 };
-//                                 prog.eval(&arena, env, cache, val)
-//                             }
-//                             Err(_) => panic!("bad read?!"),
-//                         })
-//                         .collect_into_vec(&mut vec);
+                            let seq = read.sequence();
+                            let paired_seq = paired_read.sequence();
 
-//                     for result_effects in &vec {
-//                         for effect in result_effects.as_ref().expect("") {
-//                             output_handler.handle(effect).unwrap();
-//                         }
-//                     }
-//                 }),
-//             RecordIterable::Fastq { recs } => {
-//                 recs.into_iter()
-//                     .chunks(10000)
-//                     .into_iter()
-//                     .for_each(|chunk| {
-//                         let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
-//                         chunk
-//                             .collect_vec()
-//                             .par_iter()
-//                             .map(|record| match record {
-//                                 Ok(read) => {
-//                                     let arena = Arena::new();
-//                                     let val = core::Val::Rec {
-//                                         rec: Arc::new(rec::FastqRead { read }),
-//                                     };
-//                                     prog.eval(&arena, env, cache, val)
-//                                 }
-//                                 Err(_) => panic!("bad read?!"),
-//                             })
-//                             .collect_into_vec(&mut vec);
+                            let qual = read.quality_scores();
+                            let paired_qual = paired_read.quality_scores();
 
-//                         for result_effects in &vec {
-//                             for effect in result_effects.as_ref().expect("") {
-//                                 output_handler.handle(effect).unwrap();
-//                             }
-//                         }
-//                     })
-//             }
-//             RecordIterable::Sam { recs } => todo!(),
-//             RecordIterable::Paired { recs1, recs2 } => match recs1 {
-//                 RecordIterable::Fasta { recs, fun } => todo!(),
-//                 RecordIterable::Fastq { recs } => todo!(),
-//                 RecordIterable::Sam { recs } => todo!(),
-//                 RecordIterable::Paired { recs1, recs2 } => todo!(),
-//             },
-//         }
-//     }
-// }
+                            let data = read.data();
+                            let paired_data = paired_read.data();
 
-// trait Reader {
-//     fn estimate_reads(filename: &str, buffer_len: u64);
+                            let val = core::Val::Rec {
+                                rec: Arc::new(FullyConcreteRec {
+                                    map: HashMap::from([
+                                        (
+                                            b"r1".to_vec(),
+                                            core::Val::Rec {
+                                                rec: Arc::new(rec::SamRead {
+                                                    read,
+                                                    cigar: &cigar,
+                                                    seq: &seq,
+                                                    qual: &qual,
+                                                    data: &data,
+                                                }),
+                                            },
+                                        ),
+                                        (
+                                            b"r2".to_vec(),
+                                            core::Val::Rec {
+                                                rec: Arc::new(rec::SamRead {
+                                                    read: paired_read,
+                                                    cigar: &paired_cigar,
+                                                    seq: &paired_seq,
+                                                    qual: &paired_qual,
+                                                    data: &paired_data,
+                                                }),
+                                            },
+                                        ),
+                                    ]),
+                                }),
+                            };
 
-//     fn reads(&self);
-// }
+                            prog.eval(&arena, env, cache, val)
+                        }
+                        _ => panic!("bad read?!"),
+                    })
+                    .collect_into_vec(&mut vec);
 
-// pub fn new_reader(
-//     filename: &str,
-//     paired_filename: Option<&str>,
-// ) -> Result<Arc<dyn Reader>, InputError> {
-//     todo!()
-// }
+                for result_effects in &vec {
+                    for effect in result_effects.as_ref().expect("") {
+                        output_handler.handle(effect).unwrap();
+                    }
+                }
 
-// struct ReadError {
-//     message: String,
-// }
+                // update the bar, if there is one
+                if let Some(bar) = opt_bar {
+                    bar.inc(10000 as u64);
+                }
+            });
 
-// impl ReadError {
-//     fn new(message: &str) -> ReadError {
-//         ReadError {
-//             message: message.to_string(),
-//         }
-//     }
-// }
+        output_handler.finish();
+    }
 
-// struct FastaReader {
-//     records: bio::io::fasta::Records<Box<dyn BufRead>>,
-// }
+    fn count(&mut self) -> usize {
+        let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
+        let header = reader.read_header();
+        let input_records = reader.records();
 
-// impl<'a> FastaReader {
-//     fn reads(&mut self, buffer: Box<dyn BufRead>) -> Arc<dyn Iterator<Item = Val<'a>>> {
-//         // let into_iter().map(|record| match record {
-//         //     Ok(read) => Ok(core::Val::Rec {
-//         //         rec: Arc::new(rec::FastaRead { read: &read }),
-//         //     }),
-//         //     Err(_) => Err(ReadError::new("bad read!")),
-//         // });
-
-//         todo!()
-//     }
-//     fn next(&'a mut self) {
-//         self.records.next().map(|record| {
-//             record.as_ref().map(|read| core::Val::Rec {
-//                 rec: Arc::new(FastaRead { read }),
-//             })
-//         });
-//     }
-// }
+        input_records.count()
+    }
+}

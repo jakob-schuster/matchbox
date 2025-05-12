@@ -105,6 +105,11 @@ fn run(code: &str, global_config: &GlobalConfig) {
         FileType::Fasta
     };
 
+    let paired_filetype = global_config.paired_with.as_ref().map(|filename| {
+        let (filetype, _) = get_filetype_and_buffer(filename).unwrap();
+        filetype
+    });
+
     // establish a global-level arena and context,
     // for values allocated during elaboration
     let arena = Arena::new();
@@ -139,14 +144,22 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .unwrap();
 
     // elaborate to a core program
-    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, &filetype), arena.alloc(prog))
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-        // should never unwrap, because program terminates
-        .unwrap();
+    let core_prog = elab_prog(
+        &arena,
+        &ctx.bind_read_paired(&arena, &filetype, &paired_filetype),
+        arena.alloc(prog),
+    )
+    .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+    // should never unwrap, because program terminates
+    .unwrap();
 
     // cache the values
     let (core_prog, cache) = core_prog
-        .cache(&arena, &ctx.bind_read(&arena, &filetype).tms)
+        .cache(
+            &arena,
+            &ctx.bind_read_paired(&arena, &filetype, &paired_filetype)
+                .tms,
+        )
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();
@@ -161,6 +174,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
     if let Some(reads_filename) = &global_config.reads {
         read_any(
             reads_filename,
+            global_config.paired_with.clone(),
             &core_prog,
             &env,
             &cache,

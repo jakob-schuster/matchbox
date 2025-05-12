@@ -17,3 +17,5 @@ Currently you'll have a (slightly!) more stable experience with the original pro
 - [x] make reverse complement work for reads as well
 - [x] add pipe operator again
 - [x] add sam support
+- [ ] make the output look nice
+- [x] support paired read input

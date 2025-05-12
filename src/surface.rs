@@ -384,6 +384,56 @@ impl<'a> Context<'a> {
         )
     }
 
+    /// Binds the read to a parameter in the context,
+    /// taking into account an optional read pair.
+    pub fn bind_read_paired(
+        &self,
+        arena: &'a Arena,
+        filetype: &FileType,
+        paired_filetype: &Option<FileType>,
+    ) -> Context<'a> {
+        match paired_filetype {
+            Some(paired_filetype) => {
+                // filetype must be allocated since it must survive
+                let filetype_bytes = arena.alloc(filetype.to_string().as_bytes().to_vec());
+                let paired_filetype_bytes =
+                    arena.alloc(paired_filetype.to_string().as_bytes().to_vec());
+
+                self.bind_param(
+                    "read".to_string(),
+                    core::Tm::new(
+                        Location::new(0, 0),
+                        core::TmData::FunApp {
+                            head: Arc::new(core::Tm::new(
+                                Location::new(0, 0),
+                                core::TmData::FunForeignLit {
+                                    body: Arc::new(core::library::paired_read_ty),
+                                },
+                            )),
+                            args: vec![
+                                core::Tm::new(
+                                    Location::new(0, 0),
+                                    core::TmData::StrLit { s: filetype_bytes },
+                                ),
+                                core::Tm::new(
+                                    Location::new(0, 0),
+                                    core::TmData::StrLit {
+                                        s: paired_filetype_bytes,
+                                    },
+                                ),
+                            ],
+                        },
+                    )
+                    // WARN cache can be empty because this is pre-caching
+                    .eval(arena, &self.tms, &Cache::default(), &Env::default())
+                    .expect("could not evaluate standard library!"),
+                    arena,
+                )
+            }
+            None => self.bind_read(arena, filetype),
+        }
+    }
+
     pub fn assert_unique_name(&self, location: &Location, name: &String) -> Result<(), ElabError> {
         // check that the name isn't already assigned
         if self.names.iter().contains(name) {

@@ -63,6 +63,8 @@ pub trait Rec<'p>: Display + Send + Sync {
             .map_err(|_| InternalError::new("trying to slice a non-read record?!"))?
             as Val<'p>
         {
+            let s2 = seq as &'a [u8];
+
             match self.get(b"qual") {
                 Ok(Val::Str { s: qual }) => Ok(Val::Rec {
                     rec: Arc::new(self.with_all(&[

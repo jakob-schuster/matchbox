@@ -409,6 +409,34 @@ pub fn unary_read_reverse_complement<'a>(
     }
 }
 
+pub fn paired_read_ty<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [v1, v2] => Ok(Val::RecTy {
+            fields: vec![
+                CoreRecField {
+                    name: b"r1",
+                    data: read_ty(arena, location, &[v1.clone()])?,
+                },
+                CoreRecField {
+                    name: b"r2",
+                    data: read_ty(arena, location, &[v2.clone()])?,
+                },
+            ],
+        }),
+        _ => Err(EvalError::new(
+            &location,
+            &format!(
+                "bad arguments given to function?! {}",
+                vtms.iter().join(",")
+            ),
+        )),
+    }
+}
+
 pub fn read_ty<'a>(
     arena: &'a Arena,
     location: &Location,
@@ -581,9 +609,7 @@ pub fn read_ty<'a>(
                     // The optional tags associated with the alignment
                     CoreRecField {
                         name: b"desc",
-                        data: Val::ListTy {
-                            ty: Arc::new(Val::StrTy),
-                        },
+                        data: Val::StrTy,
                     },
                 ],
             }),

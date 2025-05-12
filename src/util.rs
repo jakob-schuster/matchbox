@@ -309,7 +309,7 @@ pub fn translate(seq: &[u8]) -> String {
             b"GGA" => 'G',
             b"GGG" => 'G',
 
-            _ => '?',
+            _ => 'X',
         }
     }
 

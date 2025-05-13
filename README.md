@@ -13,7 +13,9 @@ You could use *matchbox* for:
 
 <a href="https://jakob-schuster.github.io/matchbox-docs/">Read the documentation</a>
 
-⚠️ *matchbox* is still in development -- expect some changes before release! ⚠️
+<p align="center">
+    ⚠️ *matchbox* is still in development -- expect some changes before release! ⚠️
+</p>
 
 ## Installation
 

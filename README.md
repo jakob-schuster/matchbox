@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="figures/logo.png" title="Restrander" alt="Restrander" width="300">
+    <img src="figures/banner.png" title="matchbox" alt="matchbox" width="600">
 </p>
 
 A flexible read processor, capable of performing powerful transformations on your FASTA/FASTQ/SAM files.

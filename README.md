@@ -11,7 +11,7 @@ You could use *matchbox* for:
 - Quantifying and filtering out sequencing artefacts
 - Demultiplexing even the most complex barcoding schemes
 
-<a href="www.jakob-schuster.github.io/matchbox-docs">Read the documentation</a>
+<a href="https://jakob-schuster.github.io/matchbox-docs/">Read the documentation</a>
 
 ## Installation
 

@@ -11,7 +11,7 @@ You could use *matchbox* for:
 - Quantifying and filtering out sequencing artefacts
 - Demultiplexing even the most complex barcoding schemes
 
-<a href="https://jakob-schuster.github.io/matchbox-docs/">Read the documentation</a>
+**<a href="https://jakob-schuster.github.io/matchbox-docs/">Read the documentation</a>**
 
 ⚠️ *matchbox* is still in development — expect some changes before release! ⚠️
 
@@ -37,7 +37,7 @@ matchbox -s my_script.mb my_reads.fq
 - To process data on multiple threads for improved speed, use `--threads`
 - To handle paired reads, use `--paired-with`
 
-[For plenty of examples and a full scripting language reference, check out the documentation!](https://jakob-schuster.github.io/matchbox-docs/)
+**[For plenty of examples and a full scripting language reference, check out the documentation!](https://jakob-schuster.github.io/matchbox-docs/)**
 
 # Todo
 

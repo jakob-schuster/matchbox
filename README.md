@@ -1,21 +1,29 @@
-# Matchbox
+<p align="center">
+    <img src="figures/logo.png" title="Restrander" alt="Restrander" width="300">
+</p>
 
-## ⚠️ UNDER CONSTRUCTION ⚠️
+A flexible read processor, capable of performing powerful transformations on your FASTA/FASTQ/SAM files.
 
-This will soon be the release version of matchbox, a versatile read processing tool for sequencing data.
+You could use *matchbox* for:
 
-Currently you'll have a (slightly!) more stable experience with the original prototype version, [matchbox-alpha](https://github.com/jakob-schuster/matchbox-alpha).
+- Quick, error-tolerant searches for primers and known sequences
+- Validating the structure of your reads
+- Quantifying and filtering out sequencing artefacts
+- Demultiplexing even the most complex barcoding schemes
 
-## Todo before this becomes main matchbox
+<a href="www.jakob-schuster.github.io/matchbox-docs">Read the documentation</a>
 
-- [x] fix memory leak
-- [x] fix script parsing statements after conditionals
-- [x] make terms effectful
-- [x] add optional arguments
+## Installation
+
+Clone the GitHub repo and build it using cargo. More accessible distribution coming soon!
+
+```bash
+git clone https://github.com/jakob-schuster/matchbox.git
+cd matchbox
+cargo build --release
+```
+
+## Todo
+
 - [ ] add search term parameters
-- [x] make standard library on compile
-- [x] make reverse complement work for reads as well
-- [x] add pipe operator again
-- [x] add sam support
-- [ ] make the output look nice
-- [x] support paired read input
+- [ ] add a terminal UI mode

@@ -11,6 +11,7 @@ use parse::{parse, ParseError};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use read::{
     get_extensions, get_filetype_and_buffer, FileType, FileTypeError, InputError, ReaderWithBar,
+    ReaderWithUI,
 };
 use surface::{elab_prog, elab_prog_for_ctx, Context, ElabError};
 use util::{Arena, Cache, Env, Location};
@@ -22,6 +23,7 @@ mod parse;
 mod read;
 mod surface;
 mod test;
+mod ui;
 mod util;
 mod visit;
 

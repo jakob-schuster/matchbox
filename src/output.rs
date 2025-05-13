@@ -18,11 +18,12 @@ pub struct OutputHandler<'a> {
     file_handler: FileHandler,
 }
 
+#[derive(Clone)]
 pub struct OutputHandlerSummary {
-    stdout_handler: StdoutHandlerSummary,
-    counts_handler: CountsHandlerSummary,
-    average_handler: AverageHandlerSummary,
-    file_handler: FileHandlerSummary,
+    pub stdout_handler: StdoutHandlerSummary,
+    pub counts_handler: CountsHandlerSummary,
+    pub average_handler: AverageHandlerSummary,
+    pub file_handler: FileHandlerSummary,
 }
 
 impl<'a> OutputHandler<'a> {
@@ -139,6 +140,7 @@ impl StdoutHandler {
     }
 }
 
+#[derive(Clone)]
 pub struct StdoutHandlerSummary {
     lines: Vec<String>,
 }
@@ -346,6 +348,7 @@ impl FileHandler {
     }
 }
 
+#[derive(Clone)]
 pub struct FileHandlerSummary {
     files: Vec<(String, FileType, String)>,
 }
@@ -382,6 +385,7 @@ impl CountsHandler {
     }
 }
 
+#[derive(Clone)]
 pub struct CountsHandlerSummary {
     top: Vec<(String, i32)>,
 }
@@ -420,7 +424,8 @@ impl AverageHandler {
     }
 }
 
+#[derive(Clone)]
 pub struct AverageHandlerSummary {
-    mean: f32,
-    variance: f32,
+    pub mean: f32,
+    pub variance: f32,
 }

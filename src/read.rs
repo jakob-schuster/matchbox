@@ -20,7 +20,8 @@ use crate::{
         rec::{self, ConcreteRec, FastaRead, FullyConcreteRec, Rec},
         Effect, EvalError, Val,
     },
-    output::OutputHandler,
+    output::{OutputHandler, OutputHandlerSummary},
+    ui::Interface,
     util::{Arena, Cache, Env},
 };
 
@@ -156,8 +157,106 @@ pub fn get_filetype_and_buffer(
     }
 }
 
-pub struct ReaderWithBar {
+pub struct ProgressSummary {
+    read_increment: usize,
+    output_handler_summary: OutputHandlerSummary,
+}
+
+impl ProgressSummary {
+    fn new(read_increment: usize, output_handler_summary: OutputHandlerSummary) -> ProgressSummary {
+        ProgressSummary {
+            read_increment,
+            output_handler_summary,
+        }
+    }
+}
+
+pub trait Progress {
+    fn update(&mut self, progress_summary: &ProgressSummary);
+
+    fn finish(&mut self);
+}
+
+pub struct UIProgress {
+    interface: Interface,
+}
+
+impl UIProgress {
+    fn new(interface: Interface) -> UIProgress {
+        UIProgress { interface }
+    }
+}
+
+impl Progress for UIProgress {
+    fn update(&mut self, progress_summary: &ProgressSummary) {
+        self.interface
+            .update(&progress_summary.output_handler_summary);
+    }
+
+    fn finish(&mut self) {
+        self.interface.finish();
+    }
+}
+
+pub struct BarProgress {
     bar: ProgressBar,
+}
+impl BarProgress {
+    fn new(bar: ProgressBar) -> BarProgress {
+        BarProgress { bar }
+    }
+}
+
+impl Progress for BarProgress {
+    fn update(&mut self, progress_summary: &ProgressSummary) {
+        self.bar.inc(progress_summary.read_increment as u64);
+    }
+
+    fn finish(&mut self) {
+        self.bar.finish_with_message("Done!");
+    }
+}
+
+pub struct ReaderWithUI {
+    interface: UIProgress,
+    reader: Box<dyn Reader>,
+}
+
+impl ReaderWithUI {
+    pub fn new(filename: &str, paired_filename_opt: Option<String>) -> ReaderWithUI {
+        let estimate = estimate_reads(filename, 1000000).unwrap();
+
+        // make the bar
+        let style = ProgressStyle::with_template(
+            "{prefix} {elapsed_precise} [{bar:40.red/yellow}] {percent}% {msg}",
+        )
+        .unwrap()
+        .progress_chars(" @=");
+        let bar = ProgressBar::new(estimate)
+            .with_style(style)
+            .with_prefix(String::from(filename));
+        bar.set_draw_target(ProgressDrawTarget::stderr());
+
+        ReaderWithUI {
+            interface: UIProgress::new(Interface::new(bar)),
+            reader: reader_from_filename(filename, paired_filename_opt),
+        }
+    }
+
+    pub fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+    ) {
+        self.reader
+            .map(prog, env, cache, output_handler, &mut self.interface);
+    }
+}
+
+pub struct ReaderWithBar {
+    bar: BarProgress,
     reader: Box<dyn Reader>,
 }
 
@@ -179,7 +278,10 @@ impl ReaderWithBar {
         // just use bio parsers for now; can't use seq_io in parallel on gzipped files
         let reader = reader_from_filename(filename, paired_filename_opt);
 
-        ReaderWithBar { bar, reader }
+        ReaderWithBar {
+            bar: BarProgress { bar },
+            reader,
+        }
     }
 
     pub fn map<'p>(
@@ -190,7 +292,7 @@ impl ReaderWithBar {
         output_handler: &mut OutputHandler,
     ) {
         self.reader
-            .map(prog, env, cache, output_handler, Some(&self.bar));
+            .map(prog, env, cache, output_handler, &mut self.bar);
     }
 }
 
@@ -230,7 +332,7 @@ pub trait Reader {
         env: &Env<Val<'p>>,
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
-        opt_bar: Option<&ProgressBar>,
+        progress: &mut dyn Progress,
     );
 
     fn count(&mut self) -> usize;
@@ -292,15 +394,13 @@ impl Reader for FastaReader {
         env: &Env<Val<'p>>,
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
-        opt_bar: Option<&ProgressBar>,
+        progress: &mut dyn Progress,
     ) {
         let input_records = bio::io::fasta::Reader::from_bufread(&mut self.buffer).records();
 
-        input_records
-            .into_iter()
-            .chunks(10000)
-            .into_iter()
-            .for_each(|chunk| {
+        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
+            progress,
+            |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -323,12 +423,12 @@ impl Reader for FastaReader {
                     }
                 }
 
-                // update the bar, if there is one
-                if let Some(bar) = opt_bar {
-                    bar.inc(10000 as u64);
-                }
-            });
+                progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
+                progress0
+            },
+        );
 
+        final_progress.finish();
         output_handler.finish();
     }
 
@@ -351,7 +451,7 @@ impl Reader for PairedFastaReader {
         env: &Env<Val<'p>>,
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
-        opt_bar: Option<&ProgressBar>,
+        progress: &mut dyn Progress,
     ) {
         let input_records = bio::io::fasta::Reader::from_bufread(&mut self.buffer)
             .records()
@@ -399,11 +499,6 @@ impl Reader for PairedFastaReader {
                         output_handler.handle(effect).unwrap();
                     }
                 }
-
-                // update the bar, if there is one
-                if let Some(bar) = opt_bar {
-                    bar.inc(10000 as u64);
-                }
             });
 
         output_handler.finish();
@@ -427,7 +522,7 @@ impl Reader for FastqReader {
         env: &Env<Val<'p>>,
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
-        opt_bar: Option<&ProgressBar>,
+        progress: &mut dyn Progress,
     ) {
         let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
 
@@ -457,11 +552,6 @@ impl Reader for FastqReader {
                         output_handler.handle(effect).unwrap();
                     }
                 }
-
-                // update the bar, if there is one
-                if let Some(bar) = opt_bar {
-                    bar.inc(10000 as u64);
-                }
             });
 
         output_handler.finish();
@@ -486,7 +576,7 @@ impl Reader for PairedFastqReader {
         env: &Env<Val<'p>>,
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
-        opt_bar: Option<&ProgressBar>,
+        progress: &mut dyn Progress,
     ) {
         let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer)
             .records()
@@ -534,11 +624,6 @@ impl Reader for PairedFastqReader {
                         output_handler.handle(effect).unwrap();
                     }
                 }
-
-                // update the bar, if there is one
-                if let Some(bar) = opt_bar {
-                    bar.inc(10000 as u64);
-                }
             });
 
         output_handler.finish();
@@ -562,7 +647,7 @@ impl Reader for SamReader {
         env: &Env<Val<'p>>,
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
-        opt_bar: Option<&ProgressBar>,
+        progress: &mut dyn Progress,
     ) {
         let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
         let header = reader.read_header();
@@ -604,11 +689,6 @@ impl Reader for SamReader {
                     output_handler.handle(effect).unwrap();
                 }
             }
-
-            // update the bar, if there is one
-            if let Some(bar) = opt_bar {
-                bar.inc(10000 as u64);
-            }
         }
 
         output_handler.finish();
@@ -635,7 +715,7 @@ impl Reader for PairedSamReader {
         env: &Env<Val<'p>>,
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
-        opt_bar: Option<&ProgressBar>,
+        progress: &mut dyn Progress,
     ) {
         let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
         let mut paired_reader = noodles::sam::io::Reader::new(&mut self.paired_buffer);
@@ -714,9 +794,6 @@ impl Reader for PairedSamReader {
                 }
 
                 // update the bar, if there is one
-                if let Some(bar) = opt_bar {
-                    bar.inc(10000 as u64);
-                }
             });
 
         output_handler.finish();

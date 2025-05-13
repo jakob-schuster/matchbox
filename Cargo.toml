@@ -16,6 +16,9 @@ codespan = "*"
 flate2 = { version = "*", features = ["zlib-ng"] }
 noodles = { version = "0.83.0", features = ["sam"] }
 indicatif = "*"
+color-eyre = "*"
+ratatui = "*"
+crossterm = "*"
 
 [dev-dependencies]
 insta = { version = "1.42.0", features = ["yaml"] }

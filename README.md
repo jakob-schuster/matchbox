@@ -15,7 +15,7 @@ You could use *matchbox* for:
 
 ⚠️ *matchbox* is still in development -- expect some changes before release! ⚠️
 
-## Installation
+# Installation
 
 Clone the GitHub repo and build it using cargo. More accessible distribution coming soon!
 
@@ -25,7 +25,21 @@ cd matchbox
 cargo build --release
 ```
 
-## Todo
+# Usage
+
+Write your matchbox script in a `.mb` file, and give it to *matchbox* via `--script`.
+
+```bash
+matchbox -s my_script.mb my_reads.fq
+```
+
+- To allow for edit distance when searching for sequences, use `--error`
+- To process data on multiple threads for improved speed, use `--threads`
+- To handle paired reads, use `--paired-with`
+
+[For plenty of examples and a full scripting language reference, check out the documentation!](https://jakob-schuster.github.io/matchbox-docs/)
+
+# Todo
 
 - [ ] add search term parameters
 - [ ] add a terminal UI mode

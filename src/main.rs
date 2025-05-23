@@ -40,6 +40,10 @@ fn main() {
 /// The global configuration options, accessible as command line parameters.
 #[derive(Parser)]
 pub struct GlobalConfig {
+    /// Matchbox script to execute.
+    #[arg(short, long)]
+    script: String,
+
     /// Default error rate permitted when searching for sequences. Given as a proportion of total search sequence length.
     #[arg(short, long, default_value_t = 0.0)]
     error: f32,
@@ -48,23 +52,21 @@ pub struct GlobalConfig {
     #[arg(short, long, default_value_t = 1)]
     threads: usize,
 
-    /// Matchbox script to execute.
-    #[arg(short, long)]
-    script: String,
-
-    /// Reads. Accepts FASTA/FASTQ files.
+    /// Reads. Accepts FASTA/FASTQ/SAM files.
     #[arg()]
     reads: Option<String>,
 
-    /// Paired reads. Accepts FASTA/FASTQ files.
+    /// Paired reads. Accepts FASTA/FASTQ/SAM files. File type must match primary read file.
     #[arg(short, long)]
     paired_with: Option<String>,
 
+    /// Values passed into the matchbox script, via the built-in `args` variable.
     #[arg(short, long, default_value = "")]
     args: String,
 
+    /// Directory to produce CSVs generated from `count!` and `average!` functions.
     #[arg(short, long)]
-    output_directory: Option<String>,
+    output_csv_directory: Option<String>,
 }
 
 impl GlobalConfig {
@@ -76,7 +78,7 @@ impl GlobalConfig {
             reads: None,
             paired_with: None,
             args: "".to_string(),
-            output_directory: None,
+            output_csv_directory: None,
         }
     }
 }
@@ -172,7 +174,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
     // let cache = Cache::default();
 
     // create an output handler, to receive output effects
-    let mut output_handler = OutputHandler::new(global_config.output_directory.clone())
+    let mut output_handler = OutputHandler::new(global_config.output_csv_directory.clone())
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap
         .unwrap();

@@ -457,11 +457,9 @@ impl Reader for PairedFastaReader {
             .records()
             .zip(bio::io::fasta::Reader::from_bufread(&mut self.paired_buffer).records());
 
-        input_records
-            .into_iter()
-            .chunks(10000)
-            .into_iter()
-            .for_each(|chunk| {
+        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
+            progress,
+            |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -499,8 +497,13 @@ impl Reader for PairedFastaReader {
                         output_handler.handle(effect).unwrap();
                     }
                 }
-            });
 
+                progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
+                progress0
+            },
+        );
+
+        final_progress.finish();
         output_handler.finish();
     }
 
@@ -526,11 +529,9 @@ impl Reader for FastqReader {
     ) {
         let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
 
-        input_records
-            .into_iter()
-            .chunks(10000)
-            .into_iter()
-            .for_each(|chunk| {
+        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
+            progress,
+            |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -552,8 +553,13 @@ impl Reader for FastqReader {
                         output_handler.handle(effect).unwrap();
                     }
                 }
-            });
 
+                progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
+                progress0
+            },
+        );
+
+        final_progress.finish();
         output_handler.finish();
     }
 
@@ -582,11 +588,9 @@ impl Reader for PairedFastqReader {
             .records()
             .zip(bio::io::fastq::Reader::from_bufread(&mut self.paired_buffer).records());
 
-        input_records
-            .into_iter()
-            .chunks(10000)
-            .into_iter()
-            .for_each(|chunk| {
+        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
+            progress,
+            |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -624,8 +628,13 @@ impl Reader for PairedFastqReader {
                         output_handler.handle(effect).unwrap();
                     }
                 }
-            });
 
+                progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
+                progress0
+            },
+        );
+
+        final_progress.finish();
         output_handler.finish();
     }
 
@@ -652,45 +661,50 @@ impl Reader for SamReader {
         let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
         let header = reader.read_header();
         let input_records = reader.records();
+        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
+            progress,
+            |progress0, chunk| {
+                let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
+                chunk
+                    .collect_vec()
+                    .par_iter()
+                    .map(|record| match record {
+                        Ok(read) => {
+                            let arena = Arena::new();
+                            let cigar = read.cigar();
+                            let seq = read.sequence();
+                            let qual = read.quality_scores();
+                            let data = read.data();
 
-        for chunk in &input_records.chunks(10000) {
-            let mut effects = vec![];
+                            let val = core::Val::Rec {
+                                rec: Arc::new(rec::SamRead {
+                                    read: &read,
+                                    cigar: &cigar,
+                                    seq: &seq,
+                                    qual: &qual,
+                                    data: &data,
+                                }),
+                            };
+                            let effects = prog.eval(&arena, env, cache, val);
 
-            chunk
-                .collect_vec()
-                .into_par_iter()
-                .map(|record| match record {
-                    Ok(read) => {
-                        let arena = Arena::new();
-                        let cigar = read.cigar();
-                        let seq = read.sequence();
-                        let qual = read.quality_scores();
-                        let data = read.data();
+                            effects
+                        }
+                        Err(_) => panic!("bad read?!"),
+                    })
+                    .collect_into_vec(&mut vec);
 
-                        let val = core::Val::Rec {
-                            rec: Arc::new(rec::SamRead {
-                                read: &read,
-                                cigar: &cigar,
-                                seq: &seq,
-                                qual: &qual,
-                                data: &data,
-                            }),
-                        };
-                        let effects = prog.eval(&arena, env, cache, val);
-
-                        effects
+                for result_effects in &vec {
+                    for effect in result_effects.as_ref().expect("") {
+                        output_handler.handle(effect).unwrap();
                     }
-                    Err(_) => panic!("bad read?!"),
-                })
-                .collect_into_vec(&mut effects);
-
-            for result_effects in &effects {
-                for effect in result_effects.as_ref().expect("") {
-                    output_handler.handle(effect).unwrap();
                 }
-            }
-        }
 
+                progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
+                progress0
+            },
+        );
+
+        final_progress.finish();
         output_handler.finish();
     }
 
@@ -725,11 +739,9 @@ impl Reader for PairedSamReader {
 
         let input_records = reader.records().zip(paired_reader.records());
 
-        input_records
-            .into_iter()
-            .chunks(10000)
-            .into_iter()
-            .for_each(|chunk| {
+        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
+            progress,
+            |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -793,8 +805,12 @@ impl Reader for PairedSamReader {
                     }
                 }
 
-                // update the bar, if there is one
-            });
+                progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
+                progress0
+            },
+        );
+
+        final_progress.finish();
 
         output_handler.finish();
     }

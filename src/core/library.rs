@@ -1285,8 +1285,13 @@ pub fn count_eff<'a>(
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
         // string types pass straight through to reduce allocations
-        [v] => Ok(Val::Effect {
-            val: make_portable(arena, v),
+        [v, Val::Str { s: name }] => Ok(Val::Effect {
+            val: PortableVal::Rec {
+                fields: HashMap::from([
+                    (b"name".to_vec(), PortableVal::Str { s: name.to_vec() }),
+                    (b"val".to_vec(), make_portable(arena, v)),
+                ]),
+            },
             handler: PortableVal::Rec {
                 fields: HashMap::from([(
                     b"output".to_vec(),
@@ -1338,8 +1343,13 @@ pub fn average_eff<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [v] => Ok(Val::Effect {
-            val: make_portable(arena, v),
+        [v, Val::Str { s: name }] => Ok(Val::Effect {
+            val: PortableVal::Rec {
+                fields: HashMap::from([
+                    (b"name".to_vec(), PortableVal::Str { s: name.to_vec() }),
+                    (b"val".to_vec(), make_portable(arena, v)),
+                ]),
+            },
             handler: PortableVal::Rec {
                 fields: HashMap::from([(
                     b"output".to_vec(),

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{hash_set::Intersection, HashMap},
     fs::File,
     io::{stdout, BufWriter, Stdout, StdoutLock, Write},
     os::unix::ffi::OsStrExt,
@@ -12,28 +12,61 @@ use crate::core::{Effect, InternalError, PortableVal};
 use crate::util::bytes_to_string;
 
 pub struct OutputHandler<'a> {
+    output_directory: Option<String>,
     stdout_handler: BufferedStdoutHandler<'a>,
-    counts_handler: CountsHandler,
-    average_handler: AverageHandler,
+    multi_counts_handler: MultiCountsHandler,
+    multi_average_handler: MultiAverageHandler,
     file_handler: FileHandler,
 }
 
 #[derive(Clone)]
 pub struct OutputHandlerSummary {
     pub stdout_handler: StdoutHandlerSummary,
-    pub counts_handler: CountsHandlerSummary,
-    pub average_handler: AverageHandlerSummary,
+    pub multi_counts_handler: MultiCountsHandlerSummary,
+    pub multi_average_handler: MultiAverageHandlerSummary,
     pub file_handler: FileHandlerSummary,
 }
 
-impl<'a> OutputHandler<'a> {
-    pub fn new() -> OutputHandler<'a> {
-        OutputHandler {
-            stdout_handler: BufferedStdoutHandler::new(),
-            counts_handler: CountsHandler::default(),
-            average_handler: AverageHandler::default(),
-            file_handler: FileHandler::default(),
+#[derive(Debug)]
+pub struct OutputError {
+    pub message: String,
+}
+
+impl OutputError {
+    fn new(message: &str) -> OutputError {
+        OutputError {
+            message: message.to_string(),
         }
+    }
+}
+
+impl<'a> OutputHandler<'a> {
+    pub fn new(output_path: Option<String>) -> Result<OutputHandler<'a>, OutputError> {
+        if let Some(output_path) = output_path.clone() {
+            let path = Path::new(&output_path);
+
+            if !path.exists() {
+                return Err(OutputError::new(&format!(
+                    "path '{}' doesn't exist!",
+                    output_path
+                )));
+            }
+
+            if !path.is_dir() {
+                return Err(OutputError::new(&format!(
+                    "path '{}' is not a directory!",
+                    output_path
+                )));
+            }
+        }
+
+        Ok(OutputHandler {
+            output_directory: output_path,
+            stdout_handler: BufferedStdoutHandler::new(),
+            multi_counts_handler: MultiCountsHandler::default(),
+            multi_average_handler: MultiAverageHandler::default(),
+            file_handler: FileHandler::default(),
+        })
     }
 
     pub fn handle(&mut self, eff: &Effect) -> Result<(), InternalError> {
@@ -41,19 +74,16 @@ impl<'a> OutputHandler<'a> {
             PortableVal::Rec { fields } => {
                 if let Some(PortableVal::Str { s: output }) = fields.get(&b"output".to_vec()) {
                     match &output[..] {
-                        b"average" => match eff.val {
-                            PortableVal::Num { n } => {
-                                self.average_handler.handle(n.round() as i32);
-                                Ok(())
-                            }
-                            _ => Err(InternalError::new("only numeric values can be averaged")),
-                        },
+                        b"average" => {
+                            self.multi_average_handler.handle(&eff.val)?;
+                            Ok(())
+                        }
                         b"counts" => {
-                            self.counts_handler.exec(&eff.val);
+                            self.multi_counts_handler.handle(&eff.val)?;
                             Ok(())
                         }
                         b"stdout" => {
-                            self.stdout_handler.handle(&eff.val);
+                            self.stdout_handler.handle(&eff.val)?;
                             Ok(())
                         }
                         b"file" => match fields.get(&b"filename".to_vec()) {
@@ -74,15 +104,15 @@ impl<'a> OutputHandler<'a> {
 
     pub fn finish(&mut self) {
         self.stdout_handler.finish();
-        self.counts_handler.print();
-        self.average_handler.print();
+        self.multi_counts_handler.finish(&self.output_directory);
+        self.multi_average_handler.finish(&self.output_directory);
     }
 
     pub fn summarize(&self) -> OutputHandlerSummary {
         OutputHandlerSummary {
             stdout_handler: self.stdout_handler.summarize(),
-            counts_handler: self.counts_handler.summarize(),
-            average_handler: self.average_handler.summarize(),
+            multi_counts_handler: self.multi_counts_handler.summarize(),
+            multi_average_handler: self.multi_average_handler.summarize(),
             file_handler: self.file_handler.summarize(),
         }
     }
@@ -102,13 +132,15 @@ impl<'a> BufferedStdoutHandler<'a> {
         }
     }
 
-    pub fn handle(&mut self, val: &PortableVal) {
+    pub fn handle(&mut self, val: &PortableVal) -> Result<(), InternalError> {
         self.vec.push(val.to_string());
 
         if self.vec.len() > self.buffer_size {
             self.stdout.write_all(self.vec.join("\n").as_bytes());
             self.vec = vec![];
         }
+
+        Ok(())
     }
 
     pub fn finish(&mut self) {
@@ -354,12 +386,88 @@ pub struct FileHandlerSummary {
 }
 
 #[derive(Default, PartialEq)]
+struct MultiCountsHandler {
+    map: HashMap<Vec<u8>, CountsHandler>,
+}
+
+impl MultiCountsHandler {
+    fn handle(&mut self, val: &PortableVal) -> Result<(), InternalError> {
+        match val {
+            PortableVal::Rec { fields } => {
+                if let (Some(PortableVal::Str { s: name }), Some(val)) = (
+                    fields.get(&(b"name".to_vec())),
+                    fields.get(&(b"val".to_vec())),
+                ) {
+                    if let Some(handler) = self.map.get_mut(name) {
+                        handler.handle(val)?;
+                    } else {
+                        let mut handler = CountsHandler::default();
+                        handler.handle(val)?;
+                        self.map.insert(name.clone(), handler);
+                    }
+
+                    Ok(())
+                } else {
+                    Err(InternalError::new("counts received invalid record?!"))
+                }
+            }
+            _ => Err(InternalError::new("counts received non-record type?!")),
+        }
+    }
+
+    fn finish(&self, output_directory: &Option<String>) {
+        self.print();
+
+        if let Some(output_directory) = output_directory {
+            self.print_csv(output_directory);
+        }
+    }
+
+    fn print(&self) {
+        for (name, handler) in &self.map {
+            println!("{}", String::from_utf8(name.to_vec()).unwrap());
+            handler.print();
+        }
+    }
+
+    fn print_csv(&self, output_directory: &str) {
+        for (name, handler) in &self.map {
+            handler.print_csv(&format!(
+                "{}/{}.csv",
+                output_directory,
+                bytes_to_string(name).unwrap()
+            ));
+        }
+    }
+
+    fn summarize(&self) -> MultiCountsHandlerSummary {
+        MultiCountsHandlerSummary {
+            all: self
+                .map
+                .iter()
+                .map(|(name, handler)| {
+                    (
+                        String::from_utf8(name.clone()).unwrap(),
+                        handler.summarize(),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct MultiCountsHandlerSummary {
+    all: Vec<(String, CountsHandlerSummary)>,
+}
+
+#[derive(Default, PartialEq)]
 struct CountsHandler {
     map: HashMap<String, i32>,
 }
 
 impl CountsHandler {
-    fn exec(&mut self, val: &PortableVal) {
+    fn handle(&mut self, val: &PortableVal) -> Result<(), InternalError> {
         let string = format!("{}", val);
 
         if let Some(count) = self.map.get(&string) {
@@ -367,14 +475,24 @@ impl CountsHandler {
         } else {
             self.map.insert(string, 1);
         }
+
+        Ok(())
     }
 
     fn print(&self) {
         if !self.eq(&Self::default()) {
-            println!(": --- Counted Values --- :");
             for (key, val) in self.map.iter().sorted_by_key(|(_, val)| **val) {
-                println!("{val}\t{key}");
+                println!("\t{val}\t{key}");
             }
+        }
+    }
+
+    fn print_csv(&self, filename: &str) {
+        let mut file = File::create(filename).unwrap();
+        file.write_all(b"value,count\n");
+
+        for (name, value) in &self.map {
+            file.write_all(format!("{},{}\n", name, value).as_bytes());
         }
     }
 
@@ -391,6 +509,90 @@ pub struct CountsHandlerSummary {
 }
 
 #[derive(Default, PartialEq)]
+struct MultiAverageHandler {
+    map: HashMap<Vec<u8>, AverageHandler>,
+}
+
+impl MultiAverageHandler {
+    fn handle(&mut self, val: &PortableVal) -> Result<(), InternalError> {
+        match val {
+            PortableVal::Rec { fields } => {
+                if let (Some(PortableVal::Str { s: name }), Some(PortableVal::Num { n: val })) = (
+                    fields.get(&(b"name".to_vec())),
+                    fields.get(&(b"val".to_vec())),
+                ) {
+                    if let Some(handler) = self.map.get_mut(name) {
+                        handler.handle(*val)?;
+                    } else {
+                        let mut handler = AverageHandler::default();
+                        handler.handle(*val)?;
+                        self.map.insert(name.clone(), handler);
+                    }
+
+                    Ok(())
+                } else {
+                    Err(InternalError::new("counts received invalid record?!"))
+                }
+            }
+            _ => Err(InternalError::new("counts received non-record type?!")),
+        }
+    }
+
+    fn finish(&self, output_directory: &Option<String>) {
+        self.print();
+
+        if let Some(output_directory) = output_directory {
+            self.print_csv(output_directory);
+        }
+    }
+
+    fn print(&self) {
+        for (name, handler) in &self.map {
+            println!("{}", String::from_utf8(name.to_vec()).unwrap());
+            handler.print();
+        }
+    }
+
+    fn print_csv(&self, output_directory: &str) {
+        let mut file = File::create(format!("{}/stats.csv", output_directory)).unwrap();
+
+        file.write_all(b"name,mean,variance\n");
+
+        for (name, handler) in &self.map {
+            file.write_all(
+                format!(
+                    "{},{},{}\n",
+                    bytes_to_string(name).unwrap(),
+                    handler.mean,
+                    handler.variance()
+                )
+                .as_bytes(),
+            );
+        }
+    }
+
+    fn summarize(&self) -> MultiAverageHandlerSummary {
+        MultiAverageHandlerSummary {
+            all: self
+                .map
+                .iter()
+                .map(|(name, handler)| {
+                    (
+                        String::from_utf8(name.clone()).unwrap(),
+                        handler.summarize(),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct MultiAverageHandlerSummary {
+    all: Vec<(String, AverageHandlerSummary)>,
+}
+
+#[derive(Default, PartialEq)]
 struct AverageHandler {
     count: i32,
     mean: f32,
@@ -398,29 +600,31 @@ struct AverageHandler {
 }
 
 impl AverageHandler {
-    fn handle(&mut self, num: i32) {
+    fn handle(&mut self, num: f32) -> Result<(), InternalError> {
         self.count += 1;
-        let delta = num as f32 - self.mean;
+        let delta = num - self.mean;
         self.mean += delta / self.count as f32;
-        let delta2 = num as f32 - self.mean;
+        let delta2 = num - self.mean;
         self.m2 += delta * delta2;
+
+        Ok(())
     }
 
     fn print(&self) {
         if !self.eq(&Self::default()) {
-            println!(
-                "Average: {:.2} ± {:.2}",
-                self.mean,
-                (self.m2 / self.count as f32).sqrt()
-            );
+            println!("\t{:.2} ± {:.2}", self.mean, self.variance());
         }
     }
 
     fn summarize(&self) -> AverageHandlerSummary {
         AverageHandlerSummary {
             mean: self.mean,
-            variance: (self.m2 / self.count as f32).sqrt(),
+            variance: self.variance(),
         }
+    }
+
+    fn variance(&self) -> f32 {
+        (self.m2 / self.count as f32).sqrt()
     }
 }
 

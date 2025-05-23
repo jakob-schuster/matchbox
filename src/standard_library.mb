@@ -56,6 +56,6 @@ distance = $(s0: Str, s1: Str): Num => distance
 to_str = $(val: Any): Str => to_str
 
 stdout! = $(val: Any): Effect => stdout!
-count! = $(val: Any): Effect => count!
+count! = $(val: Any, name: Str = 'default'): Effect => count!
 out! = $(val: Any, filename: Str): Effect => out!
-average! = $(num: Num): Effect => average!
+average! = $(num: Num, name: Str = 'default'): Effect => average!

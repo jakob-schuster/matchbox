@@ -1,12 +1,12 @@
 use core::{library::standard_library, make_portable, EvalError};
-use std::{fmt::Debug, fs::File, io::Read, process::exit};
+use std::{fmt::Debug, fs::File, io::Read, path::Path, process::exit};
 
 use codespan_reporting::{
     diagnostic::{Diagnostic, Label},
     files::{Error, SimpleFile},
     term::{self, termcolor::StandardStream},
 };
-use output::OutputHandler;
+use output::{OutputError, OutputHandler};
 use parse::{parse, ParseError};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use read::{
@@ -62,6 +62,9 @@ pub struct GlobalConfig {
 
     #[arg(short, long, default_value = "")]
     args: String,
+
+    #[arg(short, long)]
+    output_directory: Option<String>,
 }
 
 impl GlobalConfig {
@@ -73,6 +76,7 @@ impl GlobalConfig {
             reads: None,
             paired_with: None,
             args: "".to_string(),
+            output_directory: None,
         }
     }
 }
@@ -168,7 +172,10 @@ fn run(code: &str, global_config: &GlobalConfig) {
     // let cache = Cache::default();
 
     // create an output handler, to receive output effects
-    let mut output_handler = OutputHandler::new();
+    let mut output_handler = OutputHandler::new(global_config.output_directory.clone())
+        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        // should never unwrap
+        .unwrap();
     // create the standard library
     let env = ctx.tms;
 
@@ -302,6 +309,15 @@ impl From<EvalError> for GenericError {
     fn from(value: EvalError) -> Self {
         GenericError {
             location: Some(value.location),
+            message: value.message,
+        }
+    }
+}
+
+impl From<OutputError> for GenericError {
+    fn from(value: OutputError) -> Self {
+        GenericError {
+            location: None,
             message: value.message,
         }
     }

@@ -49,11 +49,11 @@ fn render(frame: &mut Frame, state: &RenderState) {
 
     let [area_0, area_1, area_2, area_3] = vertical.areas(frame.area());
 
-    frame.render_widget(
-        format!(
-            "average {}",
-            state.output_handler_summary.average_handler.mean
-        ),
-        area_0,
-    );
+    // frame.render_widget(
+    //     format!(
+    //         "average {}",
+    //         state.output_handler_summary.average_handler.mean
+    //     ),
+    //     area_0,
+    // );
 }

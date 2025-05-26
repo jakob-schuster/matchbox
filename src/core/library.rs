@@ -100,6 +100,8 @@ pub fn foreign<'a>(
         "distance" => Ok(Arc::new(distance)),
         "to_str" => Ok(Arc::new(to_str)),
 
+        "to_num" => Ok(Arc::new(to_num)),
+
         "stdout!" => Ok(Arc::new(stdout_eff)),
         "count!" => Ok(Arc::new(count_eff)),
         "out!" => Ok(Arc::new(out_eff)),
@@ -1255,6 +1257,26 @@ pub fn to_str<'a>(
         // all else is turned into a string and then allocated
         [v] => Ok(Val::Str {
             s: arena.alloc(v.to_string()).as_bytes(),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn to_num<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Str { s }] => Ok(Val::Num {
+            n: String::from_utf8(s.to_vec())
+                .unwrap()
+                .parse::<f32>()
+                .unwrap(),
         }),
 
         _ => Err(EvalError::new(

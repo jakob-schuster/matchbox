@@ -54,6 +54,7 @@ contains = $(list: [Any], val: Any): Bool => contains
 distance = $(s0: Str, s1: Str): Num => distance
 
 to_str = $(val: Any): Str => to_str
+to_num = $(val: Str): Num => to_num
 
 stdout! = $(val: Any): Effect => stdout!
 count! = $(val: Any, name: Str = 'default'): Effect => count!

@@ -424,14 +424,14 @@ impl MultiCountsHandler {
     }
 
     fn print(&self) {
-        for (name, handler) in &self.map {
+        for (name, handler) in self.map.iter().sorted_by_key(|(name, _)| *name) {
             println!("{}", String::from_utf8(name.to_vec()).unwrap());
             handler.print();
         }
     }
 
     fn print_csv(&self, output_directory: &str) {
-        for (name, handler) in &self.map {
+        for (name, handler) in self.map.iter().sorted_by_key(|(name, _)| *name) {
             handler.print_csv(&format!(
                 "{}/{}.csv",
                 output_directory,
@@ -491,7 +491,7 @@ impl CountsHandler {
         let mut file = File::create(filename).unwrap();
         file.write_all(b"value,count\n");
 
-        for (name, value) in &self.map {
+        for (name, value) in self.map.iter().sorted_by_key(|(_, val)| **val) {
             file.write_all(format!("{},{}\n", name, value).as_bytes());
         }
     }
@@ -547,7 +547,7 @@ impl MultiAverageHandler {
     }
 
     fn print(&self) {
-        for (name, handler) in &self.map {
+        for (name, handler) in self.map.iter().sorted_by_key(|(name, _)| *name) {
             println!("{}", String::from_utf8(name.to_vec()).unwrap());
             handler.print();
         }
@@ -558,7 +558,7 @@ impl MultiAverageHandler {
 
         file.write_all(b"name,mean,variance\n");
 
-        for (name, handler) in &self.map {
+        for (name, handler) in self.map.iter().sorted_by_key(|(name, _)| *name) {
             file.write_all(
                 format!(
                     "{},{},{}\n",

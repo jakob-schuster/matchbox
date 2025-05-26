@@ -106,17 +106,17 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .unwrap();
 
     // need to know filetype of reads, for read type inference
-    let filetype = if let Some(reads_filename) = &global_config.reads {
-        let (filetype, _) = get_filetype_and_buffer(reads_filename).unwrap();
-        filetype
-    } else {
-        FileType::Fasta
-    };
+    // let filetype = if let Some(reads_filename) = &global_config.reads {
+    //     let (filetype, _) = get_filetype_and_buffer(reads_filename).unwrap();
+    //     filetype
+    // } else {
+    //     FileType::Fasta
+    // };
 
-    let paired_filetype = global_config.paired_with.as_ref().map(|filename| {
-        let (filetype, _) = get_filetype_and_buffer(filename).unwrap();
-        filetype
-    });
+    // let paired_filetype = global_config.paired_with.as_ref().map(|filename| {
+    //     let (filetype, _) = get_filetype_and_buffer(filename).unwrap();
+    //     filetype
+    // });
 
     // establish a global-level arena and context,
     // for values allocated during elaboration
@@ -154,7 +154,14 @@ fn run(code: &str, global_config: &GlobalConfig) {
     // elaborate to a core program
     let core_prog = elab_prog(
         &arena,
-        &ctx.bind_read_paired(&arena, &filetype, &paired_filetype),
+        &ctx.bind_read_paired(
+            &arena,
+            global_config
+                .reads
+                .clone()
+                .unwrap_or("in.fasta".to_string()),
+            &global_config.paired_with,
+        ),
         arena.alloc(prog),
     )
     .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
@@ -165,8 +172,15 @@ fn run(code: &str, global_config: &GlobalConfig) {
     let (core_prog, cache) = core_prog
         .cache(
             &arena,
-            &ctx.bind_read_paired(&arena, &filetype, &paired_filetype)
-                .tms,
+            &ctx.bind_read_paired(
+                &arena,
+                global_config
+                    .reads
+                    .clone()
+                    .unwrap_or("in.fasta".to_string()),
+                &global_config.paired_with,
+            )
+            .tms,
         )
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates

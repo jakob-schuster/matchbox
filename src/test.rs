@@ -86,10 +86,10 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
         elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
 
     // elaborate to a core program
-    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, &FileType::Fasta), &prog)
+    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, "in.fa".to_string()), &prog)
         .map_err(GenericError::from)?;
     let (core_prog, cache) =
-        core_prog.cache(&arena, &ctx.bind_read(&arena, &FileType::Fasta).tms)?;
+        core_prog.cache(&arena, &ctx.bind_read(&arena, "in.fa".to_string()).tms)?;
 
     // create a toy read
     let read = core::Val::Rec {
@@ -160,10 +160,10 @@ fn eval_one_fastq_read_test(code: &str, seq: &[u8], qual: &[u8]) -> Result<Strin
         elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
 
     // elaborate to a core program
-    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, &FileType::Fasta), &prog)
+    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, "in.fa".to_string()), &prog)
         .map_err(GenericError::from)?;
     let (core_prog, cache) =
-        core_prog.cache(&arena, &ctx.bind_read(&arena, &FileType::Fasta).tms)?;
+        core_prog.cache(&arena, &ctx.bind_read(&arena, "in.fa".to_string()).tms)?;
 
     // create a toy read
     let read = core::Val::Rec {

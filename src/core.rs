@@ -1073,11 +1073,13 @@ impl<'a> Val<'a> {
                 },
                 Val::RecTy { fields },
             ) => {
+                eprintln!("checking equiv for {} and {}", self, other);
+
                 let names = fields.iter().map(|CoreRecField { name, .. }| name);
-                let with_names = fields.iter().map(|CoreRecField { name, .. }| name);
+                let with_names = with_fields.iter().map(|CoreRecField { name, .. }| name);
 
                 // all the names in the RecWith should be present in the Rec
-                names.clone().all(|name| with_names.clone().contains(name))
+                with_names.clone().all(|name| names.clone().contains(name))
                     && fields
                         .iter()
                         .all(|field| match get(with_fields, field.name) {

@@ -1,6 +1,6 @@
 use noodles::sam::record::Sequence;
 
-use crate::util::{self, Arena, CoreRecField, Location};
+use crate::util::{self, bytes_to_string, Arena, CoreRecField, Location};
 use std::{collections::HashMap, fmt::Display, rc::Rc, sync::Arc};
 
 use super::{EvalError, InternalError, Val};
@@ -503,5 +503,75 @@ impl<'p> Rec<'p> for SamFlags {
 impl<'p> Display for SamFlags {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         todo!()
+    }
+}
+
+pub struct CSVHeader {
+    map: HashMap<Vec<u8>, usize>,
+}
+
+impl CSVHeader {
+    pub fn new(headers: &csv::ByteRecord) -> CSVHeader {
+        let mut map = HashMap::new();
+
+        for (index, header) in headers.iter().enumerate() {
+            map.insert(header.to_vec(), index);
+        }
+
+        CSVHeader { map }
+    }
+
+    fn get(&self, key: &[u8]) -> Result<usize, InternalError> {
+        match self.map.get(key) {
+            Some(val) => Ok(*val),
+            None => Err(InternalError::new(&format!(
+                "couldn't get field '{}'",
+                bytes_to_string(key).unwrap()
+            ))),
+        }
+    }
+    fn all(&self) -> std::collections::hash_map::Keys<'_, Vec<u8>, usize> {
+        self.map.keys()
+    }
+}
+
+pub struct CSVRead<'a> {
+    pub header: &'a CSVHeader,
+    pub fields: &'a csv::ByteRecord,
+}
+
+impl<'p> Rec<'p> for CSVRead<'p> {
+    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
+    where
+        'p: 'a,
+    {
+        match self.fields.get(self.header.get(key)?) {
+            Some(bytes) => Ok(Val::Str { s: bytes }),
+            None => Err(InternalError::new("couldn't index CSV row correctly?!")),
+        }
+    }
+
+    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
+    where
+        'p: 'a,
+    {
+        let mut map = HashMap::new();
+
+        for (key, index) in &self.header.map {
+            let bytes = self.fields.get(*index).unwrap();
+
+            map.insert(key.clone(), Val::Str { s: bytes });
+        }
+
+        map
+    }
+}
+
+impl<'p> Display for CSVRead<'p> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let map = self.all();
+        let s = FullyConcreteRec { map };
+
+        s.fmt(f)
     }
 }

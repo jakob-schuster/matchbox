@@ -666,9 +666,23 @@ pub fn slice<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }, Val::Num { n: start }, Val::Num { n: end }] => Ok(Val::Str {
-            s: &s[start.round() as usize..end.round() as usize],
-        }),
+        [Val::Str { s }, Val::Num { n: start }, Val::Num { n: end }] => {
+            if start.round() >= 0.0 && (end.round() as usize) < s.len() {
+                Ok(Val::Str {
+                    s: &s[start.round() as usize..end.round() as usize],
+                })
+            } else {
+                Err(EvalError::new(
+                    location,
+                    &format!(
+                        "couldn't slice string '{}' from position {} to {}",
+                        bytes_to_string(s).unwrap(),
+                        start,
+                        end
+                    ),
+                ))
+            }
+        }
         _ => Err(EvalError::new(
             &location,
             "bad arguments given to function?!",
@@ -816,7 +830,15 @@ pub fn csv_ty<'a>(
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
                 .from_path(Path::new(&String::from_utf8(filename.to_vec()).unwrap()))
-                .map_err(|_| EvalError::new(location, "couldn't open file"))?;
+                .map_err(|_| {
+                    EvalError::new(
+                        location,
+                        &format!(
+                            "couldn't open file '{}'",
+                            bytes_to_string(filename).unwrap()
+                        ),
+                    )
+                })?;
 
             let field_names = rdr
                 .headers()
@@ -855,7 +877,15 @@ pub fn csv<'a>(
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
                 .from_path(Path::new(&String::from_utf8(filename.to_vec()).unwrap()))
-                .map_err(|_| EvalError::new(location, "couldn't open file"))?;
+                .map_err(|_| {
+                    EvalError::new(
+                        location,
+                        &format!(
+                            "couldn't open file '{}'",
+                            bytes_to_string(filename).unwrap()
+                        ),
+                    )
+                })?;
 
             let field_names = rdr
                 .headers()
@@ -888,7 +918,15 @@ pub fn csv<'a>(
                     })
                 })
                 .try_collect()
-                .map_err(|_| EvalError::new(location, "couldn't open file"))?;
+                .map_err(|_| {
+                    EvalError::new(
+                        location,
+                        &format!(
+                            "couldn't open file '{}'",
+                            bytes_to_string(filename).unwrap()
+                        ),
+                    )
+                })?;
 
             Ok(Val::List { v: structs })
         }
@@ -910,7 +948,15 @@ pub fn tsv_ty<'a>(
             let mut rdr = csv::ReaderBuilder::new()
                 .delimiter(b'\t')
                 .from_path(Path::new(&String::from_utf8(filename.to_vec()).unwrap()))
-                .map_err(|_| EvalError::new(location, "couldn't open file"))?;
+                .map_err(|_| {
+                    EvalError::new(
+                        location,
+                        &format!(
+                            "couldn't open file '{}'",
+                            bytes_to_string(filename).unwrap()
+                        ),
+                    )
+                })?;
 
             let field_names = rdr
                 .headers()
@@ -947,7 +993,15 @@ pub fn tsv<'a>(
             let mut rdr = csv::ReaderBuilder::new()
                 .delimiter(b'\t')
                 .from_path(Path::new(&String::from_utf8(filename.to_vec()).unwrap()))
-                .map_err(|_| EvalError::new(location, "couldn't open file"))?;
+                .map_err(|_| {
+                    EvalError::new(
+                        location,
+                        &format!(
+                            "couldn't open file '{}'",
+                            bytes_to_string(filename).unwrap()
+                        ),
+                    )
+                })?;
 
             let field_names = rdr
                 .headers()
@@ -980,7 +1034,15 @@ pub fn tsv<'a>(
                     })
                 })
                 .try_collect()
-                .map_err(|_| EvalError::new(location, "couldn't open file"))?;
+                .map_err(|_| {
+                    EvalError::new(
+                        location,
+                        &format!(
+                            "couldn't open file '{}'",
+                            bytes_to_string(filename).unwrap()
+                        ),
+                    )
+                })?;
 
             Ok(Val::List { v: structs })
         }
@@ -1001,7 +1063,15 @@ pub fn fasta<'a>(
         [Val::Str { s: filename }] => {
             let f =
                 bio::io::fasta::Reader::from_file(String::from_utf8(filename.to_vec()).unwrap())
-                    .map_err(|_| EvalError::new(location, "couldn't open file"))?;
+                    .map_err(|_| {
+                        EvalError::new(
+                            location,
+                            &format!(
+                                "couldn't open file '{}'",
+                                bytes_to_string(filename).unwrap()
+                            ),
+                        )
+                    })?;
 
             let mut v = vec![];
 
@@ -1023,7 +1093,15 @@ pub fn fasta<'a>(
                             rec: Arc::new(ConcreteRec { map }),
                         });
                     }
-                    Err(_) => panic!("bad read in fasta"),
+                    Err(_) => {
+                        return Err(EvalError::new(
+                            location,
+                            &format!(
+                                "bad read in FASTA file '{}'",
+                                bytes_to_string(filename).unwrap()
+                            ),
+                        ))
+                    }
                 }
             }
 
@@ -1276,7 +1354,15 @@ pub fn to_num<'a>(
             n: String::from_utf8(s.to_vec())
                 .unwrap()
                 .parse::<f32>()
-                .unwrap(),
+                .map_err(|_| {
+                    EvalError::new(
+                        location,
+                        &format!(
+                            "couldn't convert string '{}' to a Num!",
+                            bytes_to_string(s).unwrap()
+                        ),
+                    )
+                })?,
         }),
 
         _ => Err(EvalError::new(

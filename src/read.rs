@@ -256,9 +256,9 @@ impl ReaderWithUI {
         env: &Env<Val<'p>>,
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
-    ) {
+    ) -> Result<(), EvalError> {
         self.reader
-            .map(prog, env, cache, output_handler, &mut self.interface);
+            .map(prog, env, cache, output_handler, &mut self.interface)
     }
 }
 
@@ -297,9 +297,9 @@ impl ReaderWithBar {
         env: &Env<Val<'p>>,
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
-    ) {
+    ) -> Result<(), EvalError> {
         self.reader
-            .map(prog, env, cache, output_handler, &mut self.bar);
+            .map(prog, env, cache, output_handler, &mut self.bar)
     }
 }
 
@@ -340,7 +340,7 @@ pub trait Reader {
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
-    );
+    ) -> Result<(), EvalError>;
 
     fn count(&mut self) -> usize;
 }
@@ -404,12 +404,14 @@ impl Reader for FastaReader {
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
-    ) {
+    ) -> Result<(), EvalError> {
         let input_records = bio::io::fasta::Reader::from_bufread(&mut self.buffer).records();
 
-        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
-            progress,
-            |progress0, chunk| {
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -427,18 +429,19 @@ impl Reader for FastaReader {
                     .collect_into_vec(&mut vec);
 
                 for result_effects in &vec {
-                    for effect in result_effects.as_ref().expect("") {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
                         output_handler.handle(effect).unwrap();
                     }
                 }
 
                 progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
-                progress0
-            },
-        );
+                Ok(progress0)
+            })?;
 
         final_progress.finish();
         output_handler.finish();
+
+        Ok(())
     }
 
     fn count(&mut self) -> usize {
@@ -461,14 +464,16 @@ impl Reader for PairedFastaReader {
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
-    ) {
+    ) -> Result<(), EvalError> {
         let input_records = bio::io::fasta::Reader::from_bufread(&mut self.buffer)
             .records()
             .zip(bio::io::fasta::Reader::from_bufread(&mut self.paired_buffer).records());
 
-        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
-            progress,
-            |progress0, chunk| {
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -502,18 +507,19 @@ impl Reader for PairedFastaReader {
                     .collect_into_vec(&mut vec);
 
                 for result_effects in &vec {
-                    for effect in result_effects.as_ref().expect("") {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
                         output_handler.handle(effect).unwrap();
                     }
                 }
 
                 progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
-                progress0
-            },
-        );
+                Ok(progress0)
+            })?;
 
         final_progress.finish();
         output_handler.finish();
+
+        Ok(())
     }
 
     fn count(&mut self) -> usize {
@@ -535,12 +541,14 @@ impl Reader for FastqReader {
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
-    ) {
+    ) -> Result<(), EvalError> {
         let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
 
-        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
-            progress,
-            |progress0, chunk| {
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -558,18 +566,19 @@ impl Reader for FastqReader {
                     .collect_into_vec(&mut vec);
 
                 for result_effects in &vec {
-                    for effect in result_effects.as_ref().expect("") {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
                         output_handler.handle(effect).unwrap();
                     }
                 }
 
                 progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
-                progress0
-            },
-        );
+                Ok(progress0)
+            })?;
 
         final_progress.finish();
         output_handler.finish();
+
+        Ok(())
     }
 
     fn count(&mut self) -> usize {
@@ -592,14 +601,16 @@ impl Reader for PairedFastqReader {
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
-    ) {
+    ) -> Result<(), EvalError> {
         let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer)
             .records()
             .zip(bio::io::fastq::Reader::from_bufread(&mut self.paired_buffer).records());
 
-        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
-            progress,
-            |progress0, chunk| {
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -633,18 +644,19 @@ impl Reader for PairedFastqReader {
                     .collect_into_vec(&mut vec);
 
                 for result_effects in &vec {
-                    for effect in result_effects.as_ref().expect("") {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
                         output_handler.handle(effect).unwrap();
                     }
                 }
 
                 progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
-                progress0
-            },
-        );
+                Ok(progress0)
+            })?;
 
         final_progress.finish();
         output_handler.finish();
+
+        Ok(())
     }
 
     fn count(&mut self) -> usize {
@@ -666,13 +678,15 @@ impl Reader for SamReader {
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
-    ) {
+    ) -> Result<(), EvalError> {
         let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
         let header = reader.read_header();
         let input_records = reader.records();
-        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
-            progress,
-            |progress0, chunk| {
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -703,18 +717,19 @@ impl Reader for SamReader {
                     .collect_into_vec(&mut vec);
 
                 for result_effects in &vec {
-                    for effect in result_effects.as_ref().expect("") {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
                         output_handler.handle(effect).unwrap();
                     }
                 }
 
                 progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
-                progress0
-            },
-        );
+                Ok(progress0)
+            })?;
 
         final_progress.finish();
         output_handler.finish();
+
+        Ok(())
     }
 
     fn count(&mut self) -> usize {
@@ -739,7 +754,7 @@ impl Reader for PairedSamReader {
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
-    ) {
+    ) -> Result<(), EvalError> {
         let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
         let mut paired_reader = noodles::sam::io::Reader::new(&mut self.paired_buffer);
 
@@ -748,9 +763,11 @@ impl Reader for PairedSamReader {
 
         let input_records = reader.records().zip(paired_reader.records());
 
-        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
-            progress,
-            |progress0, chunk| {
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -809,19 +826,18 @@ impl Reader for PairedSamReader {
                     .collect_into_vec(&mut vec);
 
                 for result_effects in &vec {
-                    for effect in result_effects.as_ref().expect("") {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
                         output_handler.handle(effect).unwrap();
                     }
                 }
 
                 progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
-                progress0
-            },
-        );
+                Ok(progress0)
+            })?;
 
         final_progress.finish();
-
         output_handler.finish();
+        Ok(())
     }
 
     fn count(&mut self) -> usize {
@@ -845,15 +861,17 @@ impl Reader for CSVReader {
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
-    ) {
+    ) -> Result<(), EvalError> {
         let mut reader = csv::Reader::from_reader(&mut self.buffer);
 
         let header = CSVHeader::new(reader.byte_headers().unwrap());
 
         let input_records = reader.byte_records();
-        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
-            progress,
-            |progress0, chunk| {
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -877,18 +895,18 @@ impl Reader for CSVReader {
                     .collect_into_vec(&mut vec);
 
                 for result_effects in &vec {
-                    for effect in result_effects.as_ref().expect("") {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
                         output_handler.handle(effect).unwrap();
                     }
                 }
 
                 progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
-                progress0
-            },
-        );
+                Ok(progress0)
+            })?;
 
         final_progress.finish();
         output_handler.finish();
+        Ok(())
     }
 
     fn count(&mut self) -> usize {
@@ -910,7 +928,7 @@ impl Reader for TSVReader {
         cache: &Cache<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
-    ) {
+    ) -> Result<(), EvalError> {
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(b'\t')
             .from_reader(&mut self.buffer);
@@ -918,9 +936,11 @@ impl Reader for TSVReader {
         let header = CSVHeader::new(reader.byte_headers().unwrap());
 
         let input_records = reader.byte_records();
-        let final_progress = input_records.into_iter().chunks(10000).into_iter().fold(
-            progress,
-            |progress0, chunk| {
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
                 let mut vec: Vec<Result<Vec<Effect>, EvalError>> = vec![];
                 chunk
                     .collect_vec()
@@ -944,18 +964,18 @@ impl Reader for TSVReader {
                     .collect_into_vec(&mut vec);
 
                 for result_effects in &vec {
-                    for effect in result_effects.as_ref().expect("") {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
                         output_handler.handle(effect).unwrap();
                     }
                 }
 
                 progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
-                progress0
-            },
-        );
+                Ok(progress0)
+            })?;
 
         final_progress.finish();
         output_handler.finish();
+        Ok(())
     }
 
     fn count(&mut self) -> usize {

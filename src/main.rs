@@ -197,12 +197,11 @@ fn run(code: &str, global_config: &GlobalConfig) {
 
     // process the reads
     if let Some(reads_filename) = &global_config.reads {
-        ReaderWithBar::new(reads_filename, global_config.paired_with.clone()).map(
-            &core_prog,
-            &env,
-            &cache,
-            &mut output_handler,
-        );
+        ReaderWithBar::new(reads_filename, global_config.paired_with.clone())
+            .map(&core_prog, &env, &cache, &mut output_handler)
+            .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+            // should never unwrap
+            .unwrap()
     } else {
         panic!("can't handle stdin reads yet!")
     }

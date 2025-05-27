@@ -1315,6 +1315,12 @@ pub fn infer_tm<'a>(
                             // apply the function to get the concrete type out
                             let ty_val = data
                                 .app(arena, arg_vals)
+                                // remap the location of the error; it currently holds the location of the literal definition,
+                                // but it should report at the application site
+                                .map_err(|e| EvalError {
+                                    location: tm.location.clone(),
+                                    message: e.message,
+                                })
                                 .map_err(ElabError::from_eval_error)?;
 
                             ty_val

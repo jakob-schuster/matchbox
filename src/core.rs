@@ -1073,8 +1073,6 @@ impl<'a> Val<'a> {
                 },
                 Val::RecTy { fields },
             ) => {
-                eprintln!("checking equiv for {} and {}", self, other);
-
                 let names = fields.iter().map(|CoreRecField { name, .. }| name);
                 let with_names = with_fields.iter().map(|CoreRecField { name, .. }| name);
 

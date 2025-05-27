@@ -667,7 +667,7 @@ pub fn slice<'a>(
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }, Val::Num { n: start }, Val::Num { n: end }] => {
-            if start.round() >= 0.0 && (end.round() as usize) < s.len() {
+            if start.round() >= 0.0 && (end.round() as usize) <= s.len() {
                 Ok(Val::Str {
                     s: &s[start.round() as usize..end.round() as usize],
                 })

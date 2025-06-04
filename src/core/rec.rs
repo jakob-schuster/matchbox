@@ -411,7 +411,7 @@ impl<'p> Rec<'p> for SamRead<'p> {
             }),
 
             // WARN need to do this
-            b"tags" => Ok(Val::Str {
+            b"tags" | b"desc" => Ok(Val::Str {
                 s: self.data.as_ref(),
             }),
 
@@ -440,6 +440,7 @@ impl<'p> Rec<'p> for SamRead<'p> {
             b"seq".to_vec(),
             b"qual".to_vec(),
             b"tags".to_vec(),
+            b"desc".to_vec(),
         ];
 
         for field in &fields {

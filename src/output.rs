@@ -227,7 +227,7 @@ impl FileHandler {
                         ) {
                             file.write_all(
                                 format!(
-                                    ">{}{}\n{}\n",
+                                    ">{} {}\n{}\n",
                                     bytes_to_string(id).unwrap(),
                                     bytes_to_string(desc).unwrap(),
                                     bytes_to_string(seq).unwrap()
@@ -262,7 +262,7 @@ impl FileHandler {
                         ) {
                             file.write_all(
                                 format!(
-                                    "@{}{}\n{}\n+\n{}\n",
+                                    "@{} {}\n{}\n+\n{}\n",
                                     bytes_to_string(id).unwrap(),
                                     bytes_to_string(desc).unwrap(),
                                     bytes_to_string(seq).unwrap(),

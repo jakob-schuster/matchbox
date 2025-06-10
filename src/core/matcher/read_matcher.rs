@@ -46,46 +46,71 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                 let worlds =
                     self.ops
                         .iter()
-                        .fold(vec![(BindCtx::default(), loc_ctx)], |worlds, op| {
+                        .fold(vec![(BindCtx::default(), loc_ctx, 0)], |worlds, op| {
                             worlds
                                 .iter()
-                                .flat_map(|(bind_ctx, loc_ctx)| {
-                                    op.exec(arena, env, seq, loc_ctx, bind_ctx)
+                                .flat_map(|(bind_ctx, loc_ctx, edit_dist)| {
+                                    op.exec(arena, env, seq, loc_ctx, bind_ctx, *edit_dist)
                                 })
                                 .flatten()
                                 .collect::<Vec<_>>()
                         });
 
-                // then, make all the binds
-                let envs = worlds.iter().map(|(bind_ctx, loc_ctx)| {
-                    // make all the binds from bind_ctx one by one
-                    let vals = bind_ctx
-                        .map
-                        .iter()
-                        .sorted_by_key(|(id, _)| **id)
-                        .map(|(_, val)| Ok((*val).clone()))
-                        .chain(
-                            // then make the other sequence binds
-                            self.binds.iter().map(|ran| {
-                                let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                let sliced = rec.slice(pos_ran.start, pos_ran.end)?;
-
-                                Ok(sliced as Val<'a>)
-                            }),
-                        )
-                        .collect::<Result<Vec<_>, InternalError>>()
-                        .map_err(|e| EvalError::from_internal(e, Location::new(0, 0)));
-
-                    vals
-                });
-
                 // choose either the first world,
                 // or all the possible worlds
                 match self.mode {
-                    MatchMode::All => envs.collect::<Result<Vec<_>, _>>(),
+                    MatchMode::All => {
+                        // then, make all the binds
+                        let envs = worlds.iter().map(|(bind_ctx, loc_ctx, edit_dist)| {
+                            // make all the binds from bind_ctx one by one
+                            let vals = bind_ctx
+                                .map
+                                .iter()
+                                .sorted_by_key(|(id, _)| **id)
+                                .map(|(_, val)| Ok((*val).clone()))
+                                .chain(
+                                    // then make the other sequence binds
+                                    self.binds.iter().map(|ran| {
+                                        let pos_ran = ran.map(|loc| loc_ctx.get(loc));
+                                        let sliced = rec.slice(pos_ran.start, pos_ran.end)?;
+
+                                        Ok(sliced as Val<'a>)
+                                    }),
+                                )
+                                .collect::<Result<Vec<_>, InternalError>>()
+                                .map_err(|e| EvalError::from_internal(e, Location::new(0, 0)));
+
+                            vals
+                        });
+
+                        envs.collect()
+                    }
                     MatchMode::One => {
-                        if let Some(env) = envs.clone().next() {
-                            Ok(vec![env?])
+                        // then, make all the binds
+                        if let Some((bind_ctx, loc_ctx, _)) = worlds
+                            .iter()
+                            .sorted_by_key(|(_, _, edit_dist)| edit_dist)
+                            .next()
+                        {
+                            // make all the binds from bind_ctx one by one
+                            let vals = bind_ctx
+                                .map
+                                .iter()
+                                .sorted_by_key(|(id, _)| **id)
+                                .map(|(_, val)| Ok((*val).clone()))
+                                .chain(
+                                    // then make the other sequence binds
+                                    self.binds.iter().map(|ran| {
+                                        let pos_ran = ran.map(|loc| loc_ctx.get(loc));
+                                        let sliced = rec.slice(pos_ran.start, pos_ran.end)?;
+
+                                        Ok(sliced as Val<'a>)
+                                    }),
+                                )
+                                .collect::<Result<Vec<_>, InternalError>>()
+                                .map_err(|e| EvalError::from_internal(e, Location::new(0, 0)));
+
+                            vals.map(|v| vec![v])
                         } else {
                             Ok(vec![])
                         }
@@ -628,19 +653,20 @@ impl<'p> OpVal<'p> {
         seq: &'a [u8],
         loc_ctx: &LocCtx,
         bind_ctx: &BindCtx<'a>,
-    ) -> Result<Vec<(BindCtx<'a>, LocCtx)>, core::EvalError>
+        edit_dist: u8,
+    ) -> Result<Vec<(BindCtx<'a>, LocCtx, u8)>, core::EvalError>
     where
         'p: 'a,
     {
         match self {
             OpVal::Let { loc, tm } => {
-                let pos = tm.eval(&arena, env, loc_ctx)?;
+                let pos = tm.eval(arena, env, loc_ctx)?;
 
                 // return out if the range is inappropriate
                 if pos > seq.len() {
                     Ok(vec![])
                 } else {
-                    Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos))])
+                    Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos), edit_dist)])
                 }
             }
             OpVal::Restrict {
@@ -725,7 +751,7 @@ impl<'p> OpVal<'p> {
                     let final_accumulated_2 = accumulated
                         .into_iter()
                         .filter(|(_, _, dist)| *dist == best_dist)
-                        .map(|(a, b, _)| (a, b))
+                        .map(|(a, b, c)| (a, b, c + edit_dist))
                         .collect();
 
                     Ok(final_accumulated_2)

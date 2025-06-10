@@ -93,6 +93,7 @@ pub fn foreign<'a>(
         "fasta" => Ok(Arc::new(fasta)),
         "find_first" => Ok(Arc::new(find_first)),
         "find_last" => Ok(Arc::new(find_last)),
+        "lookup" => Ok(Arc::new(lookup)),
         "to_upper" => Ok(Arc::new(to_upper)),
         "to_lower" => Ok(Arc::new(to_lower)),
         "describe" => Ok(Arc::new(describe)),
@@ -1153,6 +1154,40 @@ pub fn find_last<'a>(
                 None => -1.0,
             },
         }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn lookup<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Str { s }, Val::Str { s: key }, Val::Str { s: kv_sep }, Val::Str { s: sep }] => {
+            let s1 = String::from_utf8((*s).to_vec()).unwrap();
+            let key =
+                String::from_utf8((*key).iter().chain(*kv_sep).cloned().collect_vec()).unwrap();
+            let sep = String::from_utf8((*sep).to_vec()).unwrap();
+
+            if let Some(start) = s1.find(&key) {
+                if let Some(end) = s1[start + key.len()..].find(&sep) {
+                    Ok(Val::Str {
+                        s: &s[start + key.len()..end - start + key.len()],
+                    })
+                } else {
+                    Ok(Val::Str {
+                        s: &s[start + key.len()..],
+                    })
+                }
+            } else {
+                Ok(Val::Str { s: &s[0..0] })
+            }
+        }
 
         _ => Err(EvalError::new(
             &location,

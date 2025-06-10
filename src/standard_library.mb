@@ -44,6 +44,7 @@ fasta = $(filename: Str): [{ seq: Str, id: Str, desc: Str }] => fasta
 
 find_first = $(s0: Str, s1: Str): Num => find_first
 find_last = $(s0: Str, s1: Str): Num => find_last
+lookup = $(s: Str, key: Str, kv_sep: Str = '=', sep: Str = ' '): Str => lookup
 
 to_upper = $(s: Str): Str => to_upper
 to_lower = $(s: Str): Str => to_lower

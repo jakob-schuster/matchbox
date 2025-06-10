@@ -38,10 +38,17 @@ impl ElabError {
         }
     }
 
-    pub fn new_non_existent_field_access(location: &Location, name: &str) -> ElabError {
+    pub fn new_non_existent_field_access<'a>(
+        location: &Location,
+        name: &str,
+        ty: &core::Val<'a>,
+    ) -> ElabError {
         ElabError {
             location: location.clone(),
-            message: format!("trying to access non-existent field '{}'", name),
+            message: format!(
+                "trying to access non-existent field '{}' from a record with fields {}",
+                name, ty,
+            ),
         }
     }
 
@@ -987,7 +994,7 @@ pub fn infer_tm<'a>(
         TmData::RecProj { tm: head_tm, name } => {
             let (head_tm, ty) = infer_tm(arena, ctx, head_tm)?;
 
-            match ty {
+            match &ty {
                 core::Val::RecTy { fields } => {
                     match fields.iter().find(|field| field.name.eq(name.as_bytes())) {
                         Some(field) => Ok((
@@ -1000,7 +1007,11 @@ pub fn infer_tm<'a>(
                             ),
                             field.data.clone(),
                         )),
-                        None => Err(ElabError::new_non_existent_field_access(&tm.location, name)),
+                        None => Err(ElabError::new_non_existent_field_access(
+                            &tm.location,
+                            name,
+                            &ty,
+                        )),
                     }
                 }
                 // todo: improve this message

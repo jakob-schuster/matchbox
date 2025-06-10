@@ -29,6 +29,8 @@ mod visit;
 
 use clap::Parser;
 
+use crate::surface::MatchMode;
+
 fn main() {
     // parse in the command line config
     let global_config = GlobalConfig::parse();
@@ -67,6 +69,10 @@ pub struct GlobalConfig {
     /// Directory to produce CSVs generated from `count!` and `average!` functions.
     #[arg(short, long)]
     output_csv_directory: Option<String>,
+
+    /// Whether to operate on all matches of a pattern within a read, or just the first one.
+    #[arg(short, long, default_value_t = MatchMode::All)]
+    match_mode: MatchMode,
 }
 
 impl GlobalConfig {
@@ -79,6 +85,7 @@ impl GlobalConfig {
             paired_with: None,
             args: "".to_string(),
             output_csv_directory: None,
+            match_mode: MatchMode::All,
         }
     }
 }

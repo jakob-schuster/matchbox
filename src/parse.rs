@@ -76,7 +76,7 @@ peg::parser! {
             / b:bool_val() { PatternData::BoolLit { b } }
             / n:num_val() { PatternData::NumLit { n } }
             / "{" _ fields:whitespace_sensitive_list(<rec_pattern_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { PatternData::RecLit { fields } }
-            / "[" _ regs:list(<region()>, <_()>) _ "]" _ binds:read_parameters() { PatternData::Read { regs, binds, error: global_config.error } }
+            / "[" _ regs:list(<region()>, <_()>) _ "]" _ binds:read_parameters() { PatternData::Read { regs, binds, error: global_config.error, mode: global_config.match_mode.clone() } }
 
         //
 

@@ -104,6 +104,12 @@ pub struct PatternBranchData {
     pub stmt: Stmt,
 }
 
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum MatchMode {
+    All,
+    One,
+}
+
 /// A pattern is a boolean test that, if successful,
 /// also produces a context of bound values.
 /// Could be a literal, or something more complex.
@@ -141,6 +147,7 @@ pub enum PatternData {
         regs: Vec<Region>,
         binds: Vec<ReadParameter>,
         error: f32,
+        mode: MatchMode,
     },
 }
 
@@ -695,6 +702,13 @@ fn infer_pattern_branch<'a>(
     ))
 }
 
+fn elab_match_mode(mode: &MatchMode) -> Result<core::matcher::read_matcher::MatchMode, ElabError> {
+    Ok(match mode {
+        MatchMode::All => core::matcher::read_matcher::MatchMode::All,
+        MatchMode::One => core::matcher::read_matcher::MatchMode::One,
+    })
+}
+
 fn infer_pattern<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -801,7 +815,12 @@ fn infer_pattern<'a>(
             Ok((matcher, core::Val::RecTy { fields: tys }, names))
         }
 
-        PatternData::Read { regs, binds, error } => {
+        PatternData::Read {
+            regs,
+            binds,
+            error,
+            mode,
+        } => {
             // typecheck all the binds;
             // end up with the name of each bind, the (list) value that it is SELECTING from,
             // and the type of it itself
@@ -831,6 +850,7 @@ fn infer_pattern<'a>(
                 regs,
                 params.clone(),
                 *error,
+                &elab_match_mode(mode)?,
             )?;
 
             let new_binds = params
@@ -1667,5 +1687,15 @@ impl<'a> Display for RegionData {
                 format!("|{:?}:{}|", tm, regs.iter().join(" ")).fmt(f)
             }
         }
+    }
+}
+
+impl Display for MatchMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MatchMode::All => "all",
+            MatchMode::One => "one",
+        }
+        .fmt(f)
     }
 }

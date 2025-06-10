@@ -12,6 +12,12 @@ use crate::{
 
 use super::Matcher;
 
+#[derive(Clone)]
+pub enum MatchMode {
+    All,
+    One,
+}
+
 pub struct ReadMatcher<'a> {
     /// The search operations to perform
     pub ops: Vec<OpVal<'a>>,
@@ -19,6 +25,8 @@ pub struct ReadMatcher<'a> {
     pub binds: Vec<Ran<usize>>,
     /// The location to label to the end
     pub end: usize,
+    /// Whether the matcher will return all possible matches, or just one
+    pub mode: MatchMode,
 }
 
 impl<'p> Matcher<'p> for ReadMatcher<'p> {
@@ -71,7 +79,18 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                     vals
                 });
 
-                envs.collect::<Result<Vec<_>, _>>()
+                // choose either the first world,
+                // or all the possible worlds
+                match self.mode {
+                    MatchMode::All => envs.collect::<Result<Vec<_>, _>>(),
+                    MatchMode::One => {
+                        if let Some(env) = envs.clone().next() {
+                            Ok(vec![env?])
+                        } else {
+                            Ok(vec![])
+                        }
+                    }
+                }
             } else {
                 panic!("gave non-read value {} to read matcher?!", val)
             }
@@ -211,6 +230,7 @@ pub fn infer_read_pattern<'a>(
     regs: &'a [Region],
     params: Vec<(String, core::Val<'a>, core::Val<'a>)>,
     error: f32,
+    mode: &MatchMode,
 ) -> Result<(ReadMatcher<'a>, Vec<String>), ElabError> {
     // first, separate all the regions out into
     // - a vec of hole/tm
@@ -389,6 +409,7 @@ pub fn infer_read_pattern<'a>(
             ops: final_ops,
             binds: named.iter().map(|(_, ran)| ran.clone()).collect::<Vec<_>>(),
             end: regs.len(),
+            mode: mode.clone(),
         },
         named.iter().map(|(name, _)| name.clone()).collect(),
     ))

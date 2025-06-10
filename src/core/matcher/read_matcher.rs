@@ -103,7 +103,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
 #[derive(Clone)]
 enum Reg<'p> {
     Hole,
-    Exp(Vec<String>, core::Tm<'p>),
+    Exp(Vec<String>, core::Tm<'p>, core::Tm<'p>),
 }
 
 fn flatten_regs<'a>(
@@ -143,7 +143,7 @@ fn flatten_regs<'a>(
                 arena,
                 ctx,
             ),
-            RegionData::Term { tm } => {
+            RegionData::Term { tm, error } => {
                 // get the ids used in the tm
                 let ids = visit::ids_tm(&tm)
                     .into_iter()
@@ -157,6 +157,8 @@ fn flatten_regs<'a>(
 
                 // check that the tm is a string
                 let ctm = check_tm(arena, &new_ctx, tm, &core::Val::StrTy)?;
+                // and that the error tm is a num
+                let error_ctm = check_tm(arena, &new_ctx, error, &core::Val::NumTy)?;
 
                 flatten_regs(
                     binds,
@@ -171,7 +173,7 @@ fn flatten_regs<'a>(
                             Reg::Exp(
                                 // collect only the ids present in both the
                                 // exp and the binds
-                                ids, ctm,
+                                ids, ctm, error_ctm,
                             ),
                             Ran::new(i, i + 1),
                         )])
@@ -229,7 +231,6 @@ pub fn infer_read_pattern<'a>(
     ctx: &Context<'a>,
     regs: &'a [Region],
     params: Vec<(String, core::Val<'a>, core::Val<'a>)>,
-    error: f32,
     mode: &MatchMode,
 ) -> Result<(ReadMatcher<'a>, Vec<String>), ElabError> {
     // first, separate all the regions out into
@@ -357,10 +358,10 @@ pub fn infer_read_pattern<'a>(
 
     let bindable_regs = regs.iter().flat_map(|(reg, ran)| match reg {
         Reg::Hole => None,
-        Reg::Exp(binds, exp) => Some((ran.clone(), (binds, exp.clone()))),
+        Reg::Exp(binds, exp, error) => Some((ran.clone(), (binds, exp.clone(), error.clone()))),
     });
 
-    for (ran, (binds, exp)) in bindable_regs {
+    for (ran, (binds, exp, error)) in bindable_regs {
         // first, do the whole checking-for-range-restrictions thing
         (known, ops) = check_all_fixed_lens(&ops, &mut known, &sized, arena);
 
@@ -375,6 +376,7 @@ pub fn infer_read_pattern<'a>(
             ran: search,
             fixed,
             save: vec![ran.clone()],
+            error,
         });
 
         known.push(ran.start);
@@ -400,7 +402,7 @@ pub fn infer_read_pattern<'a>(
 
     let final_ops = ops
         .iter()
-        .map(|op| op.eval(arena, ctx, param_vals.clone(), param_indices.clone(), error))
+        .map(|op| op.eval(arena, ctx, param_vals.clone(), param_indices.clone()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(ElabError::from_eval_error)?;
 
@@ -433,6 +435,8 @@ pub enum OpTm<'p> {
         fixed: Ran<bool>,
         // the locations to save
         save: Vec<Ran<usize>>,
+        // the error rate to apply
+        error: core::Tm<'p>,
     },
 }
 
@@ -443,7 +447,6 @@ impl<'p> OpTm<'p> {
         ctx: &Context<'a>,
         params: HashMap<String, Vec<Val<'a>>>,
         param_indices: HashMap<String, usize>,
-        error: f32,
     ) -> Result<OpVal<'a>, EvalError>
     where
         'p: 'a,
@@ -460,15 +463,18 @@ impl<'p> OpTm<'p> {
                 ran,
                 fixed,
                 save,
+                error,
             } => {
                 if ids.is_empty() {
                     // special case - just wrap up the one value
                     // (cache can be empty, because this is pre-caching)
                     let val = tm.eval(arena, &Env::default(), &Cache::default(), &ctx.tms)?;
+                    let error_val =
+                        error.eval(arena, &Env::default(), &Cache::default(), &ctx.tms)?;
 
-                    match &val {
-                        Val::Str { s } => Ok(OpVal::Restrict {
-                            ctxs: vec![(HashMap::default(), Seq::new(*s, error))],
+                    match (&val, &error_val) {
+                        (Val::Str { s }, Val::Num { n }) => Ok(OpVal::Restrict {
+                            ctxs: vec![(HashMap::default(), Seq::new(*s, *n))],
                             ran: ran.clone(),
                             fixed: fixed.clone(),
                             save: save.clone(),
@@ -521,9 +527,11 @@ impl<'p> OpTm<'p> {
                         // WARN cache can be empty because this is pre-caching.
                         let val =
                             tm.eval(arena, &Env::default(), &Cache::default(), &new_ctx.tms)?;
+                        let error_val =
+                            error.eval(arena, &Env::default(), &Cache::default(), &new_ctx.tms)?;
 
-                        match val {
-                            Val::Str { s } => Ok((
+                        match (val, error_val) {
+                            (Val::Str { s }, Val::Num { n }) => Ok((
                                 bind_ctx
                                     .into_iter()
                                     .map(|(name, val)| {
@@ -535,7 +543,7 @@ impl<'p> OpTm<'p> {
                                         )
                                     })
                                     .collect::<HashMap<_, _>>(),
-                                Seq::new(&s, error),
+                                Seq::new(&s, n),
                             )),
                             _ => panic!("term in read region wasn't a string?!"),
                         }
@@ -887,13 +895,15 @@ impl<'a> Display for OpTm<'a> {
                 ran,
                 fixed,
                 save,
+                error,
             } => format!(
-                "find ({}){} in {} fixed {} save {}",
+                "find ({}){} in {} fixed {} save {} with error {}",
                 ids.join(","),
                 tm,
                 ran,
                 fixed,
-                "a"
+                "a",
+                error
             )
             .fmt(f),
         }
@@ -914,7 +924,9 @@ impl<'a> Display for Reg<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Reg::Hole => "_".fmt(f),
-            Reg::Exp(items, located) => format!("({}){}", items.join(","), located).fmt(f),
+            Reg::Exp(items, located, error) => {
+                format!("({}){}<{}>", items.join(","), located, error).fmt(f)
+            }
         }
     }
 }

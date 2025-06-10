@@ -146,7 +146,6 @@ pub enum PatternData {
     Read {
         regs: Vec<Region>,
         binds: Vec<ReadParameter>,
-        error: f32,
         mode: MatchMode,
     },
 }
@@ -163,7 +162,7 @@ pub type Region = Located<RegionData>;
 #[derive(Debug, Clone)]
 pub enum RegionData {
     Hole,
-    Term { tm: Tm },
+    Term { tm: Tm, error: Tm },
 
     Named { name: String, regs: Vec<Region> },
     Sized { tm: Tm, regs: Vec<Region> },
@@ -815,12 +814,7 @@ fn infer_pattern<'a>(
             Ok((matcher, core::Val::RecTy { fields: tys }, names))
         }
 
-        PatternData::Read {
-            regs,
-            binds,
-            error,
-            mode,
-        } => {
+        PatternData::Read { regs, binds, mode } => {
             // typecheck all the binds;
             // end up with the name of each bind, the (list) value that it is SELECTING from,
             // and the type of it itself
@@ -846,10 +840,9 @@ fn infer_pattern<'a>(
 
             let (matcher, named) = core::matcher::read_matcher::infer_read_pattern(
                 arena,
-                &ctx,
+                ctx,
                 regs,
                 params.clone(),
-                *error,
                 &elab_match_mode(mode)?,
             )?;
 
@@ -1679,7 +1672,7 @@ impl<'a> Display for RegionData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RegionData::Hole => "_".fmt(f),
-            RegionData::Term { tm } => format!("{:?}", tm).fmt(f),
+            RegionData::Term { tm, error } => format!("{:?}<{:?}>", tm, error).fmt(f),
             RegionData::Named { name, regs } => {
                 format!("{}:({})", name, regs.iter().join(" ")).fmt(f)
             }

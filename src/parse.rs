@@ -76,7 +76,7 @@ peg::parser! {
             / b:bool_val() { PatternData::BoolLit { b } }
             / n:num_val() { PatternData::NumLit { n } }
             / "{" _ fields:whitespace_sensitive_list(<rec_pattern_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { PatternData::RecLit { fields } }
-            / "[" _ regs:list(<region()>, <_()>) _ "]" _ binds:read_parameters() { PatternData::Read { regs, binds, error: global_config.error, mode: global_config.match_mode.clone() } }
+            / "[" _ regs:list(<region()>, <_()>) _ "]" _ binds:read_parameters() { PatternData::Read { regs, binds, mode: global_config.match_mode.clone() } }
 
         //
 
@@ -98,7 +98,9 @@ peg::parser! {
             // sized hole sugar
             / "|" tm:tm() "|" {RegionData::Sized { tm: tm.clone(), regs: vec![Region::new(tm.location.clone(), RegionData::Hole)] } }
             // terms
-            / tm:tm() { RegionData::Term { tm } }
+            /  tm:tm() _ "~" _ error:tm() { RegionData::Term { tm, error } }
+            // terms
+            / tm:tm() { RegionData::Term { tm, error: Tm::new(Location::new(0,0), TmData::NumLit { n: Num::Float(global_config.error) }) } }
 
         rule read_parameters() -> Vec<ReadParameter>
             = "for" _ parameters:nonempty_list(<read_parameter()>, <",">) { parameters }

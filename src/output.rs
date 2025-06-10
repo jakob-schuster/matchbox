@@ -481,7 +481,7 @@ impl CountsHandler {
 
     fn print(&self) {
         if !self.eq(&Self::default()) {
-            for (key, val) in self.map.iter().sorted_by_key(|(_, val)| **val) {
+            for (key, val) in self.map.iter().sorted_by_key(|(key, _)| *key) {
                 println!("\t{val}\t{key}");
             }
         }
@@ -491,7 +491,7 @@ impl CountsHandler {
         let mut file = File::create(filename).unwrap();
         file.write_all(b"value,count\n");
 
-        for (name, value) in self.map.iter().sorted_by_key(|(_, val)| **val) {
+        for (name, value) in self.map.iter().sorted_by_key(|(key, _)| *key) {
             file.write_all(format!("{},{}\n", name, value).as_bytes());
         }
     }

@@ -61,7 +61,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                 match self.mode {
                     MatchMode::All => {
                         // then, make all the binds
-                        let envs = worlds.iter().map(|(bind_ctx, loc_ctx, edit_dist)| {
+                        let envs = worlds.iter().map(|(bind_ctx, loc_ctx, _)| {
                             // make all the binds from bind_ctx one by one
                             let vals = bind_ctx
                                 .map
@@ -89,7 +89,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                         // then, make all the binds
                         if let Some((bind_ctx, loc_ctx, _)) = worlds
                             .iter()
-                            .sorted_by_key(|(_, _, edit_dist)| edit_dist)
+                            .sorted_by_key(|(_, _, edit_dist)| *edit_dist)
                             .next()
                         {
                             // make all the binds from bind_ctx one by one

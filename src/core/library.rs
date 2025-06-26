@@ -1279,7 +1279,7 @@ pub fn describe<'a>(
                         VarMyers::new(seq)
                             .find_all_disjoint(
                                 read_seq,
-                                (error_rate * read_seq.len() as f32).round() as usize,
+                                (error_rate * seq.len() as f32).round() as usize,
                             )
                             .iter()
                             .map(|matches| (id, *matches))

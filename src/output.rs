@@ -148,6 +148,10 @@ impl<'a> BufferedStdoutHandler<'a> {
 
     pub fn finish(&mut self) {
         self.stdout.write_all(self.vec.join("\n").as_bytes());
+        // print one more newline following,
+        // so that the result of printing multiples of 1M values
+        // is consistent with the result of printing any other amount
+        self.stdout.write_all(b"\n");
         self.vec = vec![];
     }
 

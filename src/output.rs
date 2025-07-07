@@ -137,6 +137,9 @@ impl<'a> BufferedStdoutHandler<'a> {
 
         if self.vec.len() > self.buffer_size {
             self.stdout.write_all(self.vec.join("\n").as_bytes());
+            // print one more newline following,
+            // so that the next 1M will be concatenated correctly
+            self.stdout.write_all(b"\n");
             self.vec = vec![];
         }
 

@@ -1652,7 +1652,7 @@ pub fn to_qscores<'a>(
             let mut v = vec![];
             for c in *s {
                 // check that c is a valid Phred character
-                if *c < 33 || c - 33 > 40 {
+                if *c < 33 {
                     return Err(EvalError::new(
                         location,
                         &format!("couldn't interpret '{}' as a quality score; not in the Phred character set", *c as char),

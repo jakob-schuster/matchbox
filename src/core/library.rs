@@ -108,6 +108,12 @@ pub fn foreign<'a>(
         "out!" => Ok(Arc::new(out_eff)),
         "average!" => Ok(Arc::new(average_eff)),
 
+        "min" => Ok(Arc::new(min)),
+        "max" => Ok(Arc::new(max)),
+        "mean" => Ok(Arc::new(mean)),
+
+        "to_qscores" => Ok(Arc::new(to_qscores)),
+
         _ => Err(EvalError::new(location, "foreign function does not exist")),
     }
 }
@@ -1532,6 +1538,133 @@ pub fn slice_read<'a>(
             let a = todo!();
 
             todo!()
+        }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn min<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::List { v }] => {
+            let mut min = None;
+            for val in v {
+                match val {
+                    Val::Num { n } => match min {
+                        Some(m) => min = Some(f32::min(*n, m)),
+                        None => min = Some(*n),
+                    },
+                    _ => panic!("applying `min` on a non-Num val!?"),
+                }
+            }
+
+            match min {
+                Some(n) => Ok(Val::Num { n }),
+                None => Err(EvalError::new(location, "can't apply `min` to empty list")),
+            }
+        }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn max<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::List { v }] => {
+            let mut max = None;
+            for val in v {
+                match val {
+                    Val::Num { n } => match max {
+                        Some(m) => max = Some(f32::max(*n, m)),
+                        None => max = Some(*n),
+                    },
+                    _ => panic!("applying `max` on a non-Num val!?"),
+                }
+            }
+
+            match max {
+                Some(n) => Ok(Val::Num { n }),
+                None => Err(EvalError::new(location, "can't apply `max` to empty list")),
+            }
+        }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn mean<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::List { v }] => {
+            let mut total = None;
+            for val in v {
+                match val {
+                    Val::Num { n } => match total {
+                        Some(t) => total = Some(t + *n),
+                        None => total = Some(*n),
+                    },
+                    _ => panic!("applying `min` on a non-Num val!?"),
+                }
+            }
+
+            match total {
+                Some(t) => Ok(Val::Num {
+                    n: t / v.len() as f32,
+                }),
+                None => Err(EvalError::new(location, "can't apply `min` to empty list")),
+            }
+        }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn to_qscores<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Str { s }] => {
+            let mut v = vec![];
+            for c in *s {
+                // check that c is a valid Phred character
+                if *c < 33 || c - 33 > 40 {
+                    return Err(EvalError::new(
+                        location,
+                        "couldn't interpret '{}' as a quality score; not in the Phred character set",
+                    ));
+                }
+
+                let qscore = c - 33;
+
+                v.push(Val::Num { n: qscore as f32 });
+            }
+
+            Ok(Val::List { v })
         }
 
         _ => Err(EvalError::new(

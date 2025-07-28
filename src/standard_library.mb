@@ -61,3 +61,9 @@ stdout! = $(val: Any): Effect => stdout!
 count! = $(val: Any, name: Str = 'default'): Effect => count!
 out! = $(val: Any, filename: Str): Effect => out!
 average! = $(num: Num, name: Str = 'default'): Effect => average!
+
+min = $(l: [Num]): Num => min
+max = $(l: [Num]): Num => max
+mean = $(l: [Num]): Num => mean
+
+to_qscores = $(s: Str): [Num] => to_qscores

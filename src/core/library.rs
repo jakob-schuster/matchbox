@@ -1655,7 +1655,7 @@ pub fn to_qscores<'a>(
                 if *c < 33 || c - 33 > 40 {
                     return Err(EvalError::new(
                         location,
-                        "couldn't interpret '{}' as a quality score; not in the Phred character set",
+                        &format!("couldn't interpret '{}' as a quality score; not in the Phred character set", *c as char),
                     ));
                 }
 

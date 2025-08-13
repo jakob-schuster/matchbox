@@ -115,6 +115,7 @@ pub struct PatternBranchData {
 pub enum MatchMode {
     All,
     One,
+    Unique,
 }
 
 /// A pattern is a boolean test that, if successful,
@@ -712,6 +713,7 @@ fn elab_match_mode(mode: &MatchMode) -> Result<core::matcher::read_matcher::Matc
     Ok(match mode {
         MatchMode::All => core::matcher::read_matcher::MatchMode::All,
         MatchMode::One => core::matcher::read_matcher::MatchMode::One,
+        MatchMode::Unique => core::matcher::read_matcher::MatchMode::Unique,
     })
 }
 
@@ -1699,6 +1701,7 @@ impl Display for MatchMode {
         match self {
             MatchMode::All => "all",
             MatchMode::One => "one",
+            MatchMode::Unique => "unique",
         }
         .fmt(f)
     }

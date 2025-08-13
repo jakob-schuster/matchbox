@@ -16,6 +16,7 @@ use super::Matcher;
 pub enum MatchMode {
     All,
     One,
+    Unique,
 }
 
 pub struct ReadMatcher<'a> {
@@ -90,6 +91,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                         if let Some((bind_ctx, loc_ctx, _)) = worlds
                             .iter()
                             .sorted_by_key(|(_, _, edit_dist)| *edit_dist)
+                            // just pick an arbitrary first of the tied best worlds
                             .next()
                         {
                             // make all the binds from bind_ctx one by one
@@ -111,6 +113,48 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                                 .map_err(|e| EvalError::from_internal(e, Location::new(0, 0)));
 
                             vals.map(|v| vec![v])
+                        } else {
+                            Ok(vec![])
+                        }
+                    }
+                    MatchMode::Unique => {
+                        // then, make all the binds
+                        if let Some(best_dist) =
+                            worlds.iter().map(|(_, _, edit_dist)| *edit_dist).min()
+                        {
+                            let all_best = worlds
+                                .iter()
+                                .filter(|(_, _, edit_dist)| edit_dist.eq(&best_dist))
+                                .collect_vec();
+
+                            match &all_best[..] {
+                                // if there is exactly one best world
+                                [(bind_ctx, loc_ctx, _)] => {
+                                    // make all the binds from bind_ctx one by one
+                                    let vals = bind_ctx
+                                        .map
+                                        .iter()
+                                        .sorted_by_key(|(id, _)| **id)
+                                        .map(|(_, val)| Ok((*val).clone()))
+                                        .chain(
+                                            // then make the other sequence binds
+                                            self.binds.iter().map(|ran| {
+                                                let pos_ran = ran.map(|loc| loc_ctx.get(loc));
+                                                let sliced =
+                                                    rec.slice(pos_ran.start, pos_ran.end)?;
+
+                                                Ok(sliced as Val<'a>)
+                                            }),
+                                        )
+                                        .collect::<Result<Vec<_>, InternalError>>()
+                                        .map_err(|e| {
+                                            EvalError::from_internal(e, Location::new(0, 0))
+                                        });
+
+                                    vals.map(|v| vec![v])
+                                }
+                                _ => Ok(vec![]),
+                            }
                         } else {
                             Ok(vec![])
                         }

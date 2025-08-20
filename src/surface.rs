@@ -114,8 +114,8 @@ pub struct PatternBranchData {
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub enum MatchMode {
     All,
-    One,
-    Unique,
+    AllBest,
+    OneBest,
 }
 
 /// A pattern is a boolean test that, if successful,
@@ -712,8 +712,8 @@ fn infer_pattern_branch<'a>(
 fn elab_match_mode(mode: &MatchMode) -> Result<core::matcher::read_matcher::MatchMode, ElabError> {
     Ok(match mode {
         MatchMode::All => core::matcher::read_matcher::MatchMode::All,
-        MatchMode::One => core::matcher::read_matcher::MatchMode::One,
-        MatchMode::Unique => core::matcher::read_matcher::MatchMode::Unique,
+        MatchMode::AllBest => core::matcher::read_matcher::MatchMode::One,
+        MatchMode::OneBest => core::matcher::read_matcher::MatchMode::Unique,
     })
 }
 
@@ -1700,8 +1700,8 @@ impl Display for MatchMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MatchMode::All => "all",
-            MatchMode::One => "one",
-            MatchMode::Unique => "unique",
+            MatchMode::AllBest => "one",
+            MatchMode::OneBest => "unique",
         }
         .fmt(f)
     }

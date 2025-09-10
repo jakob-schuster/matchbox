@@ -1203,7 +1203,7 @@ impl<'a> Val<'a> {
     /// A clumsy function to move a value from one arena to another,
     /// necessitated by ConcreteRec, which has its values from a static arena and then needs to produce values in the dynamic arena.
     /// Probably shockingly inefficient and could be removed with better design.
-    fn coerce<'b>(&self) -> Val<'b>
+    pub fn coerce<'b>(&self) -> Val<'b>
     where
         'a: 'b,
     {

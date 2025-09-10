@@ -7,6 +7,8 @@ use std::{
     sync::Arc,
 };
 
+use bio::io::fasta::FastaRead;
+use clap::ValueEnum;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use rayon::iter::{
@@ -22,7 +24,8 @@ use crate::{
     },
     output::{OutputHandler, OutputHandlerSummary},
     ui::Interface,
-    util::{Arena, Cache, Env},
+    util::{Arena, Cache, CoreRecField, Env},
+    InputReads,
 };
 
 #[derive(Debug)]
@@ -30,6 +33,8 @@ pub enum InputError {
     FileNameError { filename: String },
     FileTypeError(FileTypeError),
     FileOpenError { filename: String },
+    NoInputError,
+    PairedFiletypes { r1: String, r2: String },
 }
 
 impl Display for InputError {
@@ -41,6 +46,10 @@ impl Display for InputError {
             InputError::FileTypeError(file_type_error) => file_type_error.fmt(f),
             InputError::FileOpenError { filename } => {
                 format!("could not open file '{}'", filename).fmt(f)
+            }
+            InputError::NoInputError => "no input provided".fmt(f),
+            InputError::PairedFiletypes { r1, r2 } => {
+                format!("couldn't pair reads of type '{}' with '{}'", r1, r2).fmt(f)
             }
         }
     }
@@ -66,6 +75,7 @@ impl Display for FileTypeError {
     }
 }
 
+#[derive(Clone, ValueEnum)]
 pub enum FileType {
     Fasta,
     Fastq,
@@ -75,6 +85,224 @@ pub enum FileType {
     List,
     CSV,
     TSV,
+}
+
+impl FileType {
+    pub fn to_val<'a>(&'a self) -> Val<'a> {
+        match self {
+            FileType::Fasta => Val::RecTy {
+                fields: vec![
+                    CoreRecField {
+                        name: b"seq",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"id",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"desc",
+                        data: Val::StrTy,
+                    },
+                ],
+            },
+            FileType::Fastq => Val::RecTy {
+                fields: vec![
+                    CoreRecField {
+                        name: b"seq",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"id",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"desc",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"qual",
+                        data: Val::StrTy,
+                    },
+                ],
+            },
+            FileType::Sam | FileType::Bam => Val::RecTy {
+                // in the order as described in the spec
+                fields: vec![
+                    // Query template name
+                    CoreRecField {
+                        name: b"qname",
+                        data: Val::StrTy,
+                    },
+                    CoreRecField {
+                        name: b"id",
+                        data: Val::StrTy,
+                    },
+                    // Bitwise flag
+                    CoreRecField {
+                        name: b"flag",
+                        data: Val::NumTy,
+                    },
+                    CoreRecField {
+                        name: b"flag_rec",
+                        data: Val::RecTy {
+                            fields: vec![
+                                CoreRecField {
+                                    name: b"paired",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"mapped_in_proper_pair",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"unmapped",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"mate_unmapped",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"reverse_strand",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"mate_reverse_strand",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"first_in_pair",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"second_in_pair",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"not_primary_alignment",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"fails_platform_quality_checks",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"pcr_or_optical_duplicate",
+                                    data: Val::BoolTy,
+                                },
+                                CoreRecField {
+                                    name: b"supplementary_alignment",
+                                    data: Val::BoolTy,
+                                },
+                            ],
+                        },
+                    },
+                    // Reference sequence name
+                    CoreRecField {
+                        name: b"rname",
+                        data: Val::StrTy,
+                    },
+                    // 1-based leftmost mapping position
+                    CoreRecField {
+                        name: b"pos",
+                        data: Val::NumTy,
+                    },
+                    // Mapping quality
+                    CoreRecField {
+                        name: b"mapq",
+                        data: Val::NumTy,
+                    },
+                    // The CIGAR string
+                    CoreRecField {
+                        name: b"cigar",
+                        data: Val::StrTy,
+                    },
+                    // Reference name of the mate / next read
+                    CoreRecField {
+                        name: b"rnext",
+                        data: Val::StrTy,
+                    },
+                    // Position of the mate / next read
+                    CoreRecField {
+                        name: b"pnext",
+                        data: Val::NumTy,
+                    },
+                    // Observed template length
+                    CoreRecField {
+                        name: b"tlen",
+                        data: Val::NumTy,
+                    },
+                    // The actual sequence of the alignment
+                    CoreRecField {
+                        name: b"seq",
+                        data: Val::StrTy,
+                    },
+                    // The quality string of the alignment
+                    CoreRecField {
+                        name: b"qual",
+                        data: Val::StrTy,
+                    },
+                    // The optional tags associated with the alignment
+                    CoreRecField {
+                        name: b"tags",
+                        data: Val::StrTy,
+                        // data: Val::ListTy {
+                        //     ty: Arc::new(Val::StrTy),
+                        // },
+                    },
+                    // The optional tags associated with the alignment
+                    CoreRecField {
+                        name: b"desc",
+                        data: Val::StrTy,
+                    },
+                ],
+            },
+
+            // let's let users process matchbox files line by line - why not?
+            FileType::Matchbox => Val::StrTy,
+            FileType::List => Val::StrTy,
+
+            // not sure what to do here yet
+            FileType::CSV => todo!(),
+            FileType::TSV => todo!(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum ComplexFileType {
+    FileType {
+        filetype: FileType,
+    },
+    Gz {
+        filetype: Arc<ComplexFileType>,
+    },
+    Paired {
+        r1: Arc<ComplexFileType>,
+        r2: Arc<ComplexFileType>,
+    },
+}
+
+impl ComplexFileType {
+    pub fn to_val<'a>(&'a self) -> Val<'a> {
+        match self {
+            ComplexFileType::FileType { filetype } => filetype.to_val(),
+            ComplexFileType::Gz { filetype } => filetype.to_val(),
+            ComplexFileType::Paired { r1, r2 } => Val::RecTy {
+                fields: vec![
+                    CoreRecField {
+                        name: b"r1",
+                        data: r1.to_val(),
+                    },
+                    CoreRecField {
+                        name: b"r2",
+                        data: r2.to_val(),
+                    },
+                ],
+            },
+        }
+    }
 }
 
 impl TryFrom<&str> for FileType {
@@ -161,6 +389,65 @@ pub fn get_filetype_and_buffer(
                 filename: input_file.to_string(),
             }),
         }
+    }
+}
+
+// pub fn get_complex_filetype_from_input_reads(
+//     input_reads: &InputReads,
+// ) -> Result<ComplexFileType, InputError> {
+//     if let Some(filetype) = input_reads.stdin_format {
+//         Ok(ComplexFileType::FileType { filetype })
+//     } else if let Some(input_reads_file) = input_reads.reads {
+//         if let Some(paired_filename) = input_reads_file.paired_with {
+
+//         }
+//     } else {
+//         panic!()
+//     }
+// }
+
+/// Checks the arguments, and either opens a file or reads from stdin.
+/// Also returns the filetype.
+pub fn get_complex_filetype_and_buffer_from_input_reads(
+    input_file: &InputReads,
+) -> Result<(ComplexFileType, Box<dyn BufRead>), InputError> {
+    if let Some(filetype) = &input_file.stdin_format {
+        Ok((
+            ComplexFileType::FileType {
+                filetype: filetype.clone(),
+            },
+            Box::new(BufReader::new(stdin())),
+        ))
+    } else if let Some(input_reads_file) = &input_file.reads {
+        let path = Path::new(&input_reads_file.reads);
+
+        let file = File::open(path).map_err(|_| InputError::FileOpenError {
+            filename: input_reads_file.reads.to_string(),
+        })?;
+
+        match &get_extensions(&input_reads_file.reads)[..] {
+            [.., ext, "gz"] => match FileType::try_from(*ext) {
+                Ok(filetype) => Ok((
+                    ComplexFileType::FileType { filetype },
+                    Box::new(BufReader::new(flate2::read::MultiGzDecoder::new(file))),
+                )),
+                Err(err) => Err(InputError::FileTypeError(err)),
+            },
+
+            [.., ext] => match FileType::try_from(*ext) {
+                Ok(filetype) => Ok((
+                    ComplexFileType::FileType { filetype },
+                    Box::new(BufReader::new(file)),
+                )),
+                Err(err) => Err(InputError::FileTypeError(err)),
+            },
+
+            _ => Err(InputError::FileNameError {
+                filename: input_reads_file.reads.to_string(),
+            }),
+        }
+    } else {
+        todo!()
     }
 }
 
@@ -268,6 +555,22 @@ pub struct ReaderWithBar {
 }
 
 impl ReaderWithBar {
+    pub fn wrap(reader: Box<dyn Reader>) {
+        let estimate = estimate_reads(filename, 1000000).unwrap();
+
+        // make the bar
+        let style = ProgressStyle::with_template(
+            "{prefix} {elapsed_precise} [{bar:40.red/yellow}] {percent}% {msg}",
+        )
+        .unwrap()
+        .progress_chars(" @=");
+        let bar = ProgressBar::new(estimate)
+            .with_style(style)
+            .with_prefix(String::from(filename));
+        bar.set_draw_target(ProgressDrawTarget::stderr());
+
+    }
+
     pub fn new(filename: &str, paired_filename_opt: Option<String>) -> ReaderWithBar {
         let estimate = estimate_reads(filename, 1000000).unwrap();
 
@@ -343,6 +646,94 @@ pub trait Reader {
     ) -> Result<(), EvalError>;
 
     fn count(&mut self) -> usize;
+
+    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a>;
+}
+
+struct ReadSource {
+    filetype: FileType,
+    buffer: Box<dyn BufRead>,
+}
+
+enum Input {
+    Single { source: ReadSource },
+    Paired { r1: ReadSource, r2: ReadSource },
+}
+
+pub fn open(input_reads: &InputReads) -> Result<Input, InputError> {
+    if let Some(filetype) = &input_reads.stdin_format {
+        // reads will be stdin
+        Ok(Input::Single {
+            source: ReadSource {
+                filetype: filetype.clone(),
+                buffer: Box::new(BufReader::new(stdin())),
+            },
+        })
+    } else if let Some(input_reads_file) = &input_reads.reads {
+        // reads are from a file; or maybe two files
+
+        // first, open the main read file
+        let (filetype, buffer) = get_filetype_and_buffer(&input_reads_file.reads)?;
+
+        if let Some(paired_filename) = &input_reads_file.paired_with {
+            // open this file too
+            let (paired_filetype, paired_buffer) = get_filetype_and_buffer(&paired_filename)?;
+
+            Ok(Input::Paired {
+                r1: ReadSource {
+                    filetype: filetype.clone(),
+                    buffer,
+                },
+                r2: ReadSource {
+                    filetype: paired_filetype.clone(),
+                    buffer: paired_buffer,
+                },
+            })
+        } else {
+            Ok(Input::Single {
+                source: ReadSource {
+                    filetype: filetype.clone(),
+                    buffer,
+                },
+            })
+        }
+    } else {
+        // no reads; debug mode!
+        Err(InputError::NoInputError)
+    }
+}
+
+pub fn reader_from_input_reads(input_reads: &InputReads) -> Result<Box<dyn Reader>, InputError> {
+    let input = open(input_reads)?;
+
+    match input {
+        Input::Single { source } => match source.filetype {
+            FileType::Fasta => Ok(Box::new(FastaReader::new(source.buffer))),
+            FileType::Fastq => Ok(Box::new(FastqReader {
+                buffer: source.buffer,
+            })),
+            FileType::Sam => Ok(Box::new(SamReader {
+                buffer: source.buffer,
+            })),
+            FileType::Bam => Ok(Box::new(BamReader {
+                buffer: source.buffer,
+            })),
+            FileType::Matchbox => todo!(),
+            FileType::List => todo!(),
+            FileType::CSV => Ok(Box::new(Csv)),
+            FileType::TSV => todo!(),
+        },
+        Input::Paired { r1, r2 } => match (&r1.filetype, &r2.filetype) {
+            (FileType::Fasta, FileType::Fasta) => todo!(),
+            (FileType::Fastq, FileType::Fastq) => todo!(),
+            (FileType::Sam, FileType::Sam) => todo!(),
+            (FileType::Bam, FileType::Bam) => todo!(),
+            _ => Err(InputError::PairedFiletypes {
+                r1: r1.filetype.to_string(),
+                r2: r2.filetype.to_string(),
+            }),
+        },
+    }
 }
 
 pub fn reader_from_filename(
@@ -382,7 +773,7 @@ pub fn reader_from_buffer_and_filetype(
             ),
         },
         None => match filetype {
-            FileType::Fasta => Box::new(FastaReader { buffer }),
+            FileType::Fasta => Box::new(FastaReader::new(buffer)),
             FileType::Fastq => Box::new(FastqReader { buffer }),
             FileType::Sam => Box::new(SamReader { buffer }),
             FileType::CSV => Box::new(CSVReader { buffer }),
@@ -394,6 +785,30 @@ pub fn reader_from_buffer_and_filetype(
 
 pub struct FastaReader {
     buffer: Box<dyn BufRead>,
+    ty: Val<'static>,
+}
+
+impl FastaReader {
+    fn new(buffer: Box<dyn BufRead>) -> FastaReader {
+        let ty = Val::RecTy {
+            fields: vec![
+                CoreRecField {
+                    name: b"seq",
+                    data: Val::StrTy,
+                },
+                CoreRecField {
+                    name: b"id",
+                    data: Val::StrTy,
+                },
+                CoreRecField {
+                    name: b"desc",
+                    data: Val::StrTy,
+                },
+            ],
+        };
+
+        FastaReader { buffer, ty }
+    }
 }
 
 impl Reader for FastaReader {
@@ -448,6 +863,10 @@ impl Reader for FastaReader {
         let input_records = bio::io::fasta::Reader::from_bufread(&mut self.buffer).records();
 
         input_records.count()
+    }
+
+    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
+        self.ty.coerce()
     }
 }
 
@@ -531,6 +950,7 @@ impl Reader for PairedFastaReader {
 
 pub struct FastqReader {
     buffer: Box<dyn BufRead>,
+    ty:
 }
 
 impl Reader for FastqReader {
@@ -846,6 +1266,31 @@ impl Reader for PairedSamReader {
         let input_records = reader.records();
 
         input_records.count()
+    }
+}
+
+pub struct BamReader {
+    buffer: Box<dyn BufRead>,
+}
+
+impl Reader for BamReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        progress: &mut dyn Progress,
+    ) -> Result<(), EvalError> {
+        todo!()
+    }
+
+    fn count(&mut self) -> usize {
+        todo!()
+    }
+
+    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
+        todo!()
     }
 }
 

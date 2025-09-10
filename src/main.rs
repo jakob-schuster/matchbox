@@ -27,9 +27,12 @@ mod ui;
 mod util;
 mod visit;
 
-use clap::Parser;
+use clap::{Args, Parser};
 
-use crate::surface::MatchMode;
+use crate::{
+    read::{open, reader_from_input_reads, BarProgress},
+    surface::MatchMode,
+};
 
 fn main() {
     // parse in the command line config
@@ -42,9 +45,11 @@ fn main() {
 /// The global configuration options, accessible as command line parameters.
 #[derive(Parser)]
 pub struct GlobalConfig {
-    /// Matchbox script to execute.
-    #[arg(short, long)]
-    script: String,
+    #[command(flatten)]
+    input_reads: InputReads,
+
+    #[command(flatten)]
+    input_code: InputCode,
 
     /// Default error rate permitted when searching for sequences. Given as a proportion of total search sequence length.
     #[arg(short, long, default_value_t = 0.0)]
@@ -54,37 +59,77 @@ pub struct GlobalConfig {
     #[arg(short, long, default_value_t = 1)]
     threads: usize,
 
-    /// Reads. Accepts FASTA/FASTQ/SAM files.
-    #[arg()]
-    reads: Option<String>,
-
-    /// Paired reads. Accepts FASTA/FASTQ/SAM files. File type must match primary read file.
-    #[arg(short, long)]
-    paired_with: Option<String>,
-
     /// Values passed into the matchbox script, via the built-in `args` variable.
     #[arg(short, long, default_value = "")]
     args: String,
 
-    /// Directory to produce CSVs generated from `count!` and `average!` functions.
-    #[arg(short, long)]
-    output_csv_directory: Option<String>,
+    /// Directory to produce CSVs generated from `count!` and `mean!` functions.
+    #[arg(short, long, default_value = ".")]
+    output_directory: String,
 
     /// Whether to operate on all matches of a pattern within a read, or just the first one.
     #[arg(short, long, default_value_t = MatchMode::All)]
     match_mode: MatchMode,
 }
 
+#[derive(Args)]
+#[group(required = true, multiple = false)]
+struct InputReads {
+    /// The format for parsing stdin. To be used when piping input into matchbox
+    #[arg(long, short = 'f')]
+    stdin_format: Option<FileType>,
+
+    /// A read file to process.
+    #[command(flatten)]
+    reads: Option<InputReadsFile>,
+
+    /// Compile the script and output debug information
+    #[arg(long)]
+    debug: bool,
+}
+
+#[derive(Args)]
+#[group(required = true)]
+struct InputReadsFile {
+    /// A read file to process.
+    #[arg(long, short = 'i')]
+    reads: String,
+
+    /// Paired reads. Accepts FASTA/FASTQ/SAM/BAM files. File type must match primary read file.
+    #[arg(short, long)]
+    paired_with: Option<String>,
+}
+
+#[derive(Args)]
+#[group(required = true, multiple = false)]
+struct InputCode {
+    /// A matchbox script to execute
+    #[arg(long, short = 's')]
+    script_file: Option<String>,
+
+    /// Some matchbox code to execute
+    #[arg(long, short = 'r')]
+    run: Option<String>,
+}
+
 impl GlobalConfig {
     pub fn default() -> GlobalConfig {
         GlobalConfig {
+            input_reads: InputReads {
+                stdin_format: Some(FileType::Fastq),
+                reads: None,
+                debug: false,
+            },
+            input_code: InputCode {
+                script_file: Some("".to_string()),
+                run: None,
+            },
+            output_directory: ".".to_string(),
+
             error: 0.0,
             threads: 1,
-            script: "".to_string(),
-            reads: None,
-            paired_with: None,
+
             args: "".to_string(),
-            output_csv_directory: None,
             match_mode: MatchMode::All,
         }
     }
@@ -94,10 +139,18 @@ impl GlobalConfig {
 /// load the matchbox script and run matchbox on input reads.
 /// Panic on evaluation errors or internal errors.
 fn run_script(global_config: &GlobalConfig) {
-    let code = read_code_from_script(&global_config.script)
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-        // should never unwrap, because program terminates
-        .unwrap();
+    let code = if let Some(code) = &global_config.input_code.run {
+        code.to_string()
+    } else if let Some(filename) = &global_config.input_code.script_file {
+        let code = read_code_from_script(&filename)
+            .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+            // should never unwrap, because program terminates
+            .unwrap();
+        code
+    } else {
+        // can't get here
+        panic!()
+    };
 
     run(&code, global_config)
 }
@@ -158,17 +211,15 @@ fn run(code: &str, global_config: &GlobalConfig) {
         // should never unwrap, because program terminates
         .unwrap();
 
+    // load in the input reads
+    let reader = reader_from_input_reads(&global_config.input_reads)
+        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        .unwrap();
+
     // elaborate to a core program
     let core_prog = elab_prog(
         &arena,
-        &ctx.bind_read_paired(
-            &arena,
-            global_config
-                .reads
-                .clone()
-                .unwrap_or("in.fasta".to_string()),
-            &global_config.paired_with,
-        ),
+        &ctx.bind_read_from_reader(&arena, &reader),
         arena.alloc(prog),
     )
     .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
@@ -177,18 +228,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
 
     // cache the values
     let (core_prog, cache) = core_prog
-        .cache(
-            &arena,
-            &ctx.bind_read_paired(
-                &arena,
-                global_config
-                    .reads
-                    .clone()
-                    .unwrap_or("in.fasta".to_string()),
-                &global_config.paired_with,
-            )
-            .tms,
-        )
+        .cache(&arena, &ctx.bind_read_from_reader(&arena, &reader).tms)
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();
@@ -203,15 +243,11 @@ fn run(code: &str, global_config: &GlobalConfig) {
     let env = ctx.tms;
 
     // process the reads
-    if let Some(reads_filename) = &global_config.reads {
-        ReaderWithBar::new(reads_filename, global_config.paired_with.clone())
-            .map(&core_prog, &env, &cache, &mut output_handler)
-            .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-            // should never unwrap
-            .unwrap()
-    } else {
-        panic!("can't handle stdin reads yet!")
-    }
+    reader
+        .map(&core_prog, &env, &cache, &mut output_handler)
+        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        // should never unwrap
+        .unwrap()
 }
 
 /// Given matchbox code as a string, and the global config,

@@ -6,12 +6,12 @@ use crate::{
     core::{
         self, library,
         matcher::read_matcher::{self, LocTm, OpTm},
-        EvalError,
+        EvalError, Val,
     },
     parse,
-    read::FileType,
+    read::{get_complex_filetype_and_buffer_from_input_reads, FileType, InputError, Reader},
     util::{bytes_to_string, Arena, Cache, CoreRecField, Env, Located, Location, Ran, RecField},
-    visit, GlobalConfig,
+    visit, GlobalConfig, InputReads,
 };
 
 /// An error that will be raised if there was a problem in the surface syntax,
@@ -367,6 +367,10 @@ impl<'a> Context<'a> {
         let val = self.tys.get_index(index);
 
         Some((index, val))
+    }
+
+    pub fn bind_read_from_reader(&self, arena: &'a Arena, reader: &Box<dyn Reader>) -> Context<'a> {
+        self.bind_param("read".to_string(), reader.get_ty(arena), arena)
     }
 
     /// Binds the read to a parameter in the context

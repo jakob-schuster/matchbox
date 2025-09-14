@@ -369,8 +369,8 @@ impl<'a> Context<'a> {
         Some((index, val))
     }
 
-    pub fn bind_read_from_reader(&self, arena: &'a Arena, reader: &Box<dyn Reader>) -> Context<'a> {
-        self.bind_param("read".to_string(), reader.get_ty(arena), arena)
+    pub fn bind_read_from_reader(&self, arena: &'a Arena, ty: Val<'a>) -> Context<'a> {
+        self.bind_param("read".to_string(), ty, arena)
     }
 
     /// Binds the read to a parameter in the context

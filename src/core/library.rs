@@ -1168,6 +1168,36 @@ pub fn find_last<'a>(
     }
 }
 
+pub fn find_matches<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Str { s: s1 }, Val::Str { s: s2 }, Val::Num { n }] => {
+            let myers = VarMyers::new(s2);
+            let edit_dist = (s2.len() as f32 * n).floor() as usize;
+
+            myers.find_all_disjoint(s1, edit_dist);
+
+            Ok(Val::Num {
+                n: match String::from_utf8((*s1).to_vec())
+                    .unwrap()
+                    .rfind(&String::from_utf8((*s2).to_vec()).unwrap())
+                {
+                    Some(i) => i as f32,
+                    None => -1.0,
+                },
+            })
+        }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
 pub fn lookup<'a>(
     arena: &'a Arena,
     location: &Location,

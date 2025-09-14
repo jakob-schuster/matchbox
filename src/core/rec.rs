@@ -460,6 +460,165 @@ impl<'p> Display for SamRead<'p> {
     }
 }
 
+pub struct BamRead<'a> {
+    pub read: &'a noodles::bam::Record,
+
+    pub cigar: &'a noodles::bam::record::Cigar<'a>,
+    pub seq: &'a noodles::bam::record::Sequence<'a>,
+    pub qual: &'a noodles::bam::record::QualityScores<'a>,
+    pub data: &'a noodles::bam::record::Data<'a>,
+}
+
+impl<'a> BamRead<'a> {
+    // pub fn new(read: &'a noodles::sam::Record) -> BamRead<'a> {
+    //     BamRead {
+    //         read,
+    //         cigar: read.cigar(),
+    //         seq: todo!(),
+    //         qual: todo!(),
+    //         data: todo!(),
+    //     }
+    // }
+}
+
+impl<'p> Rec<'p> for BamRead<'p> {
+    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
+    where
+        'p: 'a,
+    {
+        match key {
+            b"qname" | b"id" => Ok(Val::Str {
+                s: self.read.name().unwrap_or_default(),
+            }),
+
+            b"flag" => Ok(Val::Num {
+                n: self.read.flags.unwrap_or_default().bits() as f32,
+            }),
+
+            // b"flag_rec" => Ok(Val::Rec {
+            //     rec: Arc::new(SamFlags {
+            //         flags: self.read.flags().unwrap(),
+            //     }),
+            // }),
+            b"rname" => Ok(Val::Str {
+                s: self
+                    .read
+                    .reference_sequence_id()
+                    .map(|a| a.as_ref())
+                    .unwrap_or(b"*"),
+            }),
+
+            b"pos" => Ok(Val::Num {
+                n: self
+                    .read
+                    .alignment_start()
+                    .map(|r| r.map(|pos| pos.get() as f32))
+                    .unwrap_or(Ok(0.0))
+                    .unwrap(),
+            }),
+
+            b"mapq" => Ok(Val::Num {
+                n: self
+                    .read
+                    .mapping_quality()
+                    .map(|r| r.map(|mapq| mapq.get() as f32))
+                    .unwrap_or(Ok(-1.0))
+                    .unwrap(),
+            }),
+
+            b"cigar" => Ok(Val::Str {
+                s: match self.cigar.as_ref() {
+                    b"" => b"*",
+                    r => r,
+                },
+            }),
+
+            b"rnext" => Ok(Val::Str {
+                s: self
+                    .read
+                    .mate_reference_sequence_name()
+                    .map(|a| a.as_ref())
+                    .unwrap_or(b"*"),
+            }),
+
+            b"pnext" => Ok(Val::Num {
+                n: self
+                    .read
+                    .mate_alignment_start()
+                    .map(|r| r.map(|pos| pos.get() as f32))
+                    .unwrap_or(Ok(0.0))
+                    .unwrap(),
+            }),
+
+            b"tlen" => Ok(Val::Num {
+                n: self
+                    .read
+                    .template_length()
+                    .map(|tlen| tlen as f32)
+                    .unwrap_or(0.0),
+            }),
+
+            b"seq" => Ok(Val::Str {
+                s: match self.seq.as_ref() {
+                    b"" => b"*",
+                    r => r,
+                },
+            }),
+
+            b"qual" => Ok(Val::Str {
+                s: self.qual.as_ref(),
+            }),
+
+            // WARN need to do this
+            b"tags" | b"desc" => Ok(Val::Str {
+                s: self.data.as_ref(),
+            }),
+
+            _ => Err(InternalError {
+                message: String::from_utf8(key.to_vec()).expect("Couldn't convert vec to string!"),
+            }),
+        }
+    }
+
+    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
+    where
+        'p: 'a,
+    {
+        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+        let fields: Vec<Vec<u8>> = vec![
+            b"qname".to_vec(),
+            b"id".to_vec(),
+            b"flag".to_vec(), // b"flag_rec".to_vec(),
+            b"rname".to_vec(),
+            b"pos".to_vec(),
+            b"mapq".to_vec(),
+            b"cigar".to_vec(),
+            b"rnext".to_vec(),
+            b"pnext".to_vec(),
+            b"tlen".to_vec(),
+            b"seq".to_vec(),
+            b"qual".to_vec(),
+            b"tags".to_vec(),
+            b"desc".to_vec(),
+        ];
+
+        for field in &fields {
+            map.insert(field.clone(), self.get(field).expect("Couldn't get field!"));
+        }
+
+        map
+    }
+}
+
+impl<'p> Display for BamRead<'p> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // note: this seems highly wasteful
+        let map = self.all();
+        let s = FullyConcreteRec { map }.fmt(f);
+        s
+    }
+}
+
 pub struct SamFlags {
     pub flags: noodles::sam::alignment::record::Flags,
 }

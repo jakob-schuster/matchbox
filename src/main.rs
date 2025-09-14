@@ -11,7 +11,6 @@ use parse::{parse, ParseError};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use read::{
     get_extensions, get_filetype_and_buffer, FileType, FileTypeError, InputError, ReaderWithBar,
-    ReaderWithUI,
 };
 use surface::{elab_prog, elab_prog_for_ctx, Context, ElabError};
 use util::{Arena, Cache, Env, Location};
@@ -30,7 +29,7 @@ mod visit;
 use clap::{Args, Parser};
 
 use crate::{
-    read::{open, reader_from_input_reads, BarProgress},
+    read::{open, reader_from_input, BarProgress},
     surface::MatchMode,
 };
 
@@ -73,23 +72,26 @@ pub struct GlobalConfig {
 }
 
 #[derive(Args)]
-#[group(required = true, multiple = false)]
+#[group(required = true, multiple = true)]
 struct InputReads {
     /// The format for parsing stdin. To be used when piping input into matchbox
-    #[arg(long, short = 'f')]
+    #[arg(long, short = 'f', conflicts_with_all = vec!["reads", "debug"])]
     stdin_format: Option<FileType>,
 
     /// A read file to process.
-    #[command(flatten)]
-    reads: Option<InputReadsFile>,
+    #[arg(long, short = 'i')]
+    reads: Option<String>,
+
+    /// Paired reads. Accepts FASTA/FASTQ/SAM/BAM files. File type must match primary read file.
+    #[arg(short, long, requires = "reads")]
+    paired_with: Option<String>,
 
     /// Compile the script and output debug information
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = vec!["stdin_format", "reads"])]
     debug: bool,
 }
 
-#[derive(Args)]
-#[group(required = true)]
+#[derive(Args, Clone)]
 struct InputReadsFile {
     /// A read file to process.
     #[arg(long, short = 'i')]
@@ -112,6 +114,28 @@ struct InputCode {
     run: Option<String>,
 }
 
+impl InputCode {
+    fn name(&self) -> String {
+        if let Some(script_file) = &self.script_file {
+            script_file.to_string()
+        } else if let Some(run) = &self.run {
+            "command line code".to_string()
+        } else {
+            panic!("no script file or run code?!")
+        }
+    }
+
+    fn code(&self) -> Result<String, InputError> {
+        if let Some(script_file) = &self.script_file {
+            read_code_from_script(&script_file)
+        } else if let Some(run) = &self.run {
+            Ok(run.clone())
+        } else {
+            panic!("no script file or run code?!")
+        }
+    }
+}
+
 impl GlobalConfig {
     pub fn default() -> GlobalConfig {
         GlobalConfig {
@@ -119,6 +143,7 @@ impl GlobalConfig {
                 stdin_format: Some(FileType::Fastq),
                 reads: None,
                 debug: false,
+                paired_with: None,
             },
             input_code: InputCode {
                 script_file: Some("".to_string()),
@@ -212,14 +237,14 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .unwrap();
 
     // load in the input reads
-    let reader = reader_from_input_reads(&global_config.input_reads)
+    let mut reader_with_bar = ReaderWithBar::new(&global_config.input_reads)
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         .unwrap();
 
     // elaborate to a core program
     let core_prog = elab_prog(
         &arena,
-        &ctx.bind_read_from_reader(&arena, &reader),
+        &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena)),
         arena.alloc(prog),
     )
     .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
@@ -228,14 +253,18 @@ fn run(code: &str, global_config: &GlobalConfig) {
 
     // cache the values
     let (core_prog, cache) = core_prog
-        .cache(&arena, &ctx.bind_read_from_reader(&arena, &reader).tms)
+        .cache(
+            &arena,
+            &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena))
+                .tms,
+        )
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();
     // let cache = Cache::default();
 
     // create an output handler, to receive output effects
-    let mut output_handler = OutputHandler::new(global_config.output_csv_directory.clone())
+    let mut output_handler = OutputHandler::new(Some(global_config.output_directory.clone()))
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap
         .unwrap();
@@ -243,7 +272,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
     let env = ctx.tms;
 
     // process the reads
-    reader
+    reader_with_bar
         .map(&core_prog, &env, &cache, &mut output_handler)
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap
@@ -319,8 +348,8 @@ impl GenericError {
         let config = codespan_reporting::term::Config::default();
 
         let file = SimpleFile::new(
-            format!("<{}>", global_config.script),
-            read_code_from_script(&global_config.script).unwrap(),
+            format!("<{}>", global_config.input_code.name()),
+            global_config.input_code.code().unwrap(),
         );
 
         // attach a location if one exists

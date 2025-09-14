@@ -1046,6 +1046,23 @@ version = "0.83.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f156eba509c563e509897ff9b540389eb4744bc4dbe35e5e464c9ea298cb466"
 dependencies = [
+ "noodles-bam",
+ "noodles-sam",
+]
+
+[[package]]
+name = "noodles-bam"
+version = "0.68.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b41154a96c7c65e06ea09eb9784ecec00b04d05cfcd8f0e56add7810b2e7ad2"
+dependencies = [
+ "bstr",
+ "byteorder",
+ "bytes",
+ "indexmap",
+ "noodles-bgzf",
+ "noodles-core",
+ "noodles-csi",
  "noodles-sam",
 ]
 

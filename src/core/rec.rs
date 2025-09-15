@@ -462,6 +462,8 @@ impl<'p> Display for SamRead<'p> {
 
 pub struct BamRead<'a> {
     pub read: &'a noodles::bam::Record,
+    pub rname: &'a [u8],
+    pub mate_rname: &'a [u8],
 
     pub cigar: &'a noodles::bam::record::Cigar<'a>,
     pub seq: &'a noodles::bam::record::Sequence<'a>,
@@ -492,7 +494,7 @@ impl<'p> Rec<'p> for BamRead<'p> {
             }),
 
             b"flag" => Ok(Val::Num {
-                n: self.read.flags.unwrap_or_default().bits() as f32,
+                n: self.read.flags().bits() as f32,
             }),
 
             // b"flag_rec" => Ok(Val::Rec {
@@ -500,13 +502,7 @@ impl<'p> Rec<'p> for BamRead<'p> {
             //         flags: self.read.flags().unwrap(),
             //     }),
             // }),
-            b"rname" => Ok(Val::Str {
-                s: self
-                    .read
-                    .reference_sequence_id()
-                    .map(|a| a.as_ref())
-                    .unwrap_or(b"*"),
-            }),
+            b"rname" => Ok(Val::Str { s: self.rname }),
 
             b"pos" => Ok(Val::Num {
                 n: self
@@ -521,9 +517,8 @@ impl<'p> Rec<'p> for BamRead<'p> {
                 n: self
                     .read
                     .mapping_quality()
-                    .map(|r| r.map(|mapq| mapq.get() as f32))
-                    .unwrap_or(Ok(-1.0))
-                    .unwrap(),
+                    .map(|mapq| mapq.get() as f32)
+                    .unwrap_or(-1.0),
             }),
 
             b"cigar" => Ok(Val::Str {
@@ -533,13 +528,7 @@ impl<'p> Rec<'p> for BamRead<'p> {
                 },
             }),
 
-            b"rnext" => Ok(Val::Str {
-                s: self
-                    .read
-                    .mate_reference_sequence_name()
-                    .map(|a| a.as_ref())
-                    .unwrap_or(b"*"),
-            }),
+            b"rnext" => Ok(Val::Str { s: self.mate_rname }),
 
             b"pnext" => Ok(Val::Num {
                 n: self
@@ -551,11 +540,7 @@ impl<'p> Rec<'p> for BamRead<'p> {
             }),
 
             b"tlen" => Ok(Val::Num {
-                n: self
-                    .read
-                    .template_length()
-                    .map(|tlen| tlen as f32)
-                    .unwrap_or(0.0),
+                n: self.read.template_length() as f32,
             }),
 
             b"seq" => Ok(Val::Str {

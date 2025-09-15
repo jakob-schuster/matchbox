@@ -29,7 +29,7 @@ mod visit;
 use clap::{Args, Parser};
 
 use crate::{
-    read::{open, reader_from_input, BarProgress},
+    read::{open, reader_from_input, BarProgress, CLIFileType, ExecError},
     surface::MatchMode,
 };
 
@@ -76,7 +76,7 @@ pub struct GlobalConfig {
 struct InputReads {
     /// The format for parsing stdin. To be used when piping input into matchbox
     #[arg(long, short = 'f', conflicts_with_all = vec!["reads", "debug"])]
-    stdin_format: Option<FileType>,
+    stdin_format: Option<CLIFileType>,
 
     /// A read file to process.
     #[arg(long, short = 'i')]
@@ -140,7 +140,7 @@ impl GlobalConfig {
     pub fn default() -> GlobalConfig {
         GlobalConfig {
             input_reads: InputReads {
-                stdin_format: Some(FileType::Fastq),
+                stdin_format: Some(CLIFileType::Fastq),
                 reads: None,
                 debug: false,
                 paired_with: None,
@@ -362,6 +362,15 @@ impl GenericError {
 
         term::emit(&mut writer, &config, &file, &diagnostic);
         exit(1)
+    }
+}
+
+impl From<ExecError> for GenericError {
+    fn from(value: ExecError) -> Self {
+        match value {
+            ExecError::Eval(eval_error) => GenericError::from(eval_error),
+            ExecError::Input(input_error) => GenericError::from(input_error),
+        }
     }
 }
 

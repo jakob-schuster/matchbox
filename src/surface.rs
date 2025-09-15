@@ -9,7 +9,7 @@ use crate::{
         EvalError, Val,
     },
     parse,
-    read::{get_complex_filetype_and_buffer_from_input_reads, FileType, InputError, Reader},
+    read::{FileType, InputError, Reader},
     util::{bytes_to_string, Arena, Cache, CoreRecField, Env, Located, Location, Ran, RecField},
     visit, GlobalConfig, InputReads,
 };

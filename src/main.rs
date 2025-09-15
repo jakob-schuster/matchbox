@@ -264,7 +264,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
     // let cache = Cache::default();
 
     // create an output handler, to receive output effects
-    let mut output_handler = OutputHandler::new(Some(global_config.output_directory.clone()))
+    let mut output_handler = OutputHandler::new(global_config.output_directory.clone())
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap
         .unwrap();

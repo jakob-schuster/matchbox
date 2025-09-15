@@ -12,7 +12,7 @@ use crate::core::{Effect, InternalError, PortableVal};
 use crate::util::bytes_to_string;
 
 pub struct OutputHandler<'a> {
-    output_directory: Option<String>,
+    output_directory: String,
     stdout_handler: BufferedStdoutHandler<'a>,
     multi_counts_handler: MultiCountsHandler,
     multi_average_handler: MultiAverageHandler,
@@ -41,31 +41,29 @@ impl OutputError {
 }
 
 impl<'a> OutputHandler<'a> {
-    pub fn new(output_path: Option<String>) -> Result<OutputHandler<'a>, OutputError> {
-        if let Some(output_path) = output_path.clone() {
-            let path = Path::new(&output_path);
+    pub fn new(output_directory: String) -> Result<OutputHandler<'a>, OutputError> {
+        let path = Path::new(&output_directory);
 
-            if !path.exists() {
-                return Err(OutputError::new(&format!(
-                    "path '{}' doesn't exist!",
-                    output_path
-                )));
-            }
+        if !path.exists() {
+            return Err(OutputError::new(&format!(
+                "path '{}' doesn't exist!",
+                output_directory
+            )));
+        }
 
-            if !path.is_dir() {
-                return Err(OutputError::new(&format!(
-                    "path '{}' is not a directory!",
-                    output_path
-                )));
-            }
+        if !path.is_dir() {
+            return Err(OutputError::new(&format!(
+                "path '{}' is not a directory!",
+                output_directory
+            )));
         }
 
         Ok(OutputHandler {
-            output_directory: output_path,
+            output_directory: output_directory.clone(),
             stdout_handler: BufferedStdoutHandler::new(),
             multi_counts_handler: MultiCountsHandler::default(),
             multi_average_handler: MultiAverageHandler::default(),
-            file_handler: FileHandler::default(),
+            file_handler: FileHandler::new(output_directory.clone()),
         })
     }
 
@@ -196,9 +194,18 @@ enum FileType {
 struct FileHandler {
     files: HashMap<String, BufWriter<File>>,
     types: HashMap<String, FileType>,
+    dir: String,
 }
 
 impl FileHandler {
+    fn new(dir: String) -> FileHandler {
+        FileHandler {
+            files: HashMap::default(),
+            types: HashMap::default(),
+            dir,
+        }
+    }
+
     fn type_from_filename(filename: &str) -> FileType {
         match Path::new(filename).extension() {
             Some(s) => match s.as_bytes() {
@@ -358,10 +365,11 @@ impl FileHandler {
             }
         } else {
             // file needs to be created
-            if let Ok(file) = File::create(filename) {
+            // create the file in the subdirectory
+            if let Ok(file) = File::create(format!("{}/{}", self.dir, filename)) {
                 // now, write to it!
                 let t = Self::type_from_filename(filename);
-                // and add to the list
+                // and add to the list, just referring to it by name!
                 self.files
                     .insert(String::from(filename), BufWriter::new(file));
                 self.types.insert(String::from(filename), t);
@@ -369,7 +377,7 @@ impl FileHandler {
                 // then, handle it!
                 self.handle(filename, val)
             } else {
-                panic!("File {} couldn't be created!", filename)
+                panic!("File {}/{} couldn't be created!", self.dir, filename)
             }
         }
     }
@@ -422,10 +430,11 @@ impl MultiCountsHandler {
         }
     }
 
-    fn finish(&self, output_directory: &Option<String>) {
+    fn finish(&self, output_directory: &String) {
         self.print();
 
-        if let Some(output_directory) = output_directory {
+        // do not write out an empty count
+        if !self.map.is_empty() {
             self.print_csv(output_directory);
         }
     }
@@ -545,10 +554,11 @@ impl MultiAverageHandler {
         }
     }
 
-    fn finish(&self, output_directory: &Option<String>) {
+    fn finish(&self, output_directory: &str) {
         self.print();
 
-        if let Some(output_directory) = output_directory {
+        // don't print empty averages
+        if !self.map.is_empty() {
             self.print_csv(output_directory);
         }
     }

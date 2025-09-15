@@ -325,3 +325,8 @@ pub fn translate(seq: &[u8]) -> String {
 pub fn rev_comp(seq: &[u8]) -> Vec<u8> {
     bio::alphabets::dna::revcomp(seq)
 }
+
+/// Returns true if the bit i places from the right in n is active
+pub fn get_bit(n: u16, i: usize) -> bool {
+    (n >> i & 1) == 1
+}

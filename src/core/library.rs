@@ -5,7 +5,7 @@ use crate::{
     myers::VarMyers,
     read::{get_filetype_and_buffer, FileType},
     surface::Context,
-    util::{self, bytes_to_string, Arena, Cache, CoreRecField, Env, Location},
+    util::{self, bytes_to_string, get_bit, Arena, Cache, CoreRecField, Env, Location},
 };
 use std::{collections::HashMap, io::Read, path::Path, sync::Arc};
 
@@ -113,6 +113,19 @@ pub fn foreign<'a>(
         "mean" => Ok(Arc::new(mean)),
 
         "to_qscores" => Ok(Arc::new(to_qscores)),
+
+        "flag_paired" => Ok(Arc::new(flag_paired)),
+        "flag_mapped_in_proper_pair" => Ok(Arc::new(flag_mapped_in_proper_pair)),
+        "flag_unmapped" => Ok(Arc::new(flag_unmapped)),
+        "flag_mate_unmapped" => Ok(Arc::new(flag_mate_unmapped)),
+        "flag_reverse_strand" => Ok(Arc::new(flag_reverse_strand)),
+        "flag_mate_reverse_strand" => Ok(Arc::new(flag_mate_reverse_strand)),
+        "flag_first_in_pair" => Ok(Arc::new(flag_first_in_pair)),
+        "flag_second_in_pair" => Ok(Arc::new(flag_second_in_pair)),
+        "flag_not_primary_alignment" => Ok(Arc::new(flag_not_primary_alignment)),
+        "flag_fails_platform_quality_checks" => Ok(Arc::new(flag_fails_platform_quality_checks)),
+        "flag_pcr_or_optical_duplicate" => Ok(Arc::new(flag_pcr_or_optical_duplicate)),
+        "flag_supplementary_alignment" => Ok(Arc::new(flag_supplementary_alignment)),
 
         _ => Err(EvalError::new(location, "foreign function does not exist")),
     }
@@ -513,61 +526,6 @@ pub fn read_ty<'a>(
                         CoreRecField {
                             name: b"flag",
                             data: Val::NumTy,
-                        },
-                        CoreRecField {
-                            name: b"flag_rec",
-                            data: Val::RecTy {
-                                fields: vec![
-                                    CoreRecField {
-                                        name: b"paired",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"mapped_in_proper_pair",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"unmapped",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"mate_unmapped",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"reverse_strand",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"mate_reverse_strand",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"first_in_pair",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"second_in_pair",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"not_primary_alignment",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"fails_platform_quality_checks",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"pcr_or_optical_duplicate",
-                                        data: Val::BoolTy,
-                                    },
-                                    CoreRecField {
-                                        name: b"supplementary_alignment",
-                                        data: Val::BoolTy,
-                                    },
-                                ],
-                            },
                         },
                         // Reference sequence name
                         CoreRecField {
@@ -1696,6 +1654,210 @@ pub fn to_qscores<'a>(
 
             Ok(Val::List { v })
         }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_paired<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 0),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_mapped_in_proper_pair<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 1),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_unmapped<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 2),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_mate_unmapped<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 3),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_reverse_strand<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 4),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_mate_reverse_strand<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 5),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_first_in_pair<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 6),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_second_in_pair<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 7),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_not_primary_alignment<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 8),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_fails_platform_quality_checks<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 9),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_pcr_or_optical_duplicate<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 10),
+        }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn flag_supplementary_alignment<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Bool {
+            b: get_bit(n.round() as u16, 11),
+        }),
 
         _ => Err(EvalError::new(
             &location,

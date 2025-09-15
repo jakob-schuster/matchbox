@@ -67,3 +67,16 @@ max = $(l: [Num]): Num => max
 mean = $(l: [Num]): Num => mean
 
 to_qscores = $(s: Str): [Num] => to_qscores
+
+paired = $(flag: Num): Bool => flag_paired
+mapped_in_proper_pair = $(flag: Num): Bool => flag_mapped_in_proper_pair
+unmapped = $(flag: Num): Bool => flag_unmapped
+mate_unmapped = $(flag: Num): Bool => flag_mate_unmapped
+reverse_strand = $(flag: Num): Bool => flag_reverse_strand
+mate_reverse_strand = $(flag: Num): Bool => flag_mate_reverse_strand
+first_in_pair = $(flag: Num): Bool => flag_first_in_pair
+second_in_pair = $(flag: Num): Bool => flag_second_in_pair
+not_primary_alignment = $(flag: Num): Bool => flag_not_primary_alignment
+fails_platform_quality_checks = $(flag: Num): Bool => flag_fails_platform_quality_checks
+pcr_or_optical_duplicate = $(flag: Num): Bool => flag_pcr_or_optical_duplicate
+supplementary_alignment = $(flag: Num): Bool => flag_supplementary_alignment

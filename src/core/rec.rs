@@ -335,12 +335,6 @@ impl<'p> Rec<'p> for SamRead<'p> {
             b"flag" => Ok(Val::Num {
                 n: self.read.flags().unwrap_or_default().bits() as f32,
             }),
-
-            // b"flag_rec" => Ok(Val::Rec {
-            //     rec: Arc::new(SamFlags {
-            //         flags: self.read.flags().unwrap(),
-            //     }),
-            // }),
             b"rname" => Ok(Val::Str {
                 s: self
                     .read
@@ -429,7 +423,7 @@ impl<'p> Rec<'p> for SamRead<'p> {
         let fields: Vec<Vec<u8>> = vec![
             b"qname".to_vec(),
             b"id".to_vec(),
-            b"flag".to_vec(), // b"flag_rec".to_vec(),
+            b"flag".to_vec(),
             b"rname".to_vec(),
             b"pos".to_vec(),
             b"mapq".to_vec(),
@@ -497,11 +491,6 @@ impl<'p> Rec<'p> for BamRead<'p> {
                 n: self.read.flags().bits() as f32,
             }),
 
-            // b"flag_rec" => Ok(Val::Rec {
-            //     rec: Arc::new(SamFlags {
-            //         flags: self.read.flags().unwrap(),
-            //     }),
-            // }),
             b"rname" => Ok(Val::Str { s: self.rname }),
 
             b"pos" => Ok(Val::Num {
@@ -573,7 +562,7 @@ impl<'p> Rec<'p> for BamRead<'p> {
         let fields: Vec<Vec<u8>> = vec![
             b"qname".to_vec(),
             b"id".to_vec(),
-            b"flag".to_vec(), // b"flag_rec".to_vec(),
+            b"flag".to_vec(),
             b"rname".to_vec(),
             b"pos".to_vec(),
             b"mapq".to_vec(),
@@ -624,7 +613,7 @@ impl<'p> Rec<'p> for SamFlags {
         let fields: Vec<Vec<u8>> = vec![
             b"qname".to_vec(),
             b"id".to_vec(),
-            b"flag".to_vec(), // b"flag_rec".to_vec(),
+            b"flag".to_vec(),
             b"rname".to_vec(),
             b"pos".to_vec(),
             b"mapq".to_vec(),

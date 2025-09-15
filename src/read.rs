@@ -1090,61 +1090,6 @@ impl SamReader {
                     name: b"flag",
                     data: Val::NumTy,
                 },
-                CoreRecField {
-                    name: b"flag_rec",
-                    data: Val::RecTy {
-                        fields: vec![
-                            CoreRecField {
-                                name: b"paired",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"mapped_in_proper_pair",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"unmapped",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"mate_unmapped",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"reverse_strand",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"mate_reverse_strand",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"first_in_pair",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"second_in_pair",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"not_primary_alignment",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"fails_platform_quality_checks",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"pcr_or_optical_duplicate",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"supplementary_alignment",
-                                data: Val::BoolTy,
-                            },
-                        ],
-                    },
-                },
                 // Reference sequence name
                 CoreRecField {
                     name: b"rname",
@@ -1313,61 +1258,6 @@ impl PairedSamReader {
                                 name: b"flag",
                                 data: Val::NumTy,
                             },
-                            CoreRecField {
-                                name: b"flag_rec",
-                                data: Val::RecTy {
-                                    fields: vec![
-                                        CoreRecField {
-                                            name: b"paired",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mapped_in_proper_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"unmapped",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mate_unmapped",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"reverse_strand",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mate_reverse_strand",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"first_in_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"second_in_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"not_primary_alignment",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"fails_platform_quality_checks",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"pcr_or_optical_duplicate",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"supplementary_alignment",
-                                            data: Val::BoolTy,
-                                        },
-                                    ],
-                                },
-                            },
                             // Reference sequence name
                             CoreRecField {
                                 name: b"rname",
@@ -1447,61 +1337,6 @@ impl PairedSamReader {
                             CoreRecField {
                                 name: b"flag",
                                 data: Val::NumTy,
-                            },
-                            CoreRecField {
-                                name: b"flag_rec",
-                                data: Val::RecTy {
-                                    fields: vec![
-                                        CoreRecField {
-                                            name: b"paired",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mapped_in_proper_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"unmapped",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mate_unmapped",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"reverse_strand",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mate_reverse_strand",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"first_in_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"second_in_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"not_primary_alignment",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"fails_platform_quality_checks",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"pcr_or_optical_duplicate",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"supplementary_alignment",
-                                            data: Val::BoolTy,
-                                        },
-                                    ],
-                                },
                             },
                             // Reference sequence name
                             CoreRecField {
@@ -1706,61 +1541,6 @@ impl BamReader {
                     name: b"flag",
                     data: Val::NumTy,
                 },
-                CoreRecField {
-                    name: b"flag_rec",
-                    data: Val::RecTy {
-                        fields: vec![
-                            CoreRecField {
-                                name: b"paired",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"mapped_in_proper_pair",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"unmapped",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"mate_unmapped",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"reverse_strand",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"mate_reverse_strand",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"first_in_pair",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"second_in_pair",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"not_primary_alignment",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"fails_platform_quality_checks",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"pcr_or_optical_duplicate",
-                                data: Val::BoolTy,
-                            },
-                            CoreRecField {
-                                name: b"supplementary_alignment",
-                                data: Val::BoolTy,
-                            },
-                        ],
-                    },
-                },
                 // Reference sequence name
                 CoreRecField {
                     name: b"rname",
@@ -1961,61 +1741,6 @@ impl PairedBamReader {
                                 name: b"flag",
                                 data: Val::NumTy,
                             },
-                            CoreRecField {
-                                name: b"flag_rec",
-                                data: Val::RecTy {
-                                    fields: vec![
-                                        CoreRecField {
-                                            name: b"paired",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mapped_in_proper_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"unmapped",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mate_unmapped",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"reverse_strand",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mate_reverse_strand",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"first_in_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"second_in_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"not_primary_alignment",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"fails_platform_quality_checks",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"pcr_or_optical_duplicate",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"supplementary_alignment",
-                                            data: Val::BoolTy,
-                                        },
-                                    ],
-                                },
-                            },
                             // Reference sequence name
                             CoreRecField {
                                 name: b"rname",
@@ -2095,61 +1820,6 @@ impl PairedBamReader {
                             CoreRecField {
                                 name: b"flag",
                                 data: Val::NumTy,
-                            },
-                            CoreRecField {
-                                name: b"flag_rec",
-                                data: Val::RecTy {
-                                    fields: vec![
-                                        CoreRecField {
-                                            name: b"paired",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mapped_in_proper_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"unmapped",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mate_unmapped",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"reverse_strand",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"mate_reverse_strand",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"first_in_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"second_in_pair",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"not_primary_alignment",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"fails_platform_quality_checks",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"pcr_or_optical_duplicate",
-                                            data: Val::BoolTy,
-                                        },
-                                        CoreRecField {
-                                            name: b"supplementary_alignment",
-                                            data: Val::BoolTy,
-                                        },
-                                    ],
-                                },
                             },
                             // Reference sequence name
                             CoreRecField {

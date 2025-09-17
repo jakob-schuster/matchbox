@@ -1,15 +1,34 @@
+use itertools::Itertools;
+
 use std::{
     collections::{hash_set::Intersection, HashMap},
+    fmt::Display,
     fs::File,
     io::{stdout, BufWriter, Stdout, StdoutLock, Write},
     os::unix::ffi::OsStrExt,
     path::Path,
+    process::Output,
 };
 
-use itertools::Itertools;
+use crate::{
+    core::Val,
+    output::{
+        average::{MultiAverageHandler, MultiAverageHandlerSummary},
+        counts::{MultiCountsHandler, MultiCountsHandlerSummary},
+        file::{FileHandler, FileHandlerSummary},
+        stdout::{BufferedStdoutHandler, StdoutHandlerSummary},
+    },
+    util::bytes_to_string,
+};
+use crate::{
+    core::{Effect, InternalError, PortableVal},
+    input::AuxiliaryInputData,
+};
 
-use crate::core::{Effect, InternalError, PortableVal};
-use crate::util::bytes_to_string;
+mod average;
+mod counts;
+mod file;
+mod stdout;
 
 pub struct OutputHandler<'a> {
     output_directory: String,
@@ -27,21 +46,70 @@ pub struct OutputHandlerSummary {
     pub file_handler: FileHandlerSummary,
 }
 
-#[derive(Debug)]
-pub struct OutputError {
-    pub message: String,
+#[derive(Debug, Clone)]
+pub enum OutputError {
+    /// Error when creating file
+    Create {
+        filename: String,
+    },
+
+    /// Error with type of written value
+    Type {
+        val: PortableVal,
+    },
+    TypeCounts {
+        val: PortableVal,
+    },
+
+    /// Error when writing to file
+    Write,
+
+    /// Error when flushing
+    Flush,
+
+    Other {
+        message: String,
+    },
+
+    /// Trying to write to an unrecognized output type
+    UnrecognizedOutputType,
+
+    BadSAMTag,
 }
 
 impl OutputError {
     fn new(message: &str) -> OutputError {
-        OutputError {
+        OutputError::Other {
             message: message.to_string(),
         }
     }
 }
 
+impl Display for OutputError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OutputError::Create { filename } => format!("couldn't create file '{filename}'").fmt(f),
+            OutputError::Type { val } => format!("error sending value '{}' into file", val).fmt(f),
+            OutputError::TypeCounts { val } => {
+                format!("error sending value '{}' to output", val).fmt(f)
+            }
+            OutputError::Write => "error writing to file".fmt(f),
+            OutputError::Flush => "error writing to file".fmt(f),
+            OutputError::Other { message } => message.fmt(f),
+            OutputError::UnrecognizedOutputType => "unrecognized output type".fmt(f),
+            OutputError::BadSAMTag => {
+                "error writing SAM/BAM tag; make sure you are following the SAM specification"
+                    .fmt(f)
+            }
+        }
+    }
+}
+
 impl<'a> OutputHandler<'a> {
-    pub fn new(output_directory: String) -> Result<OutputHandler<'a>, OutputError> {
+    pub fn new(
+        output_directory: String,
+        aux_data: AuxiliaryInputData,
+    ) -> Result<OutputHandler<'a>, OutputError> {
         let path = Path::new(&output_directory);
 
         if !path.exists() {
@@ -63,11 +131,11 @@ impl<'a> OutputHandler<'a> {
             stdout_handler: BufferedStdoutHandler::new(),
             multi_counts_handler: MultiCountsHandler::default(),
             multi_average_handler: MultiAverageHandler::default(),
-            file_handler: FileHandler::new(output_directory.clone()),
+            file_handler: FileHandler::new(output_directory.clone(), aux_data),
         })
     }
 
-    pub fn handle(&mut self, eff: &Effect) -> Result<(), InternalError> {
+    pub fn handle(&mut self, eff: &Effect) -> Result<(), OutputError> {
         match &eff.handler {
             PortableVal::Rec { fields } => {
                 if let Some(PortableVal::Str { s: output }) = fields.get(&b"output".to_vec()) {
@@ -90,13 +158,13 @@ impl<'a> OutputHandler<'a> {
                                 .handle(&String::from_utf8(filename.clone()).unwrap(), &eff.val),
                             _ => todo!(),
                         },
-                        _ => Err(InternalError::new("unrecognised output type")),
+                        _ => Err(OutputError::UnrecognizedOutputType),
                     }
                 } else {
-                    Err(InternalError::new("unrecognised output type"))
+                    Err(OutputError::UnrecognizedOutputType)
                 }
             }
-            _ => Err(InternalError::new("unrecognised output type")),
+            _ => Err(OutputError::UnrecognizedOutputType),
         }
     }
 
@@ -114,539 +182,4 @@ impl<'a> OutputHandler<'a> {
             file_handler: self.file_handler.summarize(),
         }
     }
-}
-
-struct BufferedStdoutHandler<'a> {
-    stdout: BufWriter<StdoutLock<'a>>,
-    vec: Vec<String>,
-    buffer_size: usize,
-}
-impl<'a> BufferedStdoutHandler<'a> {
-    pub fn new() -> BufferedStdoutHandler<'a> {
-        BufferedStdoutHandler {
-            stdout: BufWriter::new(stdout().lock()),
-            vec: vec![],
-            buffer_size: 1000000,
-        }
-    }
-
-    pub fn handle(&mut self, val: &PortableVal) -> Result<(), InternalError> {
-        self.vec.push(val.to_string());
-
-        if self.vec.len() > self.buffer_size {
-            self.stdout.write_all(self.vec.join("\n").as_bytes());
-            // print one more newline following,
-            // so that the next 1M will be concatenated correctly
-            self.stdout.write_all(b"\n");
-            self.vec = vec![];
-        }
-
-        Ok(())
-    }
-
-    pub fn finish(&mut self) {
-        self.stdout.write_all(self.vec.join("\n").as_bytes());
-        // print one more newline following,
-        // so that the result of printing multiples of 1M values
-        // is consistent with the result of printing any other amount
-        self.stdout.write_all(b"\n");
-        self.vec = vec![];
-    }
-
-    fn summarize(&self) -> StdoutHandlerSummary {
-        StdoutHandlerSummary { lines: vec![] }
-    }
-}
-
-/// Naive stdout handler; simply prints to stdout with println!
-/// Included for benchmarking purposes
-struct StdoutHandler {}
-impl StdoutHandler {
-    pub fn new() -> StdoutHandler {
-        StdoutHandler {}
-    }
-
-    pub fn handle(&mut self, val: &PortableVal) {
-        println!("{}", val);
-    }
-
-    pub fn finish(&mut self) {}
-
-    fn summarize(&self) -> StdoutHandlerSummary {
-        StdoutHandlerSummary { lines: vec![] }
-    }
-}
-
-#[derive(Clone)]
-pub struct StdoutHandlerSummary {
-    lines: Vec<String>,
-}
-
-#[derive(Clone)]
-enum FileType {
-    Text,
-    Fasta,
-    Fastq,
-    Sam,
-}
-
-#[derive(Default)]
-struct FileHandler {
-    files: HashMap<String, BufWriter<File>>,
-    types: HashMap<String, FileType>,
-    dir: String,
-}
-
-impl FileHandler {
-    fn new(dir: String) -> FileHandler {
-        FileHandler {
-            files: HashMap::default(),
-            types: HashMap::default(),
-            dir,
-        }
-    }
-
-    fn type_from_filename(filename: &str) -> FileType {
-        match Path::new(filename).extension() {
-            Some(s) => match s.as_bytes() {
-                b"fq" | b"fastq" => FileType::Fastq,
-                b"fa" | b"fasta" => FileType::Fasta,
-                b"sam" => FileType::Sam,
-                _ => FileType::Text,
-            },
-            None => FileType::Text,
-        }
-    }
-
-    pub fn handle(&mut self, filename: &str, val: &PortableVal) -> Result<(), InternalError> {
-        if let (Some(file), Some(filetype)) =
-            (self.files.get_mut(filename), self.types.get(filename))
-        {
-            match filetype {
-                FileType::Text => {
-                    file.write_all(format!("{}\n", val).as_bytes())
-                        .expect("Couldn't write to file!");
-                    Ok(())
-                }
-                FileType::Fasta => match val {
-                    PortableVal::Rec { fields } => {
-                        if let (
-                            Some(PortableVal::Str { s: seq }),
-                            Some(PortableVal::Str { s: id }),
-                            Some(PortableVal::Str { s: desc }),
-                        ) = (
-                            fields.get(&b"seq".to_vec()),
-                            fields.get(&b"id".to_vec()),
-                            fields.get(&b"desc".to_vec()),
-                        ) {
-                            file.write_all(
-                                format!(
-                                    ">{} {}\n{}\n",
-                                    bytes_to_string(id).unwrap(),
-                                    bytes_to_string(desc).unwrap(),
-                                    bytes_to_string(seq).unwrap()
-                                )
-                                .as_bytes(),
-                            )
-                            .expect("Couldn't write to file!");
-
-                            Ok(())
-                        } else {
-                            Err(InternalError::new(
-                                "read didn't have correct fields to write to FASTA",
-                            ))
-                        }
-                    }
-                    _ => Err(InternalError::new(
-                        "trying to write to a FASTA file with a value that isn't a read",
-                    )),
-                },
-                FileType::Fastq => match val {
-                    PortableVal::Rec { fields } => {
-                        if let (
-                            Some(PortableVal::Str { s: seq }),
-                            Some(PortableVal::Str { s: id }),
-                            Some(PortableVal::Str { s: desc }),
-                            Some(PortableVal::Str { s: qual }),
-                        ) = (
-                            fields.get(&b"seq".to_vec()),
-                            fields.get(&b"id".to_vec()),
-                            fields.get(&b"desc".to_vec()),
-                            fields.get(&b"qual".to_vec()),
-                        ) {
-                            file.write_all(
-                                format!(
-                                    "@{} {}\n{}\n+\n{}\n",
-                                    bytes_to_string(id).unwrap(),
-                                    bytes_to_string(desc).unwrap(),
-                                    bytes_to_string(seq).unwrap(),
-                                    bytes_to_string(qual).unwrap()
-                                )
-                                .as_bytes(),
-                            )
-                            .expect("Couldn't write to file!");
-
-                            Ok(())
-                        } else {
-                            Err(InternalError::new(
-                                "read didn't have correct fields to write to FASTA",
-                            ))
-                        }
-                    }
-                    _ => Err(InternalError::new(
-                        "trying to write to a FASTA file with a value that isn't a read",
-                    )),
-                },
-
-                FileType::Sam => match val {
-                    PortableVal::Rec { fields } => {
-                        if let (
-                            Some(PortableVal::Str { s: qname }),
-                            Some(PortableVal::Num { n: flag }),
-                            Some(PortableVal::Str { s: rname }),
-                            Some(PortableVal::Num { n: pos }),
-                            Some(PortableVal::Num { n: mapq }),
-                            Some(PortableVal::Str { s: cigar }),
-                            Some(PortableVal::Str { s: rnext }),
-                            Some(PortableVal::Num { n: pnext }),
-                            Some(PortableVal::Num { n: tlen }),
-                            Some(PortableVal::Str { s: seq }),
-                            Some(PortableVal::Str { s: qual }),
-                            Some(PortableVal::Str { s: tags }),
-                        ) = (
-                            fields.get(&b"qname".to_vec()),
-                            fields.get(&b"flag".to_vec()),
-                            fields.get(&b"rname".to_vec()),
-                            fields.get(&b"pos".to_vec()),
-                            fields.get(&b"mapq".to_vec()),
-                            fields.get(&b"cigar".to_vec()),
-                            fields.get(&b"rnext".to_vec()),
-                            fields.get(&b"pnext".to_vec()),
-                            fields.get(&b"tlen".to_vec()),
-                            fields.get(&b"seq".to_vec()),
-                            fields.get(&b"qual".to_vec()),
-                            fields.get(&b"tags".to_vec()),
-                        ) {
-                            file.write_all(
-                                format!(
-                                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
-                                    bytes_to_string(qname).unwrap(),
-                                    flag,
-                                    bytes_to_string(rname).unwrap(),
-                                    pos,
-                                    mapq,
-                                    bytes_to_string(cigar).unwrap(),
-                                    bytes_to_string(rnext).unwrap(),
-                                    pnext,
-                                    tlen,
-                                    bytes_to_string(seq).unwrap(),
-                                    bytes_to_string(qual).unwrap(),
-                                    bytes_to_string(tags).unwrap(),
-                                    // data.iter()
-                                    //     .map(|v| v.to_string())
-                                    //     .collect::<Vec<_>>()
-                                    //     .join("\t"),
-                                )
-                                .as_bytes(),
-                            )
-                            .expect("Couldn't write to file!");
-
-                            Ok(())
-                        } else {
-                            Err(InternalError::new(
-                                "read didn't have correct fields to write to FASTA",
-                            ))
-                        }
-                    }
-                    _ => Err(InternalError::new(
-                        "trying to write to a SAM file with a value that isn't a read",
-                    )),
-                },
-            }
-        } else {
-            // file needs to be created
-            // create the file in the subdirectory
-            if let Ok(file) = File::create(format!("{}/{}", self.dir, filename)) {
-                // now, write to it!
-                let t = Self::type_from_filename(filename);
-                // and add to the list, just referring to it by name!
-                self.files
-                    .insert(String::from(filename), BufWriter::new(file));
-                self.types.insert(String::from(filename), t);
-
-                // then, handle it!
-                self.handle(filename, val)
-            } else {
-                panic!("File {}/{} couldn't be created!", self.dir, filename)
-            }
-        }
-    }
-
-    fn summarize(&self) -> FileHandlerSummary {
-        let mut files = vec![];
-
-        for (filename, _) in &self.files {
-            let filetype = self.types.get(filename).expect("file without type?!");
-
-            files.push((filename.clone(), filetype.clone(), "".to_string()));
-        }
-
-        FileHandlerSummary { files }
-    }
-}
-
-#[derive(Clone)]
-pub struct FileHandlerSummary {
-    files: Vec<(String, FileType, String)>,
-}
-
-#[derive(Default, PartialEq)]
-struct MultiCountsHandler {
-    map: HashMap<Vec<u8>, CountsHandler>,
-}
-
-impl MultiCountsHandler {
-    fn handle(&mut self, val: &PortableVal) -> Result<(), InternalError> {
-        match val {
-            PortableVal::Rec { fields } => {
-                if let (Some(PortableVal::Str { s: name }), Some(val)) = (
-                    fields.get(&(b"name".to_vec())),
-                    fields.get(&(b"val".to_vec())),
-                ) {
-                    if let Some(handler) = self.map.get_mut(name) {
-                        handler.handle(val)?;
-                    } else {
-                        let mut handler = CountsHandler::default();
-                        handler.handle(val)?;
-                        self.map.insert(name.clone(), handler);
-                    }
-
-                    Ok(())
-                } else {
-                    Err(InternalError::new("counts received invalid record?!"))
-                }
-            }
-            _ => Err(InternalError::new("counts received non-record type?!")),
-        }
-    }
-
-    fn finish(&self, output_directory: &String) {
-        self.print();
-
-        // do not write out an empty count
-        if !self.map.is_empty() {
-            self.print_csv(output_directory);
-        }
-    }
-
-    fn print(&self) {
-        for (name, handler) in self.map.iter().sorted_by_key(|(name, _)| *name) {
-            println!("{}", String::from_utf8(name.to_vec()).unwrap());
-            handler.print();
-        }
-    }
-
-    fn print_csv(&self, output_directory: &str) {
-        for (name, handler) in self.map.iter().sorted_by_key(|(name, _)| *name) {
-            handler.print_csv(&format!(
-                "{}/{}.csv",
-                output_directory,
-                bytes_to_string(name).unwrap()
-            ));
-        }
-    }
-
-    fn summarize(&self) -> MultiCountsHandlerSummary {
-        MultiCountsHandlerSummary {
-            all: self
-                .map
-                .iter()
-                .map(|(name, handler)| {
-                    (
-                        String::from_utf8(name.clone()).unwrap(),
-                        handler.summarize(),
-                    )
-                })
-                .collect(),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct MultiCountsHandlerSummary {
-    all: Vec<(String, CountsHandlerSummary)>,
-}
-
-#[derive(Default, PartialEq)]
-struct CountsHandler {
-    map: HashMap<String, i32>,
-}
-
-impl CountsHandler {
-    fn handle(&mut self, val: &PortableVal) -> Result<(), InternalError> {
-        let string = format!("{}", val);
-
-        if let Some(count) = self.map.get(&string) {
-            self.map.insert(string, count + 1);
-        } else {
-            self.map.insert(string, 1);
-        }
-
-        Ok(())
-    }
-
-    fn print(&self) {
-        if !self.eq(&Self::default()) {
-            for (key, val) in self.map.iter().sorted_by_key(|(key, _)| *key) {
-                println!("\t{val}\t{key}");
-            }
-        }
-    }
-
-    fn print_csv(&self, filename: &str) {
-        let mut file = File::create(filename).unwrap();
-        file.write_all(b"value,count\n");
-
-        for (name, value) in self.map.iter().sorted_by_key(|(key, _)| *key) {
-            file.write_all(format!("{},{}\n", name, value).as_bytes());
-        }
-    }
-
-    fn summarize(&self) -> CountsHandlerSummary {
-        CountsHandlerSummary {
-            top: self.map.clone().into_iter().collect::<Vec<_>>(),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct CountsHandlerSummary {
-    top: Vec<(String, i32)>,
-}
-
-#[derive(Default, PartialEq)]
-struct MultiAverageHandler {
-    map: HashMap<Vec<u8>, AverageHandler>,
-}
-
-impl MultiAverageHandler {
-    fn handle(&mut self, val: &PortableVal) -> Result<(), InternalError> {
-        match val {
-            PortableVal::Rec { fields } => {
-                if let (Some(PortableVal::Str { s: name }), Some(PortableVal::Num { n: val })) = (
-                    fields.get(&(b"name".to_vec())),
-                    fields.get(&(b"val".to_vec())),
-                ) {
-                    if let Some(handler) = self.map.get_mut(name) {
-                        handler.handle(*val)?;
-                    } else {
-                        let mut handler = AverageHandler::default();
-                        handler.handle(*val)?;
-                        self.map.insert(name.clone(), handler);
-                    }
-
-                    Ok(())
-                } else {
-                    Err(InternalError::new("counts received invalid record?!"))
-                }
-            }
-            _ => Err(InternalError::new("counts received non-record type?!")),
-        }
-    }
-
-    fn finish(&self, output_directory: &str) {
-        self.print();
-
-        // don't print empty averages
-        if !self.map.is_empty() {
-            self.print_csv(output_directory);
-        }
-    }
-
-    fn print(&self) {
-        for (name, handler) in self.map.iter().sorted_by_key(|(name, _)| *name) {
-            println!("{}", String::from_utf8(name.to_vec()).unwrap());
-            handler.print();
-        }
-    }
-
-    fn print_csv(&self, output_directory: &str) {
-        let mut file = File::create(format!("{}/stats.csv", output_directory)).unwrap();
-
-        file.write_all(b"name,mean,variance\n");
-
-        for (name, handler) in self.map.iter().sorted_by_key(|(name, _)| *name) {
-            file.write_all(
-                format!(
-                    "{},{},{}\n",
-                    bytes_to_string(name).unwrap(),
-                    handler.mean,
-                    handler.variance()
-                )
-                .as_bytes(),
-            );
-        }
-    }
-
-    fn summarize(&self) -> MultiAverageHandlerSummary {
-        MultiAverageHandlerSummary {
-            all: self
-                .map
-                .iter()
-                .map(|(name, handler)| {
-                    (
-                        String::from_utf8(name.clone()).unwrap(),
-                        handler.summarize(),
-                    )
-                })
-                .collect(),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct MultiAverageHandlerSummary {
-    all: Vec<(String, AverageHandlerSummary)>,
-}
-
-#[derive(Default, PartialEq)]
-struct AverageHandler {
-    count: i32,
-    mean: f32,
-    m2: f32,
-}
-
-impl AverageHandler {
-    fn handle(&mut self, num: f32) -> Result<(), InternalError> {
-        self.count += 1;
-        let delta = num - self.mean;
-        self.mean += delta / self.count as f32;
-        let delta2 = num - self.mean;
-        self.m2 += delta * delta2;
-
-        Ok(())
-    }
-
-    fn print(&self) {
-        if !self.eq(&Self::default()) {
-            println!("\t{:.2} ± {:.2}", self.mean, self.variance());
-        }
-    }
-
-    fn summarize(&self) -> AverageHandlerSummary {
-        AverageHandlerSummary {
-            mean: self.mean,
-            variance: self.variance(),
-        }
-    }
-
-    fn variance(&self) -> f32 {
-        (self.m2 / self.count as f32).sqrt()
-    }
-}
-
-#[derive(Clone)]
-pub struct AverageHandlerSummary {
-    pub mean: f32,
-    pub variance: f32,
 }

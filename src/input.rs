@@ -12,14 +12,14 @@ use itertools::Itertools;
 
 use crate::{
     core::{self, EvalError, Val},
-    output::{OutputHandler, OutputHandlerSummary},
-    read::{
+    input::{
         bam::{BamReader, PairedBamReader},
         dsv::DSVReader,
         fasta::{FastaReader, PairedFastaReader},
         fastq::{FastqReader, PairedFastqReader},
         sam::{PairedSamReader, SamReader},
     },
+    output::{OutputError, OutputHandler, OutputHandlerSummary},
     ui::Interface,
     util::{Arena, Cache, Env},
     InputReads,
@@ -35,6 +35,7 @@ mod sam;
 pub enum ExecError {
     Eval(EvalError),
     Input(InputError),
+    Output(OutputError),
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +53,11 @@ pub enum InputError {
 
     // A SAM/BAM read referenced a reference sequence that was not in the header
     ReferenceID,
+
+    // A SAM/BAM read had an error with a tag
+    BAMTag,
+    // A SAM/BAM read had an error with a tag
+    BAMArrayTag,
 }
 
 impl Display for InputError {
@@ -74,6 +80,8 @@ impl Display for InputError {
                 "a BAM read's rname ID was not present in the header; check for issues in header"
             }
             .fmt(f),
+            InputError::BAMTag => "error parsing BAM tag".fmt(f),
+            InputError::BAMArrayTag => "error parsing BAM array tag".fmt(f),
         }
     }
 }
@@ -389,6 +397,15 @@ impl ReaderWithBar {
     pub fn get_ty<'a>(&mut self, arena: &'a Arena) -> Val<'a> {
         self.reader.get_ty(arena)
     }
+
+    pub fn get_aux_data(&self) -> AuxiliaryInputData {
+        self.reader.get_aux_data()
+    }
+}
+
+pub enum AuxiliaryInputData {
+    None,
+    SAMHeader { header: noodles::sam::Header },
 }
 
 pub trait Reader {
@@ -404,6 +421,10 @@ pub trait Reader {
     fn count(&mut self) -> usize;
 
     fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a>;
+
+    fn get_aux_data(&self) -> AuxiliaryInputData {
+        AuxiliaryInputData::None
+    }
 }
 
 struct ReadSource {
@@ -435,16 +456,16 @@ fn estimate(input_reads: &InputReads, buffer_len: u64) -> Result<Option<u64>, In
         let filename = input_reads_file.clone();
 
         // first, open the main read file
-        let (filetype, buffer) = get_filetype_and_buffer(&filename)?;
+        let (filetype, _) = get_filetype_and_buffer(&filename)?;
 
-        let f = File::open(&filename).map_err(|e| InputError::FileOpenError {
+        let f = File::open(&filename).map_err(|_| InputError::FileOpenError {
             filename: filename.to_string(),
         })?;
 
         // get the length of the file in bytes
         let file_len = f
             .metadata()
-            .map_err(|e| InputError::FileOpenError {
+            .map_err(|_| InputError::FileOpenError {
                 filename: filename.to_string(),
             })?
             .len();
@@ -525,8 +546,8 @@ pub fn reader_from_input(input: Input) -> Result<Box<dyn Reader>, InputError> {
         Input::Single { source } => match source.filetype {
             FileType::Fasta => Ok(Box::new(FastaReader::new(source.buffer))),
             FileType::Fastq => Ok(Box::new(FastqReader::new(source.buffer))),
-            FileType::Sam => Ok(Box::new(SamReader::new(source.buffer))),
-            FileType::Bam => Ok(Box::new(BamReader::new(source.buffer))),
+            FileType::Sam => Ok(Box::new(SamReader::new(source.buffer)?)),
+            FileType::Bam => Ok(Box::new(BamReader::new(source.buffer)?)),
             FileType::Matchbox => todo!(),
             FileType::List => todo!(),
             FileType::CSV => Ok(Box::new(DSVReader::new(source.buffer, b','))),
@@ -540,10 +561,10 @@ pub fn reader_from_input(input: Input) -> Result<Box<dyn Reader>, InputError> {
                 Ok(Box::new(PairedFastqReader::new(r1.buffer, r2.buffer)))
             }
             (FileType::Sam, FileType::Sam) => {
-                Ok(Box::new(PairedSamReader::new(r1.buffer, r2.buffer)))
+                Ok(Box::new(PairedSamReader::new(r1.buffer, r2.buffer)?))
             }
             (FileType::Bam, FileType::Bam) => {
-                Ok(Box::new(PairedBamReader::new(r1.buffer, r2.buffer)))
+                Ok(Box::new(PairedBamReader::new(r1.buffer, r2.buffer)?))
             }
             _ => Err(InputError::PairedFiletypes {
                 r1: r1.filetype.to_string(),

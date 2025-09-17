@@ -9,7 +9,7 @@ use codespan_reporting::{
 use output::{OutputError, OutputHandler};
 use parse::{parse, ParseError};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use read::{
+use input::{
     get_extensions, get_filetype_and_buffer, FileType, FileTypeError, InputError, ReaderWithBar,
 };
 use surface::{elab_prog, elab_prog_for_ctx, Context, ElabError};
@@ -19,7 +19,7 @@ mod core;
 mod myers;
 mod output;
 mod parse;
-mod read;
+mod input;
 mod surface;
 mod test;
 mod ui;
@@ -29,7 +29,7 @@ mod visit;
 use clap::{Args, Parser};
 
 use crate::{
-    read::{open, reader_from_input, BarProgress, CLIFileType, ExecError},
+    input::{open, reader_from_input, BarProgress, CLIFileType, ExecError},
     surface::MatchMode,
 };
 
@@ -264,10 +264,13 @@ fn run(code: &str, global_config: &GlobalConfig) {
     // let cache = Cache::default();
 
     // create an output handler, to receive output effects
-    let mut output_handler = OutputHandler::new(global_config.output_directory.clone())
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-        // should never unwrap
-        .unwrap();
+    let mut output_handler = OutputHandler::new(
+        global_config.output_directory.clone(),
+        reader_with_bar.get_aux_data(),
+    )
+    .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+    // should never unwrap
+    .unwrap();
     // create the standard library
     let env = ctx.tms;
 
@@ -370,6 +373,7 @@ impl From<ExecError> for GenericError {
         match value {
             ExecError::Eval(eval_error) => GenericError::from(eval_error),
             ExecError::Input(input_error) => GenericError::from(input_error),
+            ExecError::Output(output_error) => GenericError::from(output_error),
         }
     }
 }
@@ -414,7 +418,7 @@ impl From<OutputError> for GenericError {
     fn from(value: OutputError) -> Self {
         GenericError {
             location: None,
-            message: value.message,
+            message: value.to_string(),
         }
     }
 }

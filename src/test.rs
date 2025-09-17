@@ -62,7 +62,7 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
 
     use crate::{
         core::{library::standard_library, rec::FullyConcreteRec},
-        read::FileType,
+        input::FileType,
         read_code_from_script,
         surface::elab_prog_for_ctx,
         GenericError,
@@ -136,7 +136,7 @@ fn eval_one_fastq_read_test(code: &str, seq: &[u8], qual: &[u8]) -> Result<Strin
 
     use crate::{
         core::{library::standard_library, rec::FullyConcreteRec},
-        read::FileType,
+        input::FileType,
         read_code_from_script,
         surface::elab_prog_for_ctx,
         GenericError,

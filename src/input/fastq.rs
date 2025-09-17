@@ -10,7 +10,7 @@ use crate::{
         Effect, Val,
     },
     output::OutputHandler,
-    read::{ExecError, InputError, Progress, ProgressSummary, Reader},
+    input::{ExecError, InputError, Progress, ProgressSummary, Reader},
     util::{Arena, Cache, CoreRecField, Env},
 };
 
@@ -80,7 +80,7 @@ impl Reader for FastqReader {
 
                 for result_effects in &vec {
                     for effect in result_effects.as_ref().map_err(|e| e.clone())? {
-                        output_handler.handle(effect).unwrap();
+                        output_handler.handle(effect).map_err(ExecError::Output)?;
                     }
                 }
 
@@ -224,7 +224,7 @@ impl Reader for PairedFastqReader {
 
                 for result_effects in &vec {
                     for effect in result_effects.as_ref().map_err(|e| e.clone())? {
-                        output_handler.handle(effect).unwrap();
+                        output_handler.handle(effect).map_err(ExecError::Output)?;
                     }
                 }
 

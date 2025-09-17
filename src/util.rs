@@ -201,8 +201,12 @@ impl<A> Default for Env<A> {
 }
 
 pub fn bytes_to_string(bytes: &[u8]) -> Result<String, InternalError> {
-    String::from_utf8(bytes.to_vec())
-        .map_err(|_| InternalError::new("couldn't convert bytes to string!?"))
+    String::from_utf8(bytes.to_vec()).map_err(|_| {
+        InternalError::new(&format!(
+            "couldn't convert bytes to string!? {:?}",
+            bytes.to_vec()
+        ))
+    })
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]

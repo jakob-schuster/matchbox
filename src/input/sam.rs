@@ -10,17 +10,20 @@ use crate::{
         Effect, Val,
     },
     output::OutputHandler,
-    read::{ExecError, InputError, Progress, ProgressSummary, Reader},
+    input::{AuxiliaryInputData, ExecError, Input, InputError, Progress, ProgressSummary, Reader},
     util::{Arena, Cache, CoreRecField, Env},
 };
-
-pub struct BamReader {
-    buffer: Box<dyn BufRead>,
+pub struct SamReader {
+    reader: noodles::sam::io::Reader<Box<dyn BufRead>>,
+    header: noodles::sam::Header,
     ty: Val<'static>,
 }
 
-impl BamReader {
-    pub fn new(buffer: Box<dyn BufRead>) -> BamReader {
+impl SamReader {
+    pub fn new(buffer: Box<dyn BufRead>) -> Result<SamReader, InputError> {
+        let mut reader = noodles::sam::io::Reader::new(buffer);
+        let header = reader.read_header().map_err(|e| InputError::Header)?;
+
         let ty = Val::RecTy {
             // in the order as described in the spec
             fields: vec![
@@ -99,11 +102,11 @@ impl BamReader {
             ],
         };
 
-        BamReader { buffer, ty }
+        Ok(SamReader { ty, reader, header })
     }
 }
 
-impl Reader for BamReader {
+impl Reader for SamReader {
     fn map<'p>(
         &mut self,
         prog: &core::Prog<'p>,
@@ -112,18 +115,7 @@ impl Reader for BamReader {
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
-        let mut reader = noodles::bam::io::Reader::new(&mut self.buffer);
-        let header = reader
-            .read_header()
-            .map_err(|e| ExecError::Input(InputError::Header))?;
-
-        let reference_sequences = header
-            .reference_sequences()
-            .keys()
-            .map(|rname| rname.to_vec())
-            .collect_vec();
-
-        let input_records = reader.records();
+        let input_records = self.reader.records();
         let final_progress = input_records
             .into_iter()
             .chunks(10000)
@@ -141,39 +133,16 @@ impl Reader for BamReader {
                             let qual = read.quality_scores();
                             let data = read.data();
 
-                            let rname = match read.reference_sequence_id() {
-                                Some(id) => match reference_sequences
-                                    .get(id.map_err(|e| ExecError::Input(InputError::Read))?)
-                                {
-                                    Some(name) => name,
-                                    None => return Err(ExecError::Input(InputError::ReferenceID)),
-                                },
-                                // if there is no reference sequence ID, use the default '*'
-                                None => &vec![b'*'],
-                            };
-
-                            let mate_rname = match read.mate_reference_sequence_id() {
-                                Some(id) => match reference_sequences
-                                    .get(id.map_err(|e| ExecError::Input(InputError::Read))?)
-                                {
-                                    Some(name) => name,
-                                    None => return Err(ExecError::Input(InputError::ReferenceID)),
-                                },
-                                // if there is no reference sequence ID, use the default '*'
-                                None => &vec![b'*'],
-                            };
-
                             let val = core::Val::Rec {
-                                rec: Arc::new(rec::BamRead {
+                                rec: Arc::new(rec::SamRead {
                                     read: &read,
-                                    rname,
-                                    mate_rname,
                                     cigar: &cigar,
                                     seq: &seq,
                                     qual: &qual,
                                     data: &data,
                                 }),
                             };
+
                             prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
                         }
                         Err(_) => Err(ExecError::Input(InputError::Read)),
@@ -182,7 +151,7 @@ impl Reader for BamReader {
 
                 for result_effects in &vec {
                     for effect in result_effects.as_ref().map_err(|e| e.clone())? {
-                        output_handler.handle(effect).unwrap();
+                        output_handler.handle(effect).map_err(ExecError::Output)?;
                     }
                 }
 
@@ -197,9 +166,7 @@ impl Reader for BamReader {
     }
 
     fn count(&mut self) -> usize {
-        let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
-        let header = reader.read_header();
-        let input_records = reader.records();
+        let input_records = self.reader.records();
 
         input_records.count()
     }
@@ -207,16 +174,35 @@ impl Reader for BamReader {
     fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
         self.ty.coerce()
     }
+
+    fn get_aux_data(&self) -> super::AuxiliaryInputData {
+        AuxiliaryInputData::SAMHeader {
+            header: self.header.clone(),
+        }
+    }
 }
 
-pub struct PairedBamReader {
-    buffer: Box<dyn BufRead>,
-    paired_buffer: Box<dyn BufRead>,
+pub struct PairedSamReader {
+    reader: noodles::sam::io::Reader<Box<dyn BufRead>>,
+    header: noodles::sam::Header,
+
+    paired_reader: noodles::sam::io::Reader<Box<dyn BufRead>>,
+    paired_header: noodles::sam::Header,
+
     ty: Val<'static>,
 }
 
-impl PairedBamReader {
-    pub fn new(buffer: Box<dyn BufRead>, paired_buffer: Box<dyn BufRead>) -> PairedBamReader {
+impl PairedSamReader {
+    pub fn new(
+        buffer: Box<dyn BufRead>,
+        paired_buffer: Box<dyn BufRead>,
+    ) -> Result<PairedSamReader, InputError> {
+        let mut reader = noodles::sam::io::Reader::new(buffer);
+        let header = reader.read_header().map_err(|e| InputError::Header)?;
+
+        let mut paired_reader = noodles::sam::io::Reader::new(paired_buffer);
+        let paired_header = reader.read_header().map_err(|e| InputError::Header)?;
+
         let ty = Val::RecTy {
             fields: vec![
                 CoreRecField {
@@ -382,15 +368,17 @@ impl PairedBamReader {
             ],
         };
 
-        PairedBamReader {
-            buffer,
-            paired_buffer,
+        Ok(PairedSamReader {
+            reader,
+            header,
+            paired_reader,
+            paired_header,
             ty,
-        }
+        })
     }
 }
 
-impl Reader for PairedBamReader {
+impl Reader for PairedSamReader {
     fn map<'p>(
         &mut self,
         prog: &core::Prog<'p>,
@@ -399,27 +387,7 @@ impl Reader for PairedBamReader {
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
-        let mut reader = noodles::bam::io::Reader::new(&mut self.buffer);
-        let mut paired_reader = noodles::bam::io::Reader::new(&mut self.paired_buffer);
-
-        let header = reader
-            .read_header()
-            .map_err(|e| ExecError::Input(InputError::Header))?;
-        let reference_sequences = header
-            .reference_sequences()
-            .keys()
-            .map(|rname| rname.to_vec())
-            .collect_vec();
-        let paired_header = paired_reader
-            .read_header()
-            .map_err(|e| ExecError::Input(InputError::Header))?;
-        let paired_reference_sequences = paired_header
-            .reference_sequences()
-            .keys()
-            .map(|rname| rname.to_vec())
-            .collect_vec();
-
-        let input_records = reader.records().zip(paired_reader.records());
+        let input_records = self.reader.records().zip(self.paired_reader.records());
 
         let final_progress = input_records
             .into_iter()
@@ -446,60 +414,14 @@ impl Reader for PairedBamReader {
                             let data = read.data();
                             let paired_data = paired_read.data();
 
-                            let rname = match read.reference_sequence_id() {
-                                Some(id) => match reference_sequences
-                                    .get(id.map_err(|e| ExecError::Input(InputError::Read))?)
-                                {
-                                    Some(name) => name,
-                                    None => return Err(ExecError::Input(InputError::ReferenceID)),
-                                },
-                                // if there is no reference sequence ID, use the default '*'
-                                None => &vec![b'*'],
-                            };
-
-                            let mate_rname = match read.mate_reference_sequence_id() {
-                                Some(id) => match reference_sequences
-                                    .get(id.map_err(|e| ExecError::Input(InputError::Read))?)
-                                {
-                                    Some(name) => name,
-                                    None => return Err(ExecError::Input(InputError::ReferenceID)),
-                                },
-                                // if there is no reference sequence ID, use the default '*'
-                                None => &vec![b'*'],
-                            };
-
-                            let paired_rname = match paired_read.reference_sequence_id() {
-                                Some(id) => match paired_reference_sequences
-                                    .get(id.map_err(|e| ExecError::Input(InputError::Read))?)
-                                {
-                                    Some(name) => name,
-                                    None => return Err(ExecError::Input(InputError::ReferenceID)),
-                                },
-                                // if there is no reference sequence ID, use the default '*'
-                                None => &vec![b'*'],
-                            };
-
-                            let paired_mate_rname = match paired_read.mate_reference_sequence_id() {
-                                Some(id) => match paired_reference_sequences
-                                    .get(id.map_err(|e| ExecError::Input(InputError::Read))?)
-                                {
-                                    Some(name) => name,
-                                    None => return Err(ExecError::Input(InputError::ReferenceID)),
-                                },
-                                // if there is no reference sequence ID, use the default '*'
-                                None => &vec![b'*'],
-                            };
-
                             let val = core::Val::Rec {
                                 rec: Arc::new(FullyConcreteRec {
                                     map: HashMap::from([
                                         (
                                             b"r1".to_vec(),
                                             core::Val::Rec {
-                                                rec: Arc::new(rec::BamRead {
+                                                rec: Arc::new(rec::SamRead {
                                                     read,
-                                                    rname,
-                                                    mate_rname,
                                                     cigar: &cigar,
                                                     seq: &seq,
                                                     qual: &qual,
@@ -510,10 +432,8 @@ impl Reader for PairedBamReader {
                                         (
                                             b"r2".to_vec(),
                                             core::Val::Rec {
-                                                rec: Arc::new(rec::BamRead {
+                                                rec: Arc::new(rec::SamRead {
                                                     read: paired_read,
-                                                    rname: paired_rname,
-                                                    mate_rname: paired_mate_rname,
                                                     cigar: &paired_cigar,
                                                     seq: &paired_seq,
                                                     qual: &paired_qual,
@@ -533,7 +453,7 @@ impl Reader for PairedBamReader {
 
                 for result_effects in &vec {
                     for effect in result_effects.as_ref().map_err(|e| e.clone())? {
-                        output_handler.handle(effect).unwrap();
+                        output_handler.handle(effect).map_err(ExecError::Output)?;
                     }
                 }
 
@@ -547,14 +467,17 @@ impl Reader for PairedBamReader {
     }
 
     fn count(&mut self) -> usize {
-        let mut reader = noodles::sam::io::Reader::new(&mut self.buffer);
-        let header = reader.read_header();
-        let input_records = reader.records();
-
-        input_records.count()
+        self.reader.records().count()
     }
 
     fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
         self.ty.coerce()
+    }
+
+    fn get_aux_data(&self) -> AuxiliaryInputData {
+        // for now, just report the header of the first file...
+        AuxiliaryInputData::SAMHeader {
+            header: self.header.clone(),
+        }
     }
 }

@@ -1,7 +1,14 @@
-use noodles::sam::record::Sequence;
+use itertools::Itertools;
+use noodles::sam::{
+    io::writer::record::write_cigar,
+    record::{Data, Sequence},
+};
 
-use crate::util::{self, bytes_to_string, Arena, CoreRecField, Location};
-use std::{collections::HashMap, fmt::Display, rc::Rc, sync::Arc};
+use crate::{
+    input::{Input, InputError},
+    util::{self, bytes_to_string, Arena, CoreRecField, Location},
+};
+use std::{collections::HashMap, fmt::Display, io::Read, rc::Rc, sync::Arc};
 
 use super::{EvalError, InternalError, Val};
 
@@ -459,14 +466,14 @@ pub struct BamRead<'a> {
     pub rname: &'a [u8],
     pub mate_rname: &'a [u8],
 
-    pub cigar: &'a noodles::bam::record::Cigar<'a>,
-    pub seq: &'a noodles::bam::record::Sequence<'a>,
-    pub qual: &'a noodles::bam::record::QualityScores<'a>,
-    pub data: &'a noodles::bam::record::Data<'a>,
+    pub cigar: &'a [u8],
+    pub seq: &'a [u8],
+    pub qual: &'a [u8],
+    pub data: &'a [u8],
 }
 
 impl<'a> BamRead<'a> {
-    // pub fn new(read: &'a noodles::sam::Record) -> BamRead<'a> {
+    // pub fn new(read: &'a noodles::bam::Record) -> BamRead<'a> {
     //     BamRead {
     //         read,
     //         cigar: read.cigar(),
@@ -510,12 +517,7 @@ impl<'p> Rec<'p> for BamRead<'p> {
                     .unwrap_or(-1.0),
             }),
 
-            b"cigar" => Ok(Val::Str {
-                s: match self.cigar.as_ref() {
-                    b"" => b"*",
-                    r => r,
-                },
-            }),
+            b"cigar" => Ok(Val::Str { s: &self.cigar }),
 
             b"rnext" => Ok(Val::Str { s: self.mate_rname }),
 
@@ -533,20 +535,15 @@ impl<'p> Rec<'p> for BamRead<'p> {
             }),
 
             b"seq" => Ok(Val::Str {
-                s: match self.seq.as_ref() {
+                s: match self.seq {
                     b"" => b"*",
                     r => r,
                 },
             }),
-
-            b"qual" => Ok(Val::Str {
-                s: self.qual.as_ref(),
-            }),
+            b"qual" => Ok(Val::Str { s: self.qual }),
 
             // WARN need to do this
-            b"tags" | b"desc" => Ok(Val::Str {
-                s: self.data.as_ref(),
-            }),
+            b"tags" | b"desc" => Ok(Val::Str { s: self.data }),
 
             _ => Err(InternalError {
                 message: String::from_utf8(key.to_vec()).expect("Couldn't convert vec to string!"),

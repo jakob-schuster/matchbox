@@ -11,10 +11,12 @@ itertools = "*"
 csv = "*"
 peg = "*"
 codespan-reporting = "*"
-clap = { version = "4.4.10", features = ["derive"] }
+clap = { version = "*", features = ["derive"] }
+clap_builder = "*"
 codespan = "*"
 flate2 = { version = "*", features = ["zlib-ng"] }
-noodles = { version = "0.83.0", features = ["sam", "bam"] }
+noodles = { version = "0.101.0", features = ["sam", "bam", "bgzf"] }
+noodles-util = { version = "0.70.0", features = ["alignment"] }
 indicatif = "*"
 color-eyre = "*"
 ratatui = "*"

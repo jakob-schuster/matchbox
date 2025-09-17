@@ -2,8 +2,8 @@ use itertools::Itertools;
 
 use crate::{
     core,
+    input::{get_filetype_and_buffer, FileType},
     myers::VarMyers,
-    read::{get_filetype_and_buffer, FileType},
     surface::Context,
     util::{self, bytes_to_string, get_bit, Arena, Cache, CoreRecField, Env, Location},
 };
@@ -667,23 +667,21 @@ pub fn tag<'a>(
                 .expect("record with no desc given to tag?!");
 
             match desc {
-                Val::Str { s: old_s } => Ok(Val::Rec {
-                    rec: Arc::new(
-                        rec.with(
-                            b"desc",
-                            Val::Str {
-                                s: arena
-                                    .alloc(format!(
-                                        "{}{}{}",
-                                        util::bytes_to_string(old_s).unwrap(),
-                                        util::bytes_to_string(prefix).unwrap(),
-                                        util::bytes_to_string(s).unwrap()
-                                    ))
-                                    .as_bytes(),
-                            },
-                        ),
-                    ),
-                }),
+                Val::Str { s: old_s } => {
+                    let new_desc = &arena
+                        .alloc(old_s.iter().chain(*prefix).chain(*s).cloned().collect_vec())[..];
+
+                    Ok(Val::Rec {
+                        rec: Arc::new(if rec.get(b"tags").is_ok() {
+                            rec.with_all(&[
+                                (b"desc", Val::Str { s: new_desc }),
+                                (b"tags", Val::Str { s: new_desc }),
+                            ])
+                        } else {
+                            rec.with(b"desc", Val::Str { s: new_desc })
+                        }),
+                    })
+                }
                 _ => panic!("record desc was not string type?!"),
             }
         }

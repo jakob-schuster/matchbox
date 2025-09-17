@@ -8,8 +8,8 @@ use crate::{
         matcher::read_matcher::{self, LocTm, OpTm},
         EvalError, Val,
     },
-    parse,
     input::{FileType, InputError, Reader},
+    parse,
     util::{bytes_to_string, Arena, Cache, CoreRecField, Env, Located, Location, Ran, RecField},
     visit, GlobalConfig, InputReads,
 };

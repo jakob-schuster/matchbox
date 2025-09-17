@@ -4,8 +4,8 @@ use noodles::sam::header::record::value::{map::tag, Map};
 
 use crate::{
     core::PortableVal,
-    output::{file::FileWriter, OutputError},
     input::AuxiliaryInputData,
+    output::{file::FileWriter, OutputError},
     util::bytes_to_string,
 };
 
@@ -31,7 +31,10 @@ impl SamWriter {
                         tag::Other::try_from([b'V', b'N']).unwrap(),
                         env!("CARGO_PKG_VERSION"),
                     )
-                    .insert(tag::Other::try_from([b'C', b'L']).unwrap(), b"hello")
+                    .insert(
+                        tag::Other::try_from([b'C', b'L']).unwrap(),
+                        std::env::args().collect::<Vec<_>>().join(" "),
+                    )
                     .build()
                     .unwrap(),
             )

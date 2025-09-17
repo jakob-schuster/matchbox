@@ -6,20 +6,20 @@ use codespan_reporting::{
     files::{Error, SimpleFile},
     term::{self, termcolor::StandardStream},
 };
-use output::{OutputError, OutputHandler};
-use parse::{parse, ParseError};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use input::{
     get_extensions, get_filetype_and_buffer, FileType, FileTypeError, InputError, ReaderWithBar,
 };
+use output::{OutputError, OutputHandler};
+use parse::{parse, ParseError};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use surface::{elab_prog, elab_prog_for_ctx, Context, ElabError};
 use util::{Arena, Cache, Env, Location};
 
 mod core;
+mod input;
 mod myers;
 mod output;
 mod parse;
-mod input;
 mod surface;
 mod test;
 mod ui;
@@ -72,14 +72,13 @@ pub struct GlobalConfig {
 }
 
 #[derive(Args)]
-#[group(required = true, multiple = true)]
 struct InputReads {
     /// The format for parsing stdin. To be used when piping input into matchbox
-    #[arg(long, short = 'f', conflicts_with_all = vec!["reads", "debug"])]
+    #[arg(long, short = 'f', conflicts_with_all(["reads", "debug"]), required_unless_present_any(["reads", "debug"]))]
     stdin_format: Option<CLIFileType>,
 
     /// A read file to process.
-    #[arg(long, short = 'i')]
+    #[arg(conflicts_with_all(["stdin_format", "debug"]), required_unless_present_any(["stdin_format", "debug"]))]
     reads: Option<String>,
 
     /// Paired reads. Accepts FASTA/FASTQ/SAM/BAM files. File type must match primary read file.
@@ -87,14 +86,14 @@ struct InputReads {
     paired_with: Option<String>,
 
     /// Compile the script and output debug information
-    #[arg(long, conflicts_with_all = vec!["stdin_format", "reads"])]
+    #[arg(long, conflicts_with_all(["stdin_format", "reads"]), conflicts_with_all(["stdin_format", "reads"]))]
     debug: bool,
 }
 
 #[derive(Args, Clone)]
 struct InputReadsFile {
     /// A read file to process.
-    #[arg(long, short = 'i')]
+    #[arg()]
     reads: String,
 
     /// Paired reads. Accepts FASTA/FASTQ/SAM/BAM files. File type must match primary read file.

@@ -8,11 +8,14 @@ use std::{collections::HashMap, fs::File, io::BufWriter, os::unix::ffi::OsStrExt
 
 use crate::{
     core::PortableVal,
+    input::AuxiliaryInputData,
     output::{
-        file::{bam::SamOrBamWriter, fasta::FastaWriter, fastq::FastqWriter, txt::TxtWriter},
+        file::{
+            bam::SamOrBamWriter, fasta::FastaWriter, fastq::FastqWriter, sam::SamWriter,
+            txt::TxtWriter,
+        },
         OutputError,
     },
-    input::AuxiliaryInputData,
 };
 
 /// A file type of an output file
@@ -76,12 +79,12 @@ impl FileHandler {
                 FileType::Text => Box::new(TxtWriter::new(&altered_filename)?),
                 FileType::Fasta => Box::new(FastaWriter::new(&altered_filename)?),
                 FileType::Fastq => Box::new(FastqWriter::new(&altered_filename)?),
-                // FileType::Sam => Box::new(SamWriter::new(&altered_filename, &self.aux_data)?),
-                FileType::Sam => Box::new(SamOrBamWriter::new(
-                    &altered_filename,
-                    &self.aux_data,
-                    noodles_util::alignment::io::Format::Sam,
-                )?),
+                FileType::Sam => Box::new(SamWriter::new(&altered_filename, &self.aux_data)?),
+                // FileType::Sam => Box::new(SamOrBamWriter::new(
+                //     &altered_filename,
+                //     &self.aux_data,
+                //     noodles_util::alignment::io::Format::Sam,
+                // )?),
                 FileType::Bam => Box::new(SamOrBamWriter::new(
                     &altered_filename,
                     &self.aux_data,

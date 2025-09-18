@@ -9,12 +9,12 @@ use crate::{
     util::bytes_to_string,
 };
 
-struct SamWriter {
+pub struct SamWriter {
     writer: noodles::sam::io::Writer<File>,
 }
 
 impl SamWriter {
-    fn new(filename: &str, aux_data: &AuxiliaryInputData) -> Result<SamWriter, OutputError> {
+    pub fn new(filename: &str, aux_data: &AuxiliaryInputData) -> Result<SamWriter, OutputError> {
         let mut header = match aux_data {
             // no header, so just construct a new empty one
             AuxiliaryInputData::None => noodles::sam::Header::default(),

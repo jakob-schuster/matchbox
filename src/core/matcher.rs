@@ -9,9 +9,9 @@ use crate::{
 };
 
 use super::{EvalError, Val};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-pub trait Matcher<'p>: Send + Sync {
+pub trait Matcher<'p>: Send + Sync + Display {
     fn evaluate<'a>(
         &self,
         arena: &'a Arena,
@@ -44,6 +44,12 @@ impl<'p> Matcher<'p> for Chain<'p> {
     }
 }
 
+impl<'p> Display for Chain<'p> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!("chain({},{})", self.m1.to_string(), self.m2.to_string()).fmt(f)
+    }
+}
+
 pub struct FieldAccess<'p> {
     pub name: String,
     pub inner: Arc<dyn Matcher<'p> + 'p>,
@@ -69,6 +75,11 @@ impl<'p> Matcher<'p> for FieldAccess<'p> {
         }
     }
 }
+impl<'p> Display for FieldAccess<'p> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!("field_access({},{})", self.name, self.inner).fmt(f)
+    }
+}
 
 pub struct Succeed {}
 impl<'p> Matcher<'p> for Succeed {
@@ -86,6 +97,12 @@ impl<'p> Matcher<'p> for Succeed {
     }
 }
 
+impl Display for Succeed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        "succeed()".fmt(f)
+    }
+}
+
 pub struct Bind {}
 impl<'p> Matcher<'p> for Bind {
     fn evaluate<'a>(
@@ -98,6 +115,12 @@ impl<'p> Matcher<'p> for Bind {
         'p: 'a,
     {
         Ok(vec![vec![val.clone()]])
+    }
+}
+
+impl Display for Bind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        "bind()".fmt(f)
     }
 }
 
@@ -127,5 +150,11 @@ impl<'p> Matcher<'p> for Equal<'p> {
         } else {
             Ok(vec![])
         }
+    }
+}
+
+impl<'p> Display for Equal<'p> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!("equal({})", self.val).fmt(f)
     }
 }

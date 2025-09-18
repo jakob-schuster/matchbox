@@ -6,7 +6,7 @@ use crate::{
     core::{self, matcher, EvalError, InternalError, Val},
     myers::VarMyers,
     surface::{self, check_tm, Context, ElabError, Region, RegionData},
-    util::{Arena, Cache, Env, Location, Ran},
+    util::{bytes_to_string, Arena, Cache, Env, Location, Ran},
     visit,
 };
 
@@ -17,6 +17,17 @@ pub enum MatchMode {
     All,
     One,
     Unique,
+}
+
+impl Display for MatchMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MatchMode::All => "all",
+            MatchMode::One => "one",
+            MatchMode::Unique => "unique",
+        }
+        .fmt(f)
+    }
 }
 
 pub struct ReadMatcher<'a> {
@@ -169,6 +180,27 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
     }
 }
 
+impl<'a> Display for ReadMatcher<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!(
+            "read_matcher(binds: [{}], end: {}, mode: {}, ops: [{}])",
+            self.binds
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            self.end,
+            self.mode,
+            self.ops
+                .iter()
+                .map(|op| op.to_string())
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+        .fmt(f)
+    }
+}
+
 #[derive(Clone)]
 enum Reg<'p> {
     Hole,
@@ -214,7 +246,7 @@ fn flatten_regs<'a>(
             ),
             RegionData::Term { tm, error } => {
                 // get the ids used in the tm
-                let ids = visit::ids_tm(&tm)
+                let ids = visit::ids_tm(tm)
                     .into_iter()
                     .filter(|id| binds.contains(id))
                     .collect::<Vec<_>>();
@@ -273,7 +305,7 @@ fn flatten_regs<'a>(
                 regs: inner_regs,
             } => {
                 // first check that tm is a numeric
-                let ctm = check_tm(arena, ctx, &tm, &core::Val::NumTy)?;
+                let ctm = check_tm(arena, ctx, tm, &core::Val::NumTy)?;
 
                 flatten_regs(
                     binds,
@@ -352,6 +384,9 @@ pub fn infer_read_pattern<'a>(
             let mut new_known = known.clone();
 
             for (expr_num, ran) in fixed_lens {
+                // get the closest flanking sequences
+                let flanking = get_tightest_known(known, ran);
+
                 match ran.map(|l| known.contains(l)).to_tuple() {
                     // todo: insert something that actually verifies the length?
                     (true, true) => {}
@@ -364,6 +399,7 @@ pub fn infer_read_pattern<'a>(
                                 loc_tm: Arc::new(LocTm::Var { loc: ran.start }),
                                 offset: expr_num.clone(),
                             },
+                            flanking,
                         });
                         new_known.push(ran.end);
                     }
@@ -374,6 +410,7 @@ pub fn infer_read_pattern<'a>(
                                 loc_tm: Arc::new(LocTm::Var { loc: ran.end }),
                                 offset: expr_num.clone(),
                             },
+                            flanking,
                         });
                         new_known.push(ran.start);
                     }
@@ -493,6 +530,8 @@ pub enum OpTm<'p> {
         loc: usize,
         // the
         tm: LocTm<'p>,
+        // the closest known locations to check bounds against
+        flanking: Ran<usize>,
     },
     Restrict {
         // list of new binds to make
@@ -521,9 +560,10 @@ impl<'p> OpTm<'p> {
         'p: 'a,
     {
         match self {
-            OpTm::Let { loc, tm } => Ok(OpVal::Let {
+            OpTm::Let { loc, tm, flanking } => Ok(OpVal::Let {
                 loc: *loc,
                 tm: tm.coerce(arena),
+                flanking: flanking.clone(),
             }),
 
             OpTm::Restrict {
@@ -637,6 +677,8 @@ pub enum OpVal<'a> {
         loc: usize,
         // the
         tm: LocTm<'a>,
+        // the closest known locations to check bounds against
+        flanking: Ran<usize>,
     },
     Restrict {
         // list of new binds to make
@@ -648,6 +690,39 @@ pub enum OpVal<'a> {
         // the locations to save
         save: Vec<Ran<usize>>,
     },
+}
+
+impl<'a> Display for OpVal<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpVal::Let { loc, tm, flanking } => {
+                format!("let {} = {} checking between {}", loc, tm, flanking).fmt(f)
+            }
+            OpVal::Restrict {
+                ctxs,
+                ran,
+                fixed,
+                save,
+            } => format!(
+                "restrict [{}] to {} with fixed {} saving to [{}]",
+                ctxs.iter()
+                    .map(|(map, seq)| format!(
+                        "ctx(map: {}, seq: {})",
+                        map.iter()
+                            .map(|(a, b)| format!("({}, {})", a, b))
+                            .collect_vec()
+                            .join(","),
+                        bytes_to_string(&seq.bytes).unwrap()
+                    ))
+                    .collect_vec()
+                    .join(","),
+                ran,
+                fixed,
+                save.iter().map(|a| a.to_string()).collect_vec().join(",")
+            )
+            .fmt(f),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -703,11 +778,12 @@ impl<'p> OpVal<'p> {
         'p: 'a,
     {
         match self {
-            OpVal::Let { loc, tm } => {
+            OpVal::Let { loc, tm, flanking } => {
                 let pos = tm.eval(arena, env, loc_ctx)?;
+                let flanking_pos = flanking.map(|loc| loc_ctx.get(loc));
 
                 // return out if the range is inappropriate
-                if pos > seq.len() {
+                if pos > flanking_pos.start || pos < flanking_pos.end {
                     Ok(vec![])
                 } else {
                     Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos), edit_dist)])
@@ -958,7 +1034,9 @@ impl Mat {
 impl<'a> Display for OpTm<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            OpTm::Let { loc, tm } => format!("{} = {}", loc, tm).fmt(f),
+            OpTm::Let { loc, tm, flanking } => {
+                format!("{} = {} checking {}", loc, tm, flanking).fmt(f)
+            }
             OpTm::Restrict {
                 ids,
                 tm,

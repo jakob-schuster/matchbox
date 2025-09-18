@@ -74,7 +74,7 @@ pub struct GlobalConfig {
 #[derive(Args)]
 struct InputReads {
     /// The format for parsing stdin. To be used when piping input into matchbox
-    #[arg(long, short = 'f', conflicts_with_all(["reads", "debug"]), required_unless_present_any(["reads", "debug"]))]
+    #[arg(long, short = 'f', conflicts_with_all(["reads"]), required_unless_present_any(["reads"]))]
     stdin_format: Option<CLIFileType>,
 
     /// A read file to process.
@@ -82,11 +82,11 @@ struct InputReads {
     reads: Option<String>,
 
     /// Paired reads. Accepts FASTA/FASTQ/SAM/BAM files. File type must match primary read file.
-    #[arg(short, long, requires = "reads")]
+    #[arg(short, long, requires("reads"))]
     paired_with: Option<String>,
 
     /// Compile the script and output debug information
-    #[arg(long, conflicts_with_all(["stdin_format", "reads"]), conflicts_with_all(["stdin_format", "reads"]))]
+    #[arg(long, requires("stdin_format"), conflicts_with_all(["reads"]), conflicts_with_all(["reads"]))]
     debug: bool,
 }
 
@@ -261,6 +261,10 @@ fn run(code: &str, global_config: &GlobalConfig) {
         // should never unwrap, because program terminates
         .unwrap();
     // let cache = Cache::default();
+
+    if global_config.input_reads.debug {
+        eprintln!("{}", core_prog);
+    }
 
     // create an output handler, to receive output effects
     let mut output_handler = OutputHandler::new(

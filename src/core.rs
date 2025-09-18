@@ -1605,7 +1605,7 @@ impl<'a> Display for BranchData<'a> {
 
 impl<'a> Display for PatternBranchData<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        format!("#matcher => {}", self.stmt).fmt(f)
+        format!("#matcher({}) => {}", self.matcher, self.stmt).fmt(f)
     }
 }
 

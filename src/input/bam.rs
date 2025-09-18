@@ -10,8 +10,8 @@ use crate::{
         rec::{self, FullyConcreteRec},
         Effect, InternalError, Val,
     },
-    output::OutputHandler,
     input::{AuxiliaryInputData, ExecError, Input, InputError, Progress, ProgressSummary, Reader},
+    output::OutputHandler,
     util::{Arena, Cache, CoreRecField, Env},
 };
 
@@ -619,7 +619,6 @@ pub fn data_to_vec(data: &noodles::bam::record::Data) -> Result<Vec<u8>, InputEr
                 (b'i', i.to_string().as_bytes().to_vec())
             }
             noodles::sam::alignment::record::data::field::Value::Int32(i) => {
-                eprintln!("parsing an int32 i");
                 (b'i', i.to_string().as_bytes().to_vec())
             }
             noodles::sam::alignment::record::data::field::Value::UInt32(i) => {

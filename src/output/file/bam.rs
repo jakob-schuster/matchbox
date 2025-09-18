@@ -127,16 +127,12 @@ impl FileWriter for SamOrBamWriter {
                     // then, write it out via an agnostic writer
                     self.writer
                         .write_record(&self.header, &record)
-                        .map_err(|e| {
-                            eprintln!("{:?}", e);
-
-                            match e.kind() {
-                                std::io::ErrorKind::InvalidData => match e.to_string().as_str() {
-                                    "invalid field terminator" => OutputError::BadSAMTag,
-                                    _ => OutputError::Write,
-                                },
+                        .map_err(|e| match e.kind() {
+                            std::io::ErrorKind::InvalidData => match e.to_string().as_str() {
+                                "invalid field terminator" => OutputError::BadSAMTag,
                                 _ => OutputError::Write,
-                            }
+                            },
+                            _ => OutputError::Write,
                         })?;
 
                     Ok(())

@@ -80,3 +80,5 @@ not_primary_alignment = $(flag: Num): Bool => flag_not_primary_alignment
 fails_platform_quality_checks = $(flag: Num): Bool => flag_fails_platform_quality_checks
 pcr_or_optical_duplicate = $(flag: Num): Bool => flag_pcr_or_optical_duplicate
 supplementary_alignment = $(flag: Num): Bool => flag_supplementary_alignment
+
+round = $(n: Num): Num => round

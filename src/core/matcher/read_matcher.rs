@@ -54,7 +54,9 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
         if let Val::Rec { rec } = val {
             if let Val::Str { s: seq } = rec.get(b"seq").expect("") {
                 // first, generate all the worlds from the operations
-                let loc_ctx = LocCtx::default().with(0, 0).with(self.end, seq.len());
+                let loc_ctx = LocCtx::default()
+                    .with(0, 0)
+                    .with(self.end, seq.len() as i32);
                 let worlds =
                     self.ops
                         .iter()
@@ -84,7 +86,8 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                                     // then make the other sequence binds
                                     self.binds.iter().map(|ran| {
                                         let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                        let sliced = rec.slice(pos_ran.start, pos_ran.end)?;
+                                        let sliced = rec
+                                            .slice(pos_ran.start as usize, pos_ran.end as usize)?;
 
                                         Ok(sliced as Val<'a>)
                                     }),
@@ -115,7 +118,8 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                                     // then make the other sequence binds
                                     self.binds.iter().map(|ran| {
                                         let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                        let sliced = rec.slice(pos_ran.start, pos_ran.end)?;
+                                        let sliced = rec
+                                            .slice(pos_ran.start as usize, pos_ran.end as usize)?;
 
                                         Ok(sliced as Val<'a>)
                                     }),
@@ -151,8 +155,10 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                                             // then make the other sequence binds
                                             self.binds.iter().map(|ran| {
                                                 let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                                let sliced =
-                                                    rec.slice(pos_ran.start, pos_ran.end)?;
+                                                let sliced = rec.slice(
+                                                    pos_ran.start as usize,
+                                                    pos_ran.end as usize,
+                                                )?;
 
                                                 Ok(sliced as Val<'a>)
                                             }),
@@ -727,18 +733,18 @@ impl<'a> Display for OpVal<'a> {
 
 #[derive(Clone, Default)]
 pub struct LocCtx {
-    map: HashMap<usize, usize>,
+    map: HashMap<usize, i32>,
 }
 
 impl LocCtx {
-    fn get(&self, loc: &usize) -> usize {
+    fn get(&self, loc: &usize) -> i32 {
         *self
             .map
             .get(loc)
-            .expect("couldn't find location {loc} in location context?!")
+            .expect("couldn't find location {loc} in location context?!") as i32
     }
 
-    fn with(&self, loc: usize, pos: usize) -> LocCtx {
+    fn with(&self, loc: usize, pos: i32) -> LocCtx {
         let mut map = self.map.clone();
         map.insert(loc, pos);
 
@@ -783,10 +789,10 @@ impl<'p> OpVal<'p> {
                 let flanking_pos = flanking.map(|loc| loc_ctx.get(loc));
 
                 // return out if the range is inappropriate
-                if pos > flanking_pos.start || pos < flanking_pos.end {
-                    Ok(vec![])
-                } else {
+                if pos > flanking_pos.start && pos < flanking_pos.end {
                     Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos), edit_dist)])
+                } else {
+                    Ok(vec![])
                 }
             }
             OpVal::Restrict {
@@ -838,8 +844,11 @@ impl<'p> OpVal<'p> {
                                         loc_ctx.clone(),
                                         |old_loc_ctx, (i, mat)| {
                                             old_loc_ctx
-                                                .with(save.get(i).unwrap().start, mat.ran.start)
-                                                .with(save.get(i).unwrap().end, mat.ran.end)
+                                                .with(
+                                                    save.get(i).unwrap().start,
+                                                    mat.ran.start as i32,
+                                                )
+                                                .with(save.get(i).unwrap().end, mat.ran.end as i32)
                                         },
                                     ) as LocCtx,
                                     c.iter().fold(0, |acc, mat| acc + mat.dist) as u8,
@@ -904,12 +913,12 @@ impl<'p> LocTm<'p> {
         arena: &'a Arena,
         env: &Env<core::Val<'a>>,
         loc_ctx: &LocCtx,
-    ) -> Result<usize, core::EvalError>
+    ) -> Result<i32, core::EvalError>
     where
         'p: 'a,
     {
         match self {
-            LocTm::Var { loc } => Ok(loc_ctx.get(loc)),
+            LocTm::Var { loc } => Ok(loc_ctx.get(loc) as i32),
             LocTm::Plus { loc_tm, offset } => {
                 // WARN changed the order of env and env default; see if this works
                 // WARN cache can be empty because this is pre-caching
@@ -918,7 +927,7 @@ impl<'p> LocTm<'p> {
                 {
                     let i = n.round() as i32;
 
-                    Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 + i) as usize)
+                    Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 + i) as i32)
                 } else {
                     panic!("sized read pattern wasn't numeric type?!")
                 }
@@ -931,7 +940,7 @@ impl<'p> LocTm<'p> {
                 {
                     let i = n.round() as i32;
 
-                    Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 - i) as usize)
+                    Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 - i) as i32)
                 } else {
                     panic!("sized read pattern wasn't numeric type?!")
                 }

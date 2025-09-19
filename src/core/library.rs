@@ -127,6 +127,8 @@ pub fn foreign<'a>(
         "flag_pcr_or_optical_duplicate" => Ok(Arc::new(flag_pcr_or_optical_duplicate)),
         "flag_supplementary_alignment" => Ok(Arc::new(flag_supplementary_alignment)),
 
+        "round" => Ok(Arc::new(round)),
+
         _ => Err(EvalError::new(location, "foreign function does not exist")),
     }
 }
@@ -1856,6 +1858,21 @@ pub fn flag_supplementary_alignment<'a>(
         [Val::Num { n }] => Ok(Val::Bool {
             b: get_bit(n.round() as u16, 11),
         }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn round<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Num { n: n.round() }),
 
         _ => Err(EvalError::new(
             &location,

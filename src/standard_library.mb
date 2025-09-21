@@ -58,9 +58,9 @@ to_str = $(val: Any): Str => to_str
 to_num = $(val: Str): Num => to_num
 
 stdout! = $(val: Any): Effect => stdout!
-count! = $(val: Any, name: Str = 'default'): Effect => count!
+count! = $(val: Any, name: Str = 'count'): Effect => count!
 out! = $(val: Any, filename: Str): Effect => out!
-mean! = $(num: Num, name: Str = 'default'): Effect => average!
+mean! = $(num: Num, name: Str = 'mean'): Effect => average!
 
 min = $(l: [Num]): Num => min
 max = $(l: [Num]): Num => max

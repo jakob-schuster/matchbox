@@ -97,6 +97,7 @@ pub fn foreign<'a>(
         "to_upper" => Ok(Arc::new(to_upper)),
         "to_lower" => Ok(Arc::new(to_lower)),
         "describe" => Ok(Arc::new(describe)),
+        "count_matches" => Ok(Arc::new(count_matches)),
         "contains" => Ok(Arc::new(contains)),
         "distance" => Ok(Arc::new(distance)),
         "to_str" => Ok(Arc::new(to_str)),
@@ -1293,6 +1294,38 @@ pub fn describe<'a>(
                         })
                         .as_bytes(),
                 })
+            } else {
+                Err(EvalError::new(
+                    location,
+                    "first argument of describe must have the seq field",
+                ))
+            }
+        }
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn count_matches<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Rec { rec: read }, Val::Str { s: seq }, Val::Num { n: error_rate }] => {
+            if let Val::Str { s: read_seq } = read
+                .get(b"seq")
+                .map_err(|e| EvalError::from_internal(e, location.clone()))?
+            {
+                let matches = VarMyers::new(seq)
+                    .find_all_disjoint(read_seq, (error_rate * seq.len() as f32).round() as usize)
+                    .len();
+
+                // allocate the description
+                Ok(Val::Num { n: matches as f32 })
             } else {
                 Err(EvalError::new(
                     location,

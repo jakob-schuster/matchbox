@@ -50,6 +50,7 @@ to_upper = $(s: Str): Str => to_upper
 to_lower = $(s: Str): Str => to_lower
 
 describe = $(r: { seq: Str ..}, search_terms: {..}, reverse_complement: Bool = false, error_rate: Num = 0): Str => describe
+count_matches = $(r: { seq: Str ..}, seq: Str, error_rate: Num = 0): Str => count_matches
 
 contains = $(list: [Any], val: Any): Bool => contains
 distance = $(s0: Str, s1: Str): Num => distance

@@ -78,11 +78,14 @@ pub fn foreign<'a>(
         "unary_reverse_complement" => Ok(Arc::new(unary_reverse_complement)),
         "unary_read_reverse_complement" => Ok(Arc::new(unary_read_reverse_complement)),
 
+        "unary_not" => Ok(Arc::new(unary_not)),
+
         "read_ty" => Ok(Arc::new(read_ty)),
 
         "len" => Ok(Arc::new(len)),
         "slice" => Ok(Arc::new(slice)),
         "tag" => Ok(Arc::new(tag)),
+        "rename" => Ok(Arc::new(rename)),
         "translate" => Ok(Arc::new(translate)),
         "str_concat" => Ok(Arc::new(str_concat)),
         "concat" => Ok(Arc::new(concat)),
@@ -93,6 +96,7 @@ pub fn foreign<'a>(
         "fasta" => Ok(Arc::new(fasta)),
         "find_first" => Ok(Arc::new(find_first)),
         "find_last" => Ok(Arc::new(find_last)),
+
         "lookup" => Ok(Arc::new(lookup)),
         "to_upper" => Ok(Arc::new(to_upper)),
         "to_lower" => Ok(Arc::new(to_lower)),
@@ -435,6 +439,21 @@ pub fn unary_read_reverse_complement<'a>(
     }
 }
 
+pub fn unary_not<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Bool { b: b0 }] => Ok(Val::Bool { b: !b0 }),
+
+        _ => Err(EvalError {
+            location: location.clone(),
+            message: "bad arguments given to function?!".to_string(),
+        }),
+    }
+}
+
 pub fn paired_read_ty<'a>(
     arena: &'a Arena,
     location: &Location,
@@ -686,6 +705,39 @@ pub fn tag<'a>(
                     })
                 }
                 _ => panic!("record desc was not string type?!"),
+            }
+        }
+        _ => Err(EvalError::new(
+            &location,
+            &format!(
+                "bad arguments given to function {}?!",
+                vtms.iter().map(|v| v.to_string()).join(", ")
+            ),
+        )),
+    }
+}
+
+pub fn rename<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Rec { rec }, Val::Str { s: new_id }] => {
+            let id = rec.get(b"id").expect("record with no id given to rename?!");
+
+            match id {
+                Val::Str { s: _ } => Ok(Val::Rec {
+                    rec: Arc::new(if rec.get(b"qname").is_ok() {
+                        rec.with_all(&[
+                            (b"id", Val::Str { s: new_id }),
+                            (b"qname", Val::Str { s: new_id }),
+                        ])
+                    } else {
+                        rec.with(b"id", Val::Str { s: new_id })
+                    }),
+                }),
+                _ => panic!("record id was not string type?!"),
             }
         }
         _ => Err(EvalError::new(

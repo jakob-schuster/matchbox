@@ -301,6 +301,7 @@ pub enum BinOp {
 #[derive(Clone, Debug)]
 pub enum UnOp {
     Minus,
+    Not,
 }
 
 pub type StrLitRegion = Located<StrLitRegionData>;
@@ -1516,7 +1517,6 @@ fn infer_un_op<'a>(
         };
 
     match un_op {
-        // since this operator is parametric, it is slightly custom
         UnOp::Minus => {
             let (ctm0, cty0) = infer_tm(arena, ctx, tm)?;
 
@@ -1595,6 +1595,8 @@ fn infer_un_op<'a>(
                 ))
             }
         }
+
+        UnOp::Not => non_parametric_operator(&core::Val::BoolTy, "unary_not"),
     }
 }
 

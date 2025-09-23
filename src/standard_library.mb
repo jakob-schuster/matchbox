@@ -21,6 +21,9 @@ unary_minus = $(n0: Num): Num => unary_minus
 unary_reverse_complement = $(s: Str): Str => unary_reverse_complement
 unary_read_reverse_complement = $(r: { seq: Str ..}): { seq: Str ..} => unary_read_reverse_complement
 
+unary_not = $(b: Bool): Bool => unary_not
+
+# undoc
 read_ty = $(filetype: Str): Type => read_ty
 
 len = $(s: Str): Num => len
@@ -35,15 +38,17 @@ str_concat = $(s0: Str, s1: Str): Str => str_concat
 concat = $(r0: { seq: Str ..}, r1: {seq: Str ..}): {seq: Str ..} => concat
 
 csv_ty = $(filename: Str): Type => csv_ty
-csv = $(filename: Str): [csv_ty(filename)] => csv
+csv = $(filename: Str): $[csv_ty(filename)] => csv
 
 tsv_ty = $(filename: Str): Type => tsv_ty
-tsv = $(filename: Str): [tsv_ty(filename)] => tsv
+tsv = $(filename: Str): $[tsv_ty(filename)] => tsv
 
-fasta = $(filename: Str): [{ seq: Str, id: Str, desc: Str }] => fasta
+fasta = $(filename: Str): $[{ seq: Str, id: Str, desc: Str }] => fasta
 
 find_first = $(s0: Str, s1: Str): Num => find_first
 find_last = $(s0: Str, s1: Str): Num => find_last
+
+# undoc
 lookup = $(s: Str, key: Str, kv_sep: Str = '=', sep: Str = ' '): Str => lookup
 
 to_upper = $(s: Str): Str => to_upper
@@ -52,7 +57,7 @@ to_lower = $(s: Str): Str => to_lower
 describe = $(r: { seq: Str ..}, search_terms: {..}, reverse_complement: Bool = false, error_rate: Num = 0): Str => describe
 count_matches = $(r: { seq: Str ..}, seq: Str, error_rate: Num = 0): Str => count_matches
 
-contains = $(list: [Any], val: Any): Bool => contains
+contains = $(list: $[Any], val: Any): Bool => contains
 distance = $(s0: Str, s1: Str): Num => distance
 
 to_str = $(val: Any): Str => to_str
@@ -63,11 +68,11 @@ count! = $(val: Any, name: Str = 'count'): Effect => count!
 out! = $(val: Any, filename: Str): Effect => out!
 mean! = $(num: Num, name: Str = 'mean'): Effect => average!
 
-min = $(l: [Num]): Num => min
-max = $(l: [Num]): Num => max
-mean = $(l: [Num]): Num => mean
+min = $(l: $[Num]): Num => min
+max = $(l: $[Num]): Num => max
+mean = $(l: $[Num]): Num => mean
 
-to_qscores = $(s: Str): [Num] => to_qscores
+to_qscores = $(s: Str): $[Num] => to_qscores
 
 paired = $(flag: Num): Bool => flag_paired
 mapped_in_proper_pair = $(flag: Num): Bool => flag_mapped_in_proper_pair

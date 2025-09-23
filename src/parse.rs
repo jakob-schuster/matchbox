@@ -41,7 +41,8 @@ peg::parser! {
         rule stmt_data() -> StmtData
             = name:name() _ "=" _ tm:tm() { StmtData::Let { name, tm } }
             // for now, just keep it to two kinds of if statement - boolean conditionals and match statements
-            / "if" _ tm:tm() _ "is" _ branches:whitespace_sensitive_list_without_final_delimiter(<pattern_branch()>, <whitespace_except_newline() [','|'\n']() _>) { StmtData::If { branches: vec![Branch::new(tm.location.clone(), BranchData::Is { tm, branches })] } }
+            / "if" _ tm:tm() _ "matches" _ branch:pattern_branch() { StmtData::If { branches: vec![Branch::new(tm.location.clone(), BranchData::Is { tm, branches: vec![branch] })] } }
+            / "if" _ tm:tm() _ "matches" _ "{" _ branches:whitespace_sensitive_list_without_final_delimiter(<pattern_branch()>, <whitespace_except_newline() [','|'\n']() _>) _ "}" { StmtData::If { branches: vec![Branch::new(tm.location.clone(), BranchData::Is { tm, branches })] } }
             / "if"  _ tm:tm() _ stmt1:group_stmt() _ "else" _ stmt2:group_stmt() { StmtData::If { branches: vec![Branch { location: tm.location.clone(), data: BranchData::Bool { tm: tm.clone(), stmt: stmt1 } }, Branch { location: tm.location.clone(), data: BranchData::Bool { tm: Tm { location: tm.location.clone(), data: TmData::BoolLit { b: true } }, stmt: stmt2 } }] } }
             / "if"  _ tm:tm() _ stmt:group_stmt() { StmtData::If { branches: vec![Branch { location: tm.location.clone(), data: BranchData::Bool { tm, stmt } }] } }
             / tm:tm() { StmtData::Tm { tm } }
@@ -168,6 +169,7 @@ peg::parser! {
         rule tm_data7() -> TmData
             // unary operations
             = "-" tm:tm8() { TmData::UnOp { tm: Rc::new(tm), op: UnOp::Minus } }
+            / "not" _ tm:tm8() { TmData::UnOp { tm: Rc::new(tm), op: UnOp::Not } }
             / tm_data8()
 
         rule tm8() -> Tm = located(<tm_data8()>)
@@ -176,9 +178,9 @@ peg::parser! {
             // these three all need to be on the same precedence level - not sure why. investigate more later
 
             // method application
-            = arg1:tm8() "." head:tm9() "(" _ args_opts:arg_list() _ ")" { TmData::FunApp { head: Rc::new(head), args: [arg1].into_iter().chain(args_opts.0.into_iter()).collect::<Vec<_>>(), opts: args_opts.1 } }
+            = arg1:tm8() _ "." head:tm9() "(" _ args_opts:arg_list() _ ")" { TmData::FunApp { head: Rc::new(head), args: [arg1].into_iter().chain(args_opts.0.into_iter()).collect::<Vec<_>>(), opts: args_opts.1 } }
             // record projection
-            / tm:tm8() "." name:name() { TmData::RecProj { tm: Rc::new(tm), name } }
+            / tm:tm8() _ "." name:name() { TmData::RecProj { tm: Rc::new(tm), name } }
             // function application
             / head:tm8() "(" _ args_opts:arg_list()_ ")" { TmData::FunApp { head: Rc::new(head), args: args_opts.0, opts: args_opts.1 } }
             / tm_data9()
@@ -208,9 +210,10 @@ peg::parser! {
             / "{" _ fields:whitespace_sensitive_list(<rec_ty_field()>,<whitespace_except_newline() [','|'\n']() _>) _ "}" { TmData::RecTy { fields }}
             / "{" _ fields:whitespace_sensitive_list(<rec_ty_field()>,<whitespace_except_newline() [','|'\n']() _>) _ ".." _ "}" { TmData::RecWithTy { fields }}
 
-            // list type literals
-            / "[" _ tm:tm() _ "]" { TmData::ListTy { tm: Rc::new(tm) } }
-            // WARN there's no syntax yet for list literals, because how would we distinguish a singleton list from a list type literal?
+            // list type literals (with the clunky $ to separate list type literals from singleton lists)
+            / "$[" _ tm:tm() _ "]" { TmData::ListTy { tm: Rc::new(tm) } }
+            // list literals
+            / "[" _ tms:whitespace_sensitive_list(<tm()>,<whitespace_except_newline() [','|'\n']() _>) _ "]" { TmData::ListLit { tms } }
 
             // function type literals
             / "(" _ args_opts:list_then(<tm()>, <opt_param()>, <",">) _ ")" _ "->" _ body:tm() { TmData::FunTy { args: args_opts.0, body: Rc::new(body), opts: args_opts.1 } }

@@ -42,9 +42,11 @@ pub struct ReadMatcher<'a> {
 }
 
 impl<'p> Matcher<'p> for ReadMatcher<'p> {
-    fn evaluate<'a>(
+    fn eval<'a>(
         &self,
         arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
         val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
@@ -64,7 +66,10 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                             worlds
                                 .iter()
                                 .flat_map(|(bind_ctx, loc_ctx, edit_dist)| {
-                                    op.exec(arena, env, seq, loc_ctx, bind_ctx, *edit_dist)
+                                    op.exec(
+                                        arena, global_env, cache, env, seq, loc_ctx, bind_ctx,
+                                        *edit_dist,
+                                    )
                                 })
                                 .flatten()
                                 .collect::<Vec<_>>()
@@ -479,7 +484,7 @@ pub fn infer_read_pattern<'a>(
 
         let search: Ran<usize> = get_tightest_known(&known, &ran);
 
-        // todo: check if the loc is fixed
+        // check if the loc is fixed
         let fixed = Ran::new(search.start == ran.start, search.end == ran.end);
 
         ops.push(OpTm::Restrict {
@@ -514,7 +519,17 @@ pub fn infer_read_pattern<'a>(
 
     let final_ops = ops
         .iter()
-        .map(|op| op.eval(arena, ctx, param_vals.clone(), param_indices.clone()))
+        // WARN cache may be empty because this is pre-caching
+        .map(|op| {
+            op.eval(
+                arena,
+                &Env::default(),
+                &Cache::default(),
+                &ctx.tms,
+                &param_vals,
+                &param_indices,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()
         .map_err(ElabError::from_eval_error)?;
 
@@ -558,9 +573,11 @@ impl<'p> OpTm<'p> {
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
-        ctx: &Context<'a>,
-        params: HashMap<String, Vec<Val<'a>>>,
-        param_indices: HashMap<String, usize>,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        env: &Env<Val<'a>>,
+        params: &HashMap<String, Vec<Val<'a>>>,
+        param_indices: &HashMap<String, usize>,
     ) -> Result<OpVal<'a>, EvalError>
     where
         'p: 'a,
@@ -583,9 +600,8 @@ impl<'p> OpTm<'p> {
                 if ids.is_empty() {
                     // special case - just wrap up the one value
                     // (cache can be empty, because this is pre-caching)
-                    let val = tm.eval(arena, &Env::default(), &Cache::default(), &ctx.tms)?;
-                    let error_val =
-                        error.eval(arena, &Env::default(), &Cache::default(), &ctx.tms)?;
+                    let val = tm.eval(arena, &Env::default(), &Cache::default(), &env)?;
+                    let error_val = error.eval(arena, &Env::default(), &Cache::default(), &env)?;
 
                     match (&val, &error_val) {
                         (Val::Str { s }, Val::Num { n }) => Ok(OpVal::Restrict {
@@ -609,7 +625,7 @@ impl<'p> OpTm<'p> {
 
                     let ctxs = match &new_binds[..] {
                         [first, rest @ ..] => {
-                            first.into_iter().flat_map(|first_val: &(String, Val<'a>)| {
+                            first.iter().flat_map(|first_val: &(String, Val<'a>)| {
                                 rest.iter().fold(
                                     vec![vec![first_val.clone()]],
                                     |v: Vec<Vec<(String, Val<'a>)>>, bind| {
@@ -631,19 +647,14 @@ impl<'p> OpTm<'p> {
                     }
                     .map(|bind_ctx| {
                         // WARN this may not be binding things in the right order?
-                        let new_ctx =
-                            bind_ctx
-                                .clone()
-                                .into_iter()
-                                .fold(ctx.clone(), |ctx0, (name, val)| {
-                                    ctx0.bind_def(name, core::Val::StrTy, val as Val<'a>)
-                                });
+                        let new_env = bind_ctx
+                            .clone()
+                            .into_iter()
+                            .fold(env.clone(), |env0, (_, val)| env0.with(val as Val<'a>));
 
                         // WARN cache can be empty because this is pre-caching.
-                        let val =
-                            tm.eval(arena, &Env::default(), &Cache::default(), &new_ctx.tms)?;
-                        let error_val =
-                            error.eval(arena, &Env::default(), &Cache::default(), &new_ctx.tms)?;
+                        let val = tm.eval(arena, global_env, cache, &new_env)?;
+                        let error_val = error.eval(arena, global_env, cache, &new_env)?;
 
                         match (val, error_val) {
                             (Val::Str { s }, Val::Num { n }) => Ok((
@@ -677,18 +688,18 @@ impl<'p> OpTm<'p> {
     }
 }
 
-pub enum OpVal<'a> {
+pub enum OpVal<'p> {
     Let {
         // the location to assign to
         loc: usize,
         // the
-        tm: LocTm<'a>,
+        tm: LocTm<'p>,
         // the closest known locations to check bounds against
         flanking: Ran<usize>,
     },
     Restrict {
         // list of new binds to make
-        ctxs: Vec<(HashMap<usize, Val<'a>>, Seq)>,
+        ctxs: Vec<(HashMap<usize, Val<'p>>, Seq)>,
         // the location range to search between
         ran: Ran<usize>,
         // whether the ends are fixed
@@ -696,9 +707,14 @@ pub enum OpVal<'a> {
         // the locations to save
         save: Vec<Ran<usize>>,
     },
+    Neutral {
+        tm: OpTm<'p>,
+        params: HashMap<String, Vec<Val<'p>>>,
+        param_indices: HashMap<String, usize>,
+    },
 }
 
-impl<'a> Display for OpVal<'a> {
+impl<'p> Display for OpVal<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             OpVal::Let { loc, tm, flanking } => {
@@ -727,6 +743,11 @@ impl<'a> Display for OpVal<'a> {
                 save.iter().map(|a| a.to_string()).collect_vec().join(",")
             )
             .fmt(f),
+            OpVal::Neutral {
+                tm,
+                params,
+                param_indices,
+            } => "neutral".fmt(f),
         }
     }
 }
@@ -770,10 +791,12 @@ impl<'a> BindCtx<'a> {
     }
 }
 
-impl<'p> OpVal<'p> {
-    fn exec<'a>(
+impl<'b> OpVal<'b> {
+    fn exec<'a, 'p>(
         &self,
         arena: &'a Arena,
+        global_env: &Env<core::Val<'p>>,
+        cache: &Cache<core::Val<'p>>,
         env: &Env<core::Val<'a>>,
         seq: &'a [u8],
         loc_ctx: &LocCtx,
@@ -781,7 +804,8 @@ impl<'p> OpVal<'p> {
         edit_dist: u8,
     ) -> Result<Vec<(BindCtx<'a>, LocCtx, u8)>, core::EvalError>
     where
-        'p: 'a,
+        'b: 'a,
+        'p: 'b,
     {
         match self {
             OpVal::Let { loc, tm, flanking } => {
@@ -887,6 +911,24 @@ impl<'p> OpVal<'p> {
                 } else {
                     Ok(vec![])
                 }
+            }
+            OpVal::Neutral {
+                tm,
+                params,
+                param_indices,
+            } => {
+                let p2: HashMap<String, Vec<Val<'a>>> = params
+                    .into_iter()
+                    .map(|(name, val)| {
+                        (name.clone(), val.into_iter().map(|v| v.coerce()).collect())
+                    })
+                    .collect::<HashMap<_, _>>();
+
+                let op_val = tm.eval(arena, global_env, cache, env, &p2, param_indices)?;
+
+                op_val.exec(
+                    arena, global_env, cache, env, seq, loc_ctx, bind_ctx, edit_dist,
+                )
             }
         }
     }

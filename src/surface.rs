@@ -1050,10 +1050,17 @@ pub fn infer_tm<'a>(
                 .iter()
                 .try_fold(core::Val::AnyTy, |ty0, (_, ty1)| {
                     // first make sure the types are equivalent
-                    equate_ty(&tm.location, &ty0, ty1)?;
+                    equate_ty(&tm.location, ty1, &ty0)?;
 
                     // then return the most precise type
                     Ok(ty0.most_precise(arena, ty1))
+                })
+                .map_err(|e: ElabError| ElabError {
+                    location: e.location.clone(),
+                    message: format!(
+                        "all values in a list must be of the same type; {}",
+                        e.message
+                    ),
                 })?;
 
             let core_tms = tms_and_tys.into_iter().map(|(tm, _)| tm).collect();

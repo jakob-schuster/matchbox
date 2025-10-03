@@ -5,16 +5,18 @@ pub mod read_matcher;
 use crate::{
     myers::VarMyers,
     surface::Context,
-    util::{Arena, Env, Ran},
+    util::{Arena, Cache, Env, Ran},
 };
 
 use super::{EvalError, Val};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub trait Matcher<'p>: Send + Sync + Display {
-    fn evaluate<'a>(
+    fn eval<'a>(
         &self,
         arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
         val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
@@ -27,17 +29,19 @@ pub struct Chain<'p> {
     pub m2: Arc<dyn Matcher<'p> + 'p>,
 }
 impl<'p> Matcher<'p> for Chain<'p> {
-    fn evaluate<'a>(
+    fn eval<'a>(
         &self,
         arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
         val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
     where
         'p: 'a,
     {
-        let r1 = self.m1.evaluate(arena, env, val)?;
-        let r2 = self.m2.evaluate(arena, env, val)?;
+        let r1 = self.m1.eval(arena, global_env, cache, env, val)?;
+        let r2 = self.m2.eval(arena, global_env, cache, env, val)?;
 
         todo!()
         // Ok(r1.into_iter().chain(r2).collect::<Vec<_>>())
@@ -55,9 +59,11 @@ pub struct FieldAccess<'p> {
     pub inner: Arc<dyn Matcher<'p> + 'p>,
 }
 impl<'p> Matcher<'p> for FieldAccess<'p> {
-    fn evaluate<'a>(
+    fn eval<'a>(
         &self,
         arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
         val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
@@ -66,7 +72,7 @@ impl<'p> Matcher<'p> for FieldAccess<'p> {
     {
         match val {
             Val::Rec { rec } => match rec.get(self.name.as_bytes()) {
-                Ok(field) => self.inner.evaluate(arena, env, &field),
+                Ok(field) => self.inner.eval(arena, global_env, cache, env, &field),
                 // such errors are actually OK when pattern matching,
                 // just means the pattern didn't match!
                 Err(_) => Ok(vec![]),
@@ -83,9 +89,11 @@ impl<'p> Display for FieldAccess<'p> {
 
 pub struct Succeed {}
 impl<'p> Matcher<'p> for Succeed {
-    fn evaluate<'a>(
+    fn eval<'a>(
         &self,
         arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
         val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
@@ -105,9 +113,11 @@ impl Display for Succeed {
 
 pub struct Bind {}
 impl<'p> Matcher<'p> for Bind {
-    fn evaluate<'a>(
+    fn eval<'a>(
         &self,
         arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
         val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
@@ -135,9 +145,11 @@ impl<'p> Equal<'p> {
 }
 
 impl<'p> Matcher<'p> for Equal<'p> {
-    fn evaluate<'a>(
+    fn eval<'a>(
         &self,
         arena: &'a Arena,
+        global_env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
         env: &Env<Val<'a>>,
         val: &Val<'a>,
     ) -> Result<Vec<Vec<Val<'a>>>, EvalError>

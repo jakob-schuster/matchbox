@@ -268,7 +268,7 @@ impl<'p> Branch<'p> {
                     true => Ok(Some(stmt.eval(arena, global_env, cache, env)?)),
                     false => Ok(None),
                 },
-                v @ _ => Err(EvalError::from_internal(
+                v => Err(EvalError::from_internal(
                     InternalError {
                         message: format!("expected bool in branch, found {}?!", v),
                     },
@@ -355,7 +355,7 @@ impl<'p> PatternBranch<'p> {
     where
         'p: 'a,
     {
-        match &self.data.matcher.evaluate(arena, env, val)?[..] {
+        match &self.data.matcher.eval(arena, global_env, cache, env, val)?[..] {
             [] => Ok(None),
             bind_options => Ok(Some(
                 bind_options

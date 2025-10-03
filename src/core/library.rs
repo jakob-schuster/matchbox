@@ -133,6 +133,8 @@ pub fn foreign<'a>(
         "flag_supplementary_alignment" => Ok(Arc::new(flag_supplementary_alignment)),
 
         "round" => Ok(Arc::new(round)),
+        "floor" => Ok(Arc::new(floor)),
+        "ceil" => Ok(Arc::new(ceil)),
 
         _ => Err(EvalError::new(location, "foreign function does not exist")),
     }
@@ -1958,6 +1960,36 @@ pub fn round<'a>(
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Num { n }] => Ok(Val::Num { n: n.round() }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn floor<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Num { n: n.floor() }),
+
+        _ => Err(EvalError::new(
+            &location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
+pub fn ceil<'a>(
+    arena: &'a Arena,
+    location: &Location,
+    vtms: &[Val<'a>],
+) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Num { n }] => Ok(Val::Num { n: n.ceil() }),
 
         _ => Err(EvalError::new(
             &location,

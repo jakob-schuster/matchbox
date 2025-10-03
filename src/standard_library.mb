@@ -88,3 +88,5 @@ pcr_or_optical_duplicate = $(flag: Num): Bool => flag_pcr_or_optical_duplicate
 supplementary_alignment = $(flag: Num): Bool => flag_supplementary_alignment
 
 round = $(n: Num): Num => round
+floor = $(n: Num): Num => floor
+ceil = $(n: Num): Num => ceil

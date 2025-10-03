@@ -27,6 +27,7 @@ impl FileWriter for TxtWriter {
         match val {
             PortableVal::Str { s } => {
                 self.writer.write_all(s);
+                self.writer.write_all(b"\n");
 
                 Ok(())
             }

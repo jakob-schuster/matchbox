@@ -43,7 +43,7 @@ fn main() {
 
 /// The global configuration options, accessible as command line parameters.
 #[derive(Parser)]
-pub struct GlobalConfig {
+struct GlobalConfig {
     #[command(flatten)]
     input_reads: InputReads,
 
@@ -136,7 +136,7 @@ impl InputCode {
 }
 
 impl GlobalConfig {
-    pub fn default() -> GlobalConfig {
+    fn default() -> GlobalConfig {
         GlobalConfig {
             input_reads: InputReads {
                 stdin_format: Some(CLIFileType::Fastq),
@@ -343,8 +343,8 @@ fn read_code_from_script(script_filename: &str) -> Result<String, InputError> {
 /// so that they can all be universally printed with codespan.
 #[derive(Debug)]
 struct GenericError {
-    pub location: Option<Location>,
-    pub message: String,
+    location: Option<Location>,
+    message: String,
 }
 
 impl GenericError {

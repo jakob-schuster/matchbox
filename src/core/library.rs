@@ -758,13 +758,15 @@ pub fn translate<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }, Val::Str { s: stop_codon_char }] => match *stop_codon_char {
-            [c] => Ok(Val::Str {
-                s: arena.alloc(util::translate(s, c)).as_bytes(),
+        [Val::Str { s }, Val::Str { s: stop_codon_char }, Val::Str {
+            s: illegal_codon_char,
+        }] => match (*stop_codon_char, illegal_codon_char) {
+            ([c1], [c2]) => Ok(Val::Str {
+                s: arena.alloc(util::translate(s, c1, c2)).as_bytes(),
             }),
             _ => Err(EvalError::new(
                 location,
-                "stop codon can only be one character",
+                "stop codon and illegal codon can only be represented by one character",
             )),
         },
         _ => Err(EvalError::new(

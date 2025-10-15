@@ -31,7 +31,7 @@ slice = $(s: Str, start: Num, end: Num): Str => slice
 
 tag = $(r: { desc: Str .. }, tag: Str, prefix: Str = ' '): { desc: Str ..} => tag
 
-translate = $(seq: Str, stop_codon: Str = '-'): Str => translate
+translate = $(seq: Str, stop_codon: Str = '-', illegal_codon: Str = '?'): Str => translate
 
 str_concat = $(s0: Str, s1: Str): Str => str_concat
 

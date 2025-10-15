@@ -242,8 +242,8 @@ impl<T: Ord> Ran<T> {
 }
 
 /// Translates a sequence into protein.
-pub fn translate(seq: &[u8]) -> String {
-    fn translate_codon(codon: &[u8]) -> char {
+pub fn translate(seq: &[u8], stop_codon: &u8) -> String {
+    fn translate_codon(codon: &[u8], stop_codon: &u8) -> char {
         match codon {
             b"TTT" => 'F',
             b"TTC" => 'F',
@@ -255,11 +255,11 @@ pub fn translate(seq: &[u8]) -> String {
             b"TCG" => 'S',
             b"TAT" => 'Y',
             b"TAC" => 'Y',
-            b"TAA" => '-',
-            b"TAG" => '-',
+            b"TAA" => *stop_codon as char,
+            b"TAG" => *stop_codon as char,
             b"TGT" => 'C',
             b"TGC" => 'C',
-            b"TGA" => '-',
+            b"TGA" => *stop_codon as char,
             b"TGG" => 'W',
 
             b"CTT" => 'L',
@@ -322,7 +322,11 @@ pub fn translate(seq: &[u8]) -> String {
         String::new()
     } else {
         // or, recursively call
-        format!("{}{}", translate_codon(&seq[..3]), translate(&seq[3..]))
+        format!(
+            "{}{}",
+            translate_codon(&seq[..3], stop_codon),
+            translate(&seq[3..], stop_codon)
+        )
     }
 }
 

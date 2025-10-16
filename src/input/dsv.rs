@@ -9,8 +9,8 @@ use crate::{
         rec::{self, CSVHeader, FullyConcreteRec},
         Effect, Val,
     },
-    output::OutputHandler,
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
+    output::OutputHandler,
     util::{Arena, Cache, CoreRecField, Env},
 };
 
@@ -30,8 +30,6 @@ impl DSVReader {
             .iter()
             .flat_map(|a| a.iter().map(String::from))
             .collect::<Vec<_>>();
-
-        println!("{}", field_names.join(","));
 
         // let fields = field_names
         //     .iter()

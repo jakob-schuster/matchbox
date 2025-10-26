@@ -58,65 +58,10 @@ fn elab_test(code: &str) -> Result<String, GenericError> {
 /// printing the resulting effects as a string.
 #[cfg(test)]
 fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericError> {
+    use crate::core::rec::FullyConcreteRec;
     use std::sync::Arc;
 
-    use crate::{
-        core::{library::standard_library, rec::FullyConcreteRec},
-        input::ReaderWithBar,
-        surface::elab_prog_for_ctx,
-        GenericError,
-    };
-
-    let global_config = GlobalConfig::default();
-
-    let prog = parse(code, &global_config).map_err(GenericError::from)?;
-
-    // establish a global-level arena and context,
-    // for values allocated during elaboration
     let arena = Arena::new();
-    let ctx = standard_library(&arena);
-
-    // parse the standard library
-    let library_code = String::from_utf8(include_bytes!("standard_library.mb").to_vec()).unwrap();
-    let library_prog = parse(&library_code, &global_config).map_err(GenericError::from)?;
-
-    // elaborate to generate the context
-    let ctx =
-        elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
-
-    // parse the args program
-    let args_prog = parse(
-        &format!("args = {{{}}}", global_config.args),
-        &global_config,
-    )
-    .map_err(|e| GenericError::from(e))?;
-
-    let ctx =
-        elab_prog_for_ctx(&arena, &ctx, arena.alloc(args_prog)).map_err(GenericError::from)?;
-
-    // parse the program
-    let prog = parse(code, &global_config).map_err(GenericError::from)?;
-
-    // load in the input reads
-    let mut reader_with_bar =
-        ReaderWithBar::new(&global_config.input_reads).map_err(GenericError::from)?;
-
-    // elaborate to a core program
-    let core_prog = elab_prog(
-        &arena,
-        &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena)),
-        arena.alloc(prog),
-    )
-    .map_err(GenericError::from)?;
-
-    // cache the values
-    let (core_prog, cache) = core_prog
-        .cache(
-            &arena,
-            &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena))
-                .tms,
-        )
-        .map_err(GenericError::from)?;
 
     // create a toy read
     let read = core::Val::Rec {
@@ -146,78 +91,17 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
         }),
     };
 
-    // evaluate the program
-    Ok(core_prog
-        .eval(&arena, &ctx.tms, &cache, read)
-        .unwrap()
-        .iter()
-        .map(|a| a.to_string())
-        .collect::<Vec<_>>()
-        .join(","))
+    eval_one_read_test(code, &read, &arena)
 }
 /// Execute some given code on one given sequence,
 /// printing the resulting effects as a string.
 #[cfg(test)]
 fn eval_one_fastq_read_test(code: &str, seq: &[u8], qual: &[u8]) -> Result<String, GenericError> {
+    use crate::core::rec::FullyConcreteRec;
     use std::sync::Arc;
 
-    use crate::{
-        core::{library::standard_library, rec::FullyConcreteRec},
-        input::ReaderWithBar,
-        surface::elab_prog_for_ctx,
-        GenericError,
-    };
-
-    let global_config = GlobalConfig::default();
-
-    let prog = parse(code, &global_config).map_err(GenericError::from)?;
-
-    // establish a global-level arena and context,
-    // for values allocated during elaboration
     let arena = Arena::new();
-    let ctx = standard_library(&arena);
 
-    // parse the standard library
-    let library_code = String::from_utf8(include_bytes!("standard_library.mb").to_vec()).unwrap();
-    let library_prog = parse(&library_code, &global_config).map_err(GenericError::from)?;
-
-    // elaborate to generate the context
-    let ctx =
-        elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
-
-    // parse the args program
-    let args_prog = parse(
-        &format!("args = {{{}}}", global_config.args),
-        &global_config,
-    )
-    .map_err(|e| GenericError::from(e))?;
-
-    let ctx =
-        elab_prog_for_ctx(&arena, &ctx, arena.alloc(args_prog)).map_err(GenericError::from)?;
-
-    // parse the program
-    let prog = parse(code, &global_config).map_err(GenericError::from)?;
-
-    // load in the input reads
-    let mut reader_with_bar =
-        ReaderWithBar::new(&global_config.input_reads).map_err(GenericError::from)?;
-
-    // elaborate to a core program
-    let core_prog = elab_prog(
-        &arena,
-        &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena)),
-        arena.alloc(prog),
-    )
-    .map_err(GenericError::from)?;
-
-    // cache the values
-    let (core_prog, cache) = core_prog
-        .cache(
-            &arena,
-            &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena))
-                .tms,
-        )
-        .map_err(GenericError::from)?;
     // create a toy read
     let read = core::Val::Rec {
         rec: Arc::new(FullyConcreteRec {
@@ -252,9 +136,71 @@ fn eval_one_fastq_read_test(code: &str, seq: &[u8], qual: &[u8]) -> Result<Strin
         }),
     };
 
+    eval_one_read_test(code, &read, &arena)
+}
+
+fn eval_one_read_test(code: &str, read: &core::Val, arena: &Arena) -> Result<String, GenericError> {
+    use std::sync::Arc;
+
+    use crate::{
+        core::library::standard_library, input::ReaderWithBar, surface::elab_prog_for_ctx,
+        GenericError,
+    };
+
+    let global_config = GlobalConfig::default();
+
+    let prog = parse(code, &global_config).map_err(GenericError::from)?;
+
+    // establish a global-level arena and context,
+    // for values allocated during elaboration
+    let ctx = standard_library(&arena);
+
+    // parse the standard library
+    let library_code = String::from_utf8(include_bytes!("standard_library.mb").to_vec()).unwrap();
+    let library_prog = parse(&library_code, &global_config).map_err(GenericError::from)?;
+
+    // elaborate to generate the context
+    let ctx =
+        elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
+
+    // parse the args program
+    let args_prog = parse(
+        &format!("args = {{{}}}", global_config.args),
+        &global_config,
+    )
+    .map_err(GenericError::from)?;
+
+    let ctx =
+        elab_prog_for_ctx(&arena, &ctx, arena.alloc(args_prog)).map_err(GenericError::from)?;
+
+    // parse the program
+    let prog = parse(code, &global_config).map_err(GenericError::from)?;
+
+    // load in the input reads
+    let mut reader_with_bar =
+        ReaderWithBar::new(&global_config.input_reads).map_err(GenericError::from)?;
+
+    // elaborate to a core program
+    let core_prog = elab_prog(
+        &arena,
+        &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena)),
+        arena.alloc(prog),
+    )
+    .map_err(GenericError::from)?;
+
+    // cache the values
+    let (core_prog, cache) = core_prog
+        .cache(
+            &arena,
+            &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena))
+                .tms,
+        )
+        .map_err(GenericError::from)?;
+    // create a toy read
+
     // evaluate the program
     Ok(core_prog
-        .eval(&arena, &ctx.tms, &cache, read)
+        .eval(&arena, &ctx.tms, &cache, read.coerce())
         .unwrap()
         .iter()
         .map(|a| a.to_string())

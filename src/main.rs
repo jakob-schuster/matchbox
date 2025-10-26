@@ -36,7 +36,6 @@ mod surface;
 mod test;
 mod ui;
 mod util;
-mod visit;
 
 use clap::{Args, Parser};
 

@@ -13,7 +13,6 @@ use crate::{
     input::{FileType, InputError, Reader},
     parse,
     util::{bytes_to_string, Arena, Cache, CoreRecField, Env, Located, Location, Ran, RecField},
-    visit, GlobalConfig, InputReads,
 };
 
 /// An error raised if there was a problem in the surface syntax,
@@ -1717,6 +1716,100 @@ fn elab_str_lit_reg<'a>(
                 },
             ))
         }
+    }
+}
+
+/// Get the set of ids contained in a term.
+pub fn get_ids(tm: &Tm) -> Vec<String> {
+    match &tm.data {
+        crate::surface::TmData::BoolLit { b } => vec![],
+        crate::surface::TmData::NumLit { n } => vec![],
+        crate::surface::TmData::StrLit { regs } => regs
+            .iter()
+            .flat_map(|reg| match &reg.data {
+                crate::surface::StrLitRegionData::Str { s } => vec![],
+                crate::surface::StrLitRegionData::Tm { tm } => get_ids(&tm),
+            })
+            .collect(),
+        crate::surface::TmData::RecTy { fields } => fields
+            .iter()
+            .flat_map(|field| get_ids(&field.data))
+            .collect(),
+        crate::surface::TmData::RecWithTy { fields } => fields
+            .iter()
+            .flat_map(|field| get_ids(&field.data))
+            .collect(),
+        crate::surface::TmData::RecLit { fields } => fields
+            .iter()
+            .flat_map(|field| get_ids(&field.data))
+            .collect(),
+        crate::surface::TmData::RecProj { tm, name } => get_ids(tm),
+        crate::surface::TmData::FunTy { args, body, opts } => args
+            .iter()
+            .flat_map(get_ids)
+            .chain(
+                opts.iter()
+                    .flat_map(|param| {
+                        get_ids(&param.ty)
+                            .into_iter()
+                            .chain(get_ids(&param.tm))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .chain(get_ids(body))
+            .collect(),
+        crate::surface::TmData::FunLit { args, opts, body } => args
+            .iter()
+            .flat_map(|arg| get_ids(&arg.ty))
+            .chain(
+                opts.into_iter()
+                    .flat_map(|param| {
+                        get_ids(&param.ty)
+                            .into_iter()
+                            .chain(get_ids(&param.tm))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .chain(get_ids(&body))
+            .collect(),
+        crate::surface::TmData::FunLitForeign {
+            args,
+            ty,
+            name,
+            opts,
+        } => args
+            .iter()
+            .flat_map(|arg| get_ids(&arg.ty))
+            .chain(
+                opts.into_iter()
+                    .flat_map(|param| {
+                        get_ids(&param.ty)
+                            .into_iter()
+                            .chain(get_ids(&param.tm))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .chain(get_ids(&ty))
+            .collect(),
+        crate::surface::TmData::FunApp { head, args, opts } => get_ids(&head)
+            .into_iter()
+            .chain(args.iter().flat_map(get_ids).collect::<Vec<_>>())
+            .chain(
+                opts.into_iter()
+                    .flat_map(|(_, val)| get_ids(val))
+                    .collect::<Vec<_>>(),
+            )
+            .collect(),
+        crate::surface::TmData::BinOp { tm0, tm1, op } => {
+            get_ids(tm0).into_iter().chain(get_ids(tm1)).collect()
+        }
+        crate::surface::TmData::UnOp { tm, op } => get_ids(tm),
+        crate::surface::TmData::Name { name } => vec![name.clone()],
+        crate::surface::TmData::ListTy { tm } => get_ids(tm),
+        crate::surface::TmData::ListLit { tms } => tms.iter().flat_map(get_ids).collect(),
     }
 }
 

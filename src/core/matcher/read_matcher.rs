@@ -7,7 +7,6 @@ use crate::{
     myers::VarMyers,
     surface::{self, check_tm, Context, ElabError, Region, RegionData},
     util::{bytes_to_string, Arena, Cache, Env, Location, Ran},
-    visit,
 };
 
 use super::Matcher;
@@ -252,7 +251,7 @@ fn flatten_regs<'a>(
             ),
             RegionData::Term { tm, error } => {
                 // get the ids used in the tm
-                let ids = visit::ids_tm(tm)
+                let ids = surface::get_ids(tm)
                     .into_iter()
                     .filter(|id| binds.contains(id))
                     .collect::<Vec<_>>();

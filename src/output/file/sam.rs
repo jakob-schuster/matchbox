@@ -1,3 +1,5 @@
+//! Write to sequence alignment map (SAM) files.
+
 use std::{fs::File, io::Write};
 
 use noodles::sam::header::record::value::{map::tag, Map};

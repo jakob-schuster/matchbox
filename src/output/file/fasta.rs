@@ -1,3 +1,5 @@
+//! Write to FASTA files.
+
 use std::fs::File;
 
 use crate::{

@@ -1,3 +1,5 @@
+//! Handle various forms of output.
+
 use itertools::Itertools;
 
 use std::{
@@ -30,6 +32,7 @@ mod counts;
 mod file;
 mod stdout;
 
+/// A handler for all output handlers.
 pub struct OutputHandler<'a> {
     output_directory: String,
     stdout_handler: BufferedStdoutHandler<'a>,
@@ -38,6 +41,7 @@ pub struct OutputHandler<'a> {
     file_handler: FileHandler,
 }
 
+/// A summary reporting on the progress of various outputs.
 #[derive(Clone)]
 pub struct OutputHandlerSummary {
     pub stdout_handler: StdoutHandlerSummary,
@@ -46,6 +50,8 @@ pub struct OutputHandlerSummary {
     pub file_handler: FileHandlerSummary,
 }
 
+/// An error resulting from producing output.
+/// This is expected and should be displayed nicely.
 #[derive(Debug, Clone)]
 pub enum OutputError {
     /// Error when creating file

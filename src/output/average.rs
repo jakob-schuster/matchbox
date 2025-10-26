@@ -1,3 +1,5 @@
+//! Accumulate a global mean.
+
 use std::{collections::HashMap, fs::File, io::Write};
 
 use itertools::Itertools;

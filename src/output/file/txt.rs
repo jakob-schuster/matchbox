@@ -1,3 +1,5 @@
+//! Write to text files.
+
 use std::{
     fs::File,
     io::{BufWriter, Write},

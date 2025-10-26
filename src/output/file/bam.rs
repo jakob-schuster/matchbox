@@ -1,3 +1,5 @@
+//! Write to binary alignment map (BAM) files.
+
 use std::fs::File;
 
 use noodles::sam::{

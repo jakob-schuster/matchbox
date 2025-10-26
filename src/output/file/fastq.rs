@@ -1,3 +1,5 @@
+//! Write to FASTQ files.
+
 use std::fs::File;
 
 use crate::{

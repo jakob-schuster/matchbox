@@ -1,3 +1,5 @@
+//! Write to stdout.
+
 use std::io::{BufWriter, StdoutLock, Write};
 
 use crate::{

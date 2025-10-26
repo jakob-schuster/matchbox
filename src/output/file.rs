@@ -1,3 +1,5 @@
+//! Write to any number of output files.
+
 mod bam;
 mod fasta;
 mod fastq;

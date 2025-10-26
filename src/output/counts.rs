@@ -1,3 +1,5 @@
+//! Accumulate global counts.
+
 use std::{collections::HashMap, fs::File, io::Write};
 
 use itertools::Itertools;

@@ -1,3 +1,5 @@
+//! Define the core language, and evaluate it given the context of a single read to produce output effects.
+
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use bio::stats::probs;
@@ -14,6 +16,9 @@ pub mod library;
 pub mod matcher;
 pub mod rec;
 
+/// An error raised if there was a problem in evaluating core syntax,
+/// usually as a result of dynamic function errors. This is normal, and should be rendered
+/// nicely to the programmer.
 #[derive(Clone, Debug)]
 pub struct EvalError {
     pub location: Location,
@@ -37,12 +42,16 @@ impl EvalError {
 }
 
 pub type Prog<'p> = Located<ProgData<'p>>;
+/// A matchbox program, consisting of a list of statements.
 #[derive(Clone)]
 pub struct ProgData<'p> {
     pub stmt: Stmt<'p>,
 }
 
 impl<'p> Prog<'p> {
+    /// In the context of an arena, an environment of values,
+    /// the cache of pre-computed values, and a single read,
+    /// evaluate a program into a list of effects.
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
@@ -77,6 +86,7 @@ impl<'p> Prog<'p> {
 }
 
 pub type Stmt<'p> = Located<StmtData<'p>>;
+/// A statement, which can be a binding, a term on its own, or a conditional.
 #[derive(Clone)]
 pub enum StmtData<'p> {
     Let {
@@ -95,6 +105,9 @@ pub enum StmtData<'p> {
 }
 
 impl<'p> Stmt<'p> {
+    /// In the context of an arena, a global environment of values from the standard library,
+    /// the cache of pre-computed values, and a local environment,
+    /// evaluate a statement into a list of effects.
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
@@ -238,6 +251,7 @@ impl<'p> Stmt<'p> {
 }
 
 pub type Branch<'p> = Located<BranchData<'p>>;
+/// A conditional branch which is either a single conditional, or a list of match branches.
 #[derive(Clone)]
 pub enum BranchData<'p> {
     Bool {
@@ -252,6 +266,9 @@ pub enum BranchData<'p> {
 }
 
 impl<'p> Branch<'p> {
+    /// In the context of an arena, a global environment of values from the standard library,
+    /// the cache of pre-computed values, and a local environment,
+    /// evaluate a branch into a list of effects.
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
@@ -337,6 +354,8 @@ impl<'p> Branch<'p> {
 }
 
 pub type PatternBranch<'p> = Located<PatternBranchData<'p>>;
+/// A pattern-matching branch which contains a matcher,
+/// and a statement to execute on successful matches.
 #[derive(Clone)]
 pub struct PatternBranchData<'p> {
     pub matcher: Arc<dyn Matcher<'p> + 'p>,
@@ -344,6 +363,9 @@ pub struct PatternBranchData<'p> {
 }
 
 impl<'p> PatternBranch<'p> {
+    /// In the context of an arena, a global environment of values from the standard library,
+    /// the cache of pre-computed values, and a local environment,
+    /// evaluate a pattern branch into a list of effects.
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
@@ -410,6 +432,7 @@ impl<'p> PatternBranch<'p> {
 }
 
 pub type Tm<'a> = Located<TmData<'a>>;
+/// A term.
 #[derive(Clone)]
 pub enum TmData<'a> {
     Cached {
@@ -484,6 +507,8 @@ pub enum TmData<'a> {
     EffectTy,
 }
 
+/// A function signature, which contains a list of arguments,
+/// a list of named optional arguments with default values, and a return type.
 #[derive(Clone)]
 struct FunSig<'a> {
     args: Vec<Tm<'a>>,
@@ -492,6 +517,9 @@ struct FunSig<'a> {
 }
 
 impl<'p> Tm<'p> {
+    /// In the context of an arena, a global environment of values from the standard library,
+    /// the cache of pre-computed values, and a local environment,
+    /// evaluate a term into a value.
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
@@ -850,7 +878,7 @@ impl<'p> Tm<'p> {
     }
 }
 
-/// Function type that explicitly captures its environment.
+/// Function that explicitly captures its environment.
 #[derive(Clone)]
 pub struct FunData<'a> {
     pub env: Env<Val<'a>>,
@@ -858,6 +886,7 @@ pub struct FunData<'a> {
 }
 
 impl<'a> FunData<'a> {
+    /// Applies a function to a list of arguments, returning the result.
     pub fn app(&self, arena: &'a Arena, args: Vec<Val<'a>>) -> Result<Val<'a>, EvalError> {
         let new_env = args
             .into_iter()
@@ -868,6 +897,7 @@ impl<'a> FunData<'a> {
     }
 }
 
+/// A value.
 #[derive(Clone)]
 pub enum Val<'a> {
     /// Atomic values
@@ -948,26 +978,9 @@ pub enum Val<'a> {
     },
 }
 
-struct OptionalArgs<'a> {
-    v: Vec<(&'a [u8], Val<'a>)>,
-}
-
-impl<'a> OptionalArgs<'a> {
-    fn get(&self, name: &[u8]) -> Result<&Val<'a>, InternalError> {
-        for (arg_name, arg_val) in &self.v {
-            if (*arg_name).eq(name) {
-                return Ok(arg_val);
-            }
-        }
-
-        Err(InternalError::new(&format!(
-            "couldn't find argument '{}' in function type!?",
-            String::from_utf8(name.to_vec()).unwrap()
-        )))
-    }
-}
-
 impl<'a> Val<'a> {
+    /// Checks whether two types are equivalent.
+    /// When one type is a more general or equally general representation of another, they are equivalent.
     pub fn equiv(&self, other: &Val<'a>) -> bool {
         // takes a field name, and looks it up in the list of fields,
         // returning the type if one is found
@@ -1111,6 +1124,7 @@ impl<'a> Val<'a> {
         }
     }
 
+    /// Checks whether two types are equal.
     pub fn eq<'b, 'c>(&self, other: &Val<'c>) -> bool {
         match (self, other) {
             (Val::Univ, Val::Univ)
@@ -1155,6 +1169,7 @@ impl<'a> Val<'a> {
         }
     }
 
+    /// Given another type, return the most precise type of the two.
     pub fn most_precise(&self, arena: &'a Arena, other: &Val<'a>) -> Val<'a> {
         // takes a field name, and looks it up in the list of fields,
         // returning the type if one is found
@@ -1200,7 +1215,7 @@ impl<'a> Val<'a> {
         }
     }
 
-    /// A clumsy function to move a value from one arena to another,
+    /// Clumsily move a value from one arena to another,
     /// necessitated by ConcreteRec, which has its values from a static arena and then needs to produce values in the dynamic arena.
     /// Probably shockingly inefficient and could be removed with better design.
     pub fn coerce<'b>(&self) -> Val<'b>
@@ -1262,6 +1277,7 @@ impl<'a> Val<'a> {
         }
     }
 
+    /// Checks if a value is neutral.
     pub fn is_neutral(&self) -> bool {
         match self {
             Val::Neutral { neutral } => true,
@@ -1280,6 +1296,7 @@ impl<'a> Val<'a> {
     }
 }
 
+/// A neutral value, not able to be evaluated at compile time.
 #[derive(Clone)]
 pub enum Neutral<'a> {
     Var {
@@ -1383,6 +1400,8 @@ impl<'a> Neutral<'a> {
     }
 }
 
+/// Applies a head value (expected to be a function) to a list of arguments,
+/// returning the resulting value.
 pub fn app<'a>(
     arena: &'a Arena,
     location: &Location,
@@ -1421,6 +1440,7 @@ pub fn app<'a>(
     }
 }
 
+/// Convert a value to a portable value, so it owns its data and can be shared.
 pub fn make_portable<'a>(arena: &'a Arena, val: &Val<'a>) -> PortableVal {
     match val {
         Val::Univ => PortableVal::Univ,
@@ -1504,6 +1524,7 @@ impl InternalError {
     }
 }
 
+/// A portable value which can be shared.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PortableVal {
     /// Atomic values
@@ -1561,6 +1582,7 @@ pub enum PortableVal {
     },
 }
 
+/// An effect, carrying a value and a handler.
 #[derive(Clone)]
 pub struct Effect {
     pub val: PortableVal,

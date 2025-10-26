@@ -139,6 +139,8 @@ fn eval_one_fastq_read_test(code: &str, seq: &[u8], qual: &[u8]) -> Result<Strin
     eval_one_read_test(code, &read, &arena)
 }
 
+/// Given some code and a read, which exists within a given arena,
+/// printing the resulting effects as a string
 fn eval_one_read_test(code: &str, read: &core::Val, arena: &Arena) -> Result<String, GenericError> {
     use std::sync::Arc;
 

@@ -83,6 +83,7 @@ struct GlobalConfig {
     match_mode: MatchMode,
 }
 
+/// Global configuration options related to inputting reads.
 #[derive(Args)]
 struct InputReads {
     /// The format for parsing stdin. To be used when piping input into matchbox
@@ -102,6 +103,7 @@ struct InputReads {
     debug: bool,
 }
 
+/// An optionally-paired reads file.
 #[derive(Args, Clone)]
 struct InputReadsFile {
     /// A read file to process.
@@ -113,6 +115,7 @@ struct InputReadsFile {
     paired_with: Option<String>,
 }
 
+/// Global configuration options related to inputting matchbox code.
 #[derive(Args)]
 #[group(required = true, multiple = false)]
 struct InputCode {
@@ -126,6 +129,7 @@ struct InputCode {
 }
 
 impl InputCode {
+    /// Get the name of the code file, for displaying in error messages.
     fn name(&self) -> String {
         if let Some(script_file) = &self.script_file {
             script_file.to_string()
@@ -136,6 +140,7 @@ impl InputCode {
         }
     }
 
+    /// Get the content of the code file.
     fn code(&self) -> Result<String, InputError> {
         if let Some(script_file) = &self.script_file {
             read_code_from_script(&script_file)

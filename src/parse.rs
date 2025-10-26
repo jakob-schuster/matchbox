@@ -1,3 +1,5 @@
+//! Parse matchbox scripts into the surface language
+
 use parser::{prog, tm};
 
 use crate::{
@@ -7,12 +9,17 @@ use crate::{
 };
 use std::rc::Rc;
 
+/// An error resulting from parsing.
 #[derive(Debug, Clone)]
 pub struct ParseError {
+    /// The location of the error in the
     pub location: Location,
+    /// A custom error message
     pub message: String,
 }
 
+/// Parse some matchbox code into a surface program, given some global config.
+/// In the case of a parsing error, throw a parse error.
 pub fn parse(string: &str, global_config: &GlobalConfig) -> Result<Prog, ParseError> {
     prog(string, global_config).map_err(|e| ParseError {
         location: Location::new(e.location.offset, e.location.offset + 1),
@@ -20,6 +27,8 @@ pub fn parse(string: &str, global_config: &GlobalConfig) -> Result<Prog, ParseEr
     })
 }
 
+/// Parse some matchbox code into a surface term, given some global config.
+/// In the case of a parsing error, throw a parse error.
 pub fn parse_tm(string: &str, global_config: &GlobalConfig) -> Result<Tm, ParseError> {
     tm(string, global_config).map_err(|e| ParseError {
         location: Location::new(e.location.offset, e.location.offset + 1),

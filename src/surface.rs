@@ -1,3 +1,5 @@
+//! Define the surface language, and elaborate it to the core language using bidirectional type inference.
+
 use std::{collections::HashMap, fmt::Display, io::Read, ops::Deref, rc::Rc, sync::Arc};
 
 use itertools::Itertools;
@@ -14,7 +16,7 @@ use crate::{
     visit, GlobalConfig, InputReads,
 };
 
-/// An error that will be raised if there was a problem in the surface syntax,
+/// An error raised if there was a problem in the surface syntax,
 /// usually as a result of type errors. This is normal, and should be rendered
 /// nicely to the programmer.
 #[derive(Debug, Clone)]
@@ -24,6 +26,7 @@ pub struct ElabError {
 }
 
 impl ElabError {
+    /// Given a location and a custom message, create a new ElabError.
     pub fn new(location: &Location, message: &str) -> ElabError {
         ElabError {
             location: location.clone(),
@@ -31,6 +34,7 @@ impl ElabError {
         }
     }
 
+    /// Create a new ElabError resulting from an unbound name.
     pub fn new_unbound_name(location: &Location, name: &str) -> ElabError {
         ElabError {
             location: location.clone(),
@@ -38,6 +42,7 @@ impl ElabError {
         }
     }
 
+    /// Create a new ElabError resulting from accessing a non-existent record field.
     pub fn new_non_existent_field_access<'a>(
         location: &Location,
         name: &str,
@@ -52,6 +57,7 @@ impl ElabError {
         }
     }
 
+    /// Convert an EvalError to an ElabError.
     pub fn from_eval_error(eval_error: EvalError) -> ElabError {
         ElabError {
             location: eval_error.location,
@@ -61,12 +67,14 @@ impl ElabError {
 }
 
 pub type Prog = Located<ProgData>;
+/// A matchbox program, consisting of a list of statements.
 #[derive(Debug)]
 pub struct ProgData {
     pub stmts: Vec<Stmt>,
 }
 
 pub type Stmt = Located<StmtData>;
+/// A statement.
 #[derive(Debug, Clone)]
 pub enum StmtData {
     /// A group of statements, executed together.
@@ -83,34 +91,35 @@ pub enum StmtData {
     Tm { tm: Tm },
 
     /// A conditional structure.
-    /// [ if read is [ |3| rest:_ ] => rest |> trimmed ]
+    /// [ if read matches [ |3| rest:_ ] => rest |> trimmed ]
     If { branches: Vec<Branch> },
 }
 
 pub type Branch = Located<BranchData>;
+/// A branch of a conditional. Either a boolean branch, or a match branch.
 #[derive(Debug, Clone)]
 pub enum BranchData {
     /// A boolean branch
-    /// [ read.seq.len() > 100 => read.name |> names ]
+    /// [ read.seq.len() > 100 { read.name |> names } ]
     Bool { tm: Tm, stmt: Stmt },
 
     /// A pattern-matching branch
-    /// [ read is [_ tso _] => read |> filtered ]
+    /// [ read matches [_ tso _] => read |> filtered ]
     Is {
         tm: Tm,
         branches: Vec<PatternBranch>,
     },
 }
 
-/// The pattern is attempted; if successful, the bindings from the pattern
-/// match are used when executing the statement.
 pub type PatternBranch = Located<PatternBranchData>;
+/// A pattern branch, containing a pattern to test and a statement to execute.
 #[derive(Debug, Clone)]
 pub struct PatternBranchData {
     pub pat: Pattern,
     pub stmt: Stmt,
 }
 
+/// Match mode, assignable using the --match-mode parameter.
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub enum MatchMode {
     All,
@@ -118,10 +127,10 @@ pub enum MatchMode {
     OneBest,
 }
 
+pub type Pattern = Located<PatternData>;
 /// A pattern is a boolean test that, if successful,
 /// also produces a context of bound values.
 /// Could be a literal, or something more complex.
-pub type Pattern = Located<PatternData>;
 #[derive(Debug, Clone)]
 pub enum PatternData {
     /// Named pattern (match the body, return a binding)
@@ -158,8 +167,8 @@ pub enum PatternData {
     },
 }
 
-/// A parameter in a read pattern
 pub type ReadParameter = Located<ReadParameterData>;
+/// A parameter in a read pattern. Contains a name, and a term.
 #[derive(Debug, Clone)]
 pub struct ReadParameterData {
     pub name: String,
@@ -167,6 +176,7 @@ pub struct ReadParameterData {
 }
 
 pub type Region = Located<RegionData>;
+/// A region in a read pattern.
 #[derive(Debug, Clone)]
 pub enum RegionData {
     Hole,
@@ -177,6 +187,7 @@ pub enum RegionData {
 }
 
 pub type Tm = Located<TmData>;
+/// A term.
 #[derive(Clone, Debug)]
 pub enum TmData {
     /// Value literals
@@ -251,12 +262,14 @@ pub enum TmData {
     },
 }
 
+/// A parameter, with a name and a type.
 #[derive(Clone, Debug)]
 pub struct Param {
     pub name: String,
     pub ty: Tm,
 }
 
+/// An optional parameter, with a name, a default value and a type.
 #[derive(Clone, Debug)]
 pub struct OptParam {
     pub name: String,
@@ -264,6 +277,7 @@ pub struct OptParam {
     pub tm: Tm,
 }
 
+/// A number literal, either an int or a float.
 #[derive(Clone, Debug)]
 pub enum Num {
     Int(i32),
@@ -279,6 +293,7 @@ impl Num {
     }
 }
 
+/// A binary operation.
 #[derive(Clone, Debug)]
 pub enum BinOp {
     Plus,
@@ -298,6 +313,7 @@ pub enum BinOp {
     Exponent,
 }
 
+/// A unary operation.
 #[derive(Clone, Debug)]
 pub enum UnOp {
     Minus,
@@ -305,12 +321,14 @@ pub enum UnOp {
 }
 
 pub type StrLitRegion = Located<StrLitRegionData>;
+/// A region of a string literal. Either a string, or a term to be formatted.
 #[derive(Clone, Debug)]
 pub enum StrLitRegionData {
     Str { s: Vec<u8> },
     Tm { tm: Tm },
 }
 
+/// An elaboration context. Contains a list of names associated with types.
 #[derive(Clone, Default, Debug)]
 pub struct Context<'a> {
     size: usize,
@@ -426,6 +444,7 @@ impl<'a> Context<'a> {
         }
     }
 
+    /// Asserts that a name is unique.
     pub fn assert_unique_name(&self, location: &Location, name: &String) -> Result<(), ElabError> {
         // check that the name isn't already assigned
         if self.names.iter().contains(name) {
@@ -458,6 +477,7 @@ impl<'a> Display for Context<'a> {
     }
 }
 
+/// Elaborate a program to a core program.
 pub fn elab_prog<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -476,6 +496,7 @@ pub fn elab_prog<'a>(
     ))
 }
 
+/// Elaborate a statement to a core statement.
 fn elab_stmt<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -582,6 +603,9 @@ fn elab_stmt<'a>(
     }
 }
 
+/// Elaborate a statement, but just return the context generated.
+/// This is for processing the standard library, and any other modules that
+/// need to be read prior to reading the user's code.
 pub fn elab_prog_for_ctx<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -593,9 +617,7 @@ pub fn elab_prog_for_ctx<'a>(
     }
 }
 
-/// Elaborate a statement, but just return the context generated
-/// This is for processing the standard library, and any other modules that
-/// need to be read prior to reading the user's code.
+/// Elaborate a statement, but just return the context generated.
 fn elab_stmt_for_ctx<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -632,6 +654,7 @@ fn elab_stmt_for_ctx<'a>(
     }
 }
 
+/// Elaborate a branch into a core branch.
 fn elab_branch<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -684,6 +707,8 @@ fn elab_branch<'a>(
     }
 }
 
+/// Elaborate a pattern branch into a core pattern branch,
+/// and infer the type of the branch body.
 fn infer_pattern_branch<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -714,6 +739,7 @@ fn infer_pattern_branch<'a>(
     ))
 }
 
+/// Elaborate a match mode into a core match mode.
 fn elab_match_mode(mode: &MatchMode) -> Result<core::matcher::read_matcher::MatchMode, ElabError> {
     Ok(match mode {
         MatchMode::All => core::matcher::read_matcher::MatchMode::All,
@@ -722,6 +748,8 @@ fn elab_match_mode(mode: &MatchMode) -> Result<core::matcher::read_matcher::Matc
     })
 }
 
+/// Given a pattern, elaborate to a core pattern and infer the type
+/// as well as the types of each binding.
 fn infer_pattern<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -894,6 +922,7 @@ fn infer_pattern<'a>(
     }
 }
 
+/// Try to equate two types.
 fn equate_ty<'a>(
     location: &Location,
     ty1: &core::Val<'a>,
@@ -909,6 +938,7 @@ fn equate_ty<'a>(
     }
 }
 
+/// Elaborate a term to a core term while checking it has a particular type.
 pub fn check_tm<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -924,6 +954,7 @@ pub fn check_tm<'a>(
     }
 }
 
+/// Elaborate a term to a core term and infer its type.
 pub fn infer_tm<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -1395,14 +1426,9 @@ pub fn infer_tm<'a>(
     }
 }
 
-/// Takes a binary operator and the types of its two arguments,
-/// returns the name of the function that it corresponds to
-/// and the return type.
+/// Takes a binary operator and the types of its arguments,
+/// returns the function that it corresponds to and the return type.
 /// Checks that the input types are appropriate.
-///
-/// This function is where any polymorphism of operators
-/// (an operator referring to different functions depending on input types)
-/// would be provided.
 fn infer_bin_op<'a>(
     bin_op: &BinOp,
     arena: &'a Arena,
@@ -1484,6 +1510,9 @@ fn infer_bin_op<'a>(
     }
 }
 
+/// Takes a unary operator and the type of its argument,
+/// returns the function that it corresponds to and the return type.
+/// Checks that the input type is appropriate.
 fn infer_un_op<'a>(
     un_op: &UnOp,
     arena: &'a Arena,
@@ -1600,6 +1629,8 @@ fn infer_un_op<'a>(
     }
 }
 
+/// Elaborate the regions of a string literal into a core term.
+/// `str_concat` function calls are inserted during this elaboration.
 fn elab_str_lit_regs<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,
@@ -1650,6 +1681,8 @@ fn elab_str_lit_regs<'a>(
     }
 }
 
+/// Elaborate a single region of a string literal into a core term.
+/// `to_str` function calls are inserted where appropriate to format values.
 fn elab_str_lit_reg<'a>(
     arena: &'a Arena,
     ctx: &Context<'a>,

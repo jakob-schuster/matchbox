@@ -11,23 +11,23 @@ name = "matchbox"
 path = "src/main.rs"
 
 [dependencies]
-bumpalo = "*"
-bio = "*"
-rayon = "*"
-itertools = "*"
-csv = "*"
-peg = "*"
-codespan-reporting = "*"
-clap = { version = "*", features = ["derive"] }
-clap_builder = "*"
-codespan = "*"
-flate2 = { version = "*", features = ["zlib-ng"] }
+bumpalo = "~3.19"
+bio = "~3.0"
+rayon = "~1.11"
+itertools = "~0.14"
+csv = "~1.4"
+peg = "~0.8"
+codespan-reporting = "~0.13"
+clap = { version = "~4.5", features = ["derive"] }
+clap_builder = "~4.5"
+codespan = "~0.13"
+flate2 = { version = "~1.1", features = ["zlib-ng"] }
 noodles = { version = "0.101.0", features = ["sam", "bam", "bgzf"] }
 noodles-util = { version = "0.70.0", features = ["alignment"] }
-indicatif = "*"
-color-eyre = "*"
-ratatui = "*"
-crossterm = "*"
+indicatif = "~0.18"
+color-eyre = "~0.6"
+ratatui = "~0.29"
+crossterm = "~0.29"
 
 [dev-dependencies]
 insta = { version = "1.42.0", features = ["yaml"] }

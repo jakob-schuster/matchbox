@@ -129,15 +129,12 @@ impl<'p> Stmt<'p> {
                 let val = tm.eval(arena, global_env, cache, env)?;
 
                 match val {
-                    Val::Effect { val, handler } => {
+                    Val::Effect { effect } => {
                         // export the values to be portable
-                        Ok([Effect {
-                            val: val.clone(),
-                            handler: handler.clone(),
-                        }]
-                        .into_iter()
-                        .chain(next.eval(arena, global_env, cache, env)?)
-                        .collect::<Vec<_>>())
+                        Ok([effect]
+                            .into_iter()
+                            .chain(next.eval(arena, global_env, cache, env)?)
+                            .collect::<Vec<_>>())
                     }
                     _ => panic!("type error in statement-level effect, found {}?!", val),
                 }
@@ -973,9 +970,17 @@ pub enum Val<'a> {
     EffectTy,
     // by the time it's an effect, the values have already been made portable
     Effect {
-        val: PortableVal,
-        handler: PortableVal,
+        effect: Effect,
     },
+}
+
+/// An effect, carrying a value and a handler.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Effect {
+    Stdout { val: PortableVal },
+    Out { val: PortableVal, name: Vec<u8> },
+    Count { val: PortableVal, name: Vec<u8> },
+    Mean { num: f32, name: Vec<u8> },
 }
 
 impl<'a> Val<'a> {
@@ -1124,7 +1129,7 @@ impl<'a> Val<'a> {
         }
     }
 
-    /// Checks whether two types are equal.
+    /// Checks whether two values are equal.
     pub fn eq<'b, 'c>(&self, other: &Val<'c>) -> bool {
         match (self, other) {
             (Val::Univ, Val::Univ)
@@ -1153,16 +1158,7 @@ impl<'a> Val<'a> {
                     })
             }
 
-            (
-                Val::Effect {
-                    val: val1,
-                    handler: handler1,
-                },
-                Val::Effect {
-                    val: val2,
-                    handler: handler2,
-                },
-            ) => val1.eq(val2) && handler1.eq(handler2),
+            (Val::Effect { effect: e1 }, Val::Effect { effect: e2 }) => e1.eq(e2),
 
             // really not sure how to check equivalence between functions, so false for now
             _ => false,
@@ -1270,9 +1266,8 @@ impl<'a> Val<'a> {
                 neutral: neutral.coerce(),
             },
             Val::EffectTy => Val::EffectTy,
-            Val::Effect { val, handler } => Val::Effect {
-                val: val.clone(),
-                handler: handler.clone(),
+            Val::Effect { effect } => Val::Effect {
+                effect: effect.clone(),
             },
         }
     }
@@ -1503,9 +1498,8 @@ pub fn make_portable<'a>(arena: &'a Arena, val: &Val<'a>) -> PortableVal {
         Val::AnyTy => todo!(),
 
         Val::EffectTy => PortableVal::EffectTy,
-        Val::Effect { val, handler } => PortableVal::Effect {
-            val: Arc::new(val.clone()),
-            handler: Arc::new(handler.clone()),
+        Val::Effect { effect } => PortableVal::Effect {
+            effect: Arc::new(effect.clone()),
         },
     }
 }
@@ -1577,16 +1571,8 @@ pub enum PortableVal {
 
     EffectTy,
     Effect {
-        val: Arc<PortableVal>,
-        handler: Arc<PortableVal>,
+        effect: Arc<Effect>,
     },
-}
-
-/// An effect, carrying a value and a handler.
-#[derive(Clone)]
-pub struct Effect {
-    pub val: PortableVal,
-    pub handler: PortableVal,
 }
 
 impl<'a> Display for Prog<'a> {
@@ -1767,7 +1753,7 @@ impl<'a> Display for Val<'a> {
             Val::FunReturnTyAwaiting { data } => format!("#awaiting({})", data).fmt(f),
             Val::Neutral { neutral } => format!("#neutral({})", neutral).fmt(f),
             Val::EffectTy => "Effect".fmt(f),
-            Val::Effect { val, handler } => format!("#effect({}, {})", val, handler).fmt(f),
+            Val::Effect { effect } => format!("#effect({})", effect).fmt(f),
         }
     }
 }
@@ -1850,7 +1836,18 @@ impl<'a> Display for FunData<'a> {
 
 impl<'a> Display for Effect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        format!("{} |> {}", self.val, self.handler).fmt(f)
+        match self {
+            Effect::Stdout { val } => format!("stdout!({})", val).fmt(f),
+            Effect::Out { val, name } => {
+                format!("out!({}, name = {})", val, bytes_to_string(name).unwrap()).fmt(f)
+            }
+            Effect::Count { val, name } => {
+                format!("count!({}, name = {})", val, bytes_to_string(name).unwrap()).fmt(f)
+            }
+            Effect::Mean { num, name } => {
+                format!("mean!({}, {})", num, bytes_to_string(name).unwrap()).fmt(f)
+            }
+        }
     }
 }
 
@@ -1926,7 +1923,7 @@ impl<'a> Display for PortableVal {
             .fmt(f),
             PortableVal::Fun { s } => format!("#func({})", s).fmt(f),
             PortableVal::EffectTy => "Effect".fmt(f),
-            PortableVal::Effect { val, handler } => format!("#effect({}, {})", val, handler).fmt(f),
+            PortableVal::Effect { effect } => format!("#effect({})", effect).fmt(f),
         }
     }
 }

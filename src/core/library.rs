@@ -1504,14 +1504,8 @@ pub fn stdout_eff<'a>(
     match vtms {
         // string types pass straight through to reduce allocations
         [v] => Ok(Val::Effect {
-            val: make_portable(arena, v),
-            handler: PortableVal::Rec {
-                fields: HashMap::from([(
-                    b"output".to_vec(),
-                    PortableVal::Str {
-                        s: b"stdout".to_vec(),
-                    },
-                )]),
+            effect: Effect::Stdout {
+                val: make_portable(arena, v),
             },
         }),
 
@@ -1530,19 +1524,9 @@ pub fn count_eff<'a>(
     match vtms {
         // string types pass straight through to reduce allocations
         [v, Val::Str { s: name }] => Ok(Val::Effect {
-            val: PortableVal::Rec {
-                fields: HashMap::from([
-                    (b"name".to_vec(), PortableVal::Str { s: name.to_vec() }),
-                    (b"val".to_vec(), make_portable(arena, v)),
-                ]),
-            },
-            handler: PortableVal::Rec {
-                fields: HashMap::from([(
-                    b"output".to_vec(),
-                    PortableVal::Str {
-                        s: b"counts".to_vec(),
-                    },
-                )]),
+            effect: Effect::Count {
+                val: make_portable(arena, v),
+                name: name.to_vec(),
             },
         }),
 
@@ -1559,18 +1543,10 @@ pub fn out_eff<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [v, filename @ Val::Str { .. }] => Ok(Val::Effect {
-            val: make_portable(arena, v),
-            handler: PortableVal::Rec {
-                fields: HashMap::from([
-                    (
-                        b"output".to_vec(),
-                        PortableVal::Str {
-                            s: b"file".to_vec(),
-                        },
-                    ),
-                    (b"filename".to_vec(), make_portable(arena, filename)),
-                ]),
+        [v, Val::Str { s: filename }] => Ok(Val::Effect {
+            effect: Effect::Out {
+                val: make_portable(arena, v),
+                name: filename.to_vec(),
             },
         }),
 
@@ -1587,20 +1563,10 @@ pub fn average_eff<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [v, Val::Str { s: name }] => Ok(Val::Effect {
-            val: PortableVal::Rec {
-                fields: HashMap::from([
-                    (b"name".to_vec(), PortableVal::Str { s: name.to_vec() }),
-                    (b"val".to_vec(), make_portable(arena, v)),
-                ]),
-            },
-            handler: PortableVal::Rec {
-                fields: HashMap::from([(
-                    b"output".to_vec(),
-                    PortableVal::Str {
-                        s: b"average".to_vec(),
-                    },
-                )]),
+        [Val::Num { n }, Val::Str { s: name }] => Ok(Val::Effect {
+            effect: Effect::Mean {
+                num: *n,
+                name: name.to_vec(),
             },
         }),
 

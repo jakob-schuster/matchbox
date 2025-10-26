@@ -18,6 +18,7 @@ use crate::{
         },
         OutputError,
     },
+    util::bytes_to_string,
 };
 
 /// A file type of an output file
@@ -32,9 +33,9 @@ enum FileType {
 
 /// Represents all of the output files.
 pub struct FileHandler {
-    files: HashMap<String, BufWriter<File>>,
-    types: HashMap<String, FileType>,
-    new_files: HashMap<String, Box<dyn FileWriter>>,
+    files: HashMap<Vec<u8>, BufWriter<File>>,
+    types: HashMap<Vec<u8>, FileType>,
+    new_files: HashMap<Vec<u8>, Box<dyn FileWriter>>,
     dir: String,
     aux_data: AuxiliaryInputData,
 }
@@ -66,13 +67,13 @@ impl FileHandler {
     }
 
     /// Handle a new value, by either creating a new file or adding it to an existing one.
-    pub fn handle(&mut self, filename: &str, val: &PortableVal) -> Result<(), OutputError> {
+    pub fn handle(&mut self, filename: &[u8], val: &PortableVal) -> Result<(), OutputError> {
         if let Some(file) = self.new_files.get_mut(filename) {
             file.write(val)
         } else {
             // file needs to be created
             // create the file in the subdirectory
-            let altered_filename = format!("{}/{}", self.dir, filename);
+            let altered_filename = format!("{}/{}", self.dir, bytes_to_string(filename).unwrap());
 
             // now, write to it!
             let t = Self::type_from_filename(&altered_filename);
@@ -95,8 +96,8 @@ impl FileHandler {
             };
 
             // and add to the list, just referring to it by name!
-            self.new_files.insert(String::from(filename), f);
-            self.types.insert(String::from(filename), t);
+            self.new_files.insert(filename.to_vec(), f);
+            self.types.insert(filename.to_vec(), t);
 
             // then, handle it!
             self.handle(filename, val)
@@ -119,5 +120,5 @@ pub trait FileWriter {
 
 #[derive(Clone)]
 pub struct FileHandlerSummary {
-    files: Vec<String>,
+    files: Vec<Vec<u8>>,
 }

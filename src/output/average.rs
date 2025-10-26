@@ -12,28 +12,15 @@ pub struct MultiAverageHandler {
 }
 
 impl MultiAverageHandler {
-    pub fn handle(&mut self, val: &PortableVal) -> Result<(), OutputError> {
-        match val {
-            PortableVal::Rec { fields } => {
-                if let (Some(PortableVal::Str { s: name }), Some(PortableVal::Num { n: val })) = (
-                    fields.get(&(b"name".to_vec())),
-                    fields.get(&(b"val".to_vec())),
-                ) {
-                    if let Some(handler) = self.map.get_mut(name) {
-                        handler.handle(*val)?;
-                    } else {
-                        let mut handler = AverageHandler::default();
-                        handler.handle(*val)?;
-                        self.map.insert(name.clone(), handler);
-                    }
-
-                    Ok(())
-                } else {
-                    Err(OutputError::TypeCounts { val: val.clone() })
-                }
-            }
-            _ => Err(OutputError::TypeCounts { val: val.clone() }),
+    pub fn handle(&mut self, val: f32, name: &[u8]) -> Result<(), OutputError> {
+        if let Some(handler) = self.map.get_mut(name) {
+            handler.handle(val)?;
+        } else {
+            let mut handler = AverageHandler::default();
+            handler.handle(val)?;
+            self.map.insert(name.to_vec(), handler);
         }
+        Ok(())
     }
 
     pub fn finish(&self, output_directory: &str) {

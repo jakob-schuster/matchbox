@@ -142,35 +142,11 @@ impl<'a> OutputHandler<'a> {
     }
 
     pub fn handle(&mut self, eff: &Effect) -> Result<(), OutputError> {
-        match &eff.handler {
-            PortableVal::Rec { fields } => {
-                if let Some(PortableVal::Str { s: output }) = fields.get(&b"output".to_vec()) {
-                    match &output[..] {
-                        b"average" => {
-                            self.multi_average_handler.handle(&eff.val)?;
-                            Ok(())
-                        }
-                        b"counts" => {
-                            self.multi_counts_handler.handle(&eff.val)?;
-                            Ok(())
-                        }
-                        b"stdout" => {
-                            self.stdout_handler.handle(&eff.val)?;
-                            Ok(())
-                        }
-                        b"file" => match fields.get(&b"filename".to_vec()) {
-                            Some(PortableVal::Str { s: filename }) => self
-                                .file_handler
-                                .handle(&String::from_utf8(filename.clone()).unwrap(), &eff.val),
-                            _ => todo!(),
-                        },
-                        _ => Err(OutputError::UnrecognizedOutputType),
-                    }
-                } else {
-                    Err(OutputError::UnrecognizedOutputType)
-                }
-            }
-            _ => Err(OutputError::UnrecognizedOutputType),
+        match eff {
+            Effect::Stdout { val } => self.stdout_handler.handle(val),
+            Effect::Out { val, name } => self.file_handler.handle(name, val),
+            Effect::Count { val, name } => self.multi_counts_handler.handle(val, name),
+            Effect::Mean { num, name } => self.multi_average_handler.handle(*num, name),
         }
     }
 

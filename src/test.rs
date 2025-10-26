@@ -62,8 +62,7 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
 
     use crate::{
         core::{library::standard_library, rec::FullyConcreteRec},
-        input::FileType,
-        read_code_from_script,
+        input::ReaderWithBar,
         surface::elab_prog_for_ctx,
         GenericError,
     };
@@ -85,11 +84,39 @@ fn eval_one_fasta_read_test(code: &str, seq: &[u8]) -> Result<String, GenericErr
     let ctx =
         elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
 
+    // parse the args program
+    let args_prog = parse(
+        &format!("args = {{{}}}", global_config.args),
+        &global_config,
+    )
+    .map_err(|e| GenericError::from(e))?;
+
+    let ctx =
+        elab_prog_for_ctx(&arena, &ctx, arena.alloc(args_prog)).map_err(GenericError::from)?;
+
+    // parse the program
+    let prog = parse(code, &global_config).map_err(GenericError::from)?;
+
+    // load in the input reads
+    let mut reader_with_bar =
+        ReaderWithBar::new(&global_config.input_reads).map_err(GenericError::from)?;
+
     // elaborate to a core program
-    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, "in.fa".to_string()), &prog)
+    let core_prog = elab_prog(
+        &arena,
+        &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena)),
+        arena.alloc(prog),
+    )
+    .map_err(GenericError::from)?;
+
+    // cache the values
+    let (core_prog, cache) = core_prog
+        .cache(
+            &arena,
+            &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena))
+                .tms,
+        )
         .map_err(GenericError::from)?;
-    let (core_prog, cache) =
-        core_prog.cache(&arena, &ctx.bind_read(&arena, "in.fa".to_string()).tms)?;
 
     // create a toy read
     let read = core::Val::Rec {
@@ -136,8 +163,7 @@ fn eval_one_fastq_read_test(code: &str, seq: &[u8], qual: &[u8]) -> Result<Strin
 
     use crate::{
         core::{library::standard_library, rec::FullyConcreteRec},
-        input::FileType,
-        read_code_from_script,
+        input::ReaderWithBar,
         surface::elab_prog_for_ctx,
         GenericError,
     };
@@ -159,12 +185,39 @@ fn eval_one_fastq_read_test(code: &str, seq: &[u8], qual: &[u8]) -> Result<Strin
     let ctx =
         elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog)).map_err(GenericError::from)?;
 
-    // elaborate to a core program
-    let core_prog = elab_prog(&arena, &ctx.bind_read(&arena, "in.fa".to_string()), &prog)
-        .map_err(GenericError::from)?;
-    let (core_prog, cache) =
-        core_prog.cache(&arena, &ctx.bind_read(&arena, "in.fa".to_string()).tms)?;
+    // parse the args program
+    let args_prog = parse(
+        &format!("args = {{{}}}", global_config.args),
+        &global_config,
+    )
+    .map_err(|e| GenericError::from(e))?;
 
+    let ctx =
+        elab_prog_for_ctx(&arena, &ctx, arena.alloc(args_prog)).map_err(GenericError::from)?;
+
+    // parse the program
+    let prog = parse(code, &global_config).map_err(GenericError::from)?;
+
+    // load in the input reads
+    let mut reader_with_bar =
+        ReaderWithBar::new(&global_config.input_reads).map_err(GenericError::from)?;
+
+    // elaborate to a core program
+    let core_prog = elab_prog(
+        &arena,
+        &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena)),
+        arena.alloc(prog),
+    )
+    .map_err(GenericError::from)?;
+
+    // cache the values
+    let (core_prog, cache) = core_prog
+        .cache(
+            &arena,
+            &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena))
+                .tms,
+        )
+        .map_err(GenericError::from)?;
     // create a toy read
     let read = core::Val::Rec {
         rec: Arc::new(FullyConcreteRec {
@@ -241,7 +294,7 @@ fn elab_assignment_pass3() {
 
 #[test]
 fn elab_assignment_pass4() {
-    insta::assert_snapshot!(format!("{:?}", elab_test(r"a = 1; b = a + 10 * 10")), @r#"Ok("push 1; push (#[42])(#[0], (#[41])(10, 10)); ")"#)
+    insta::assert_snapshot!(format!("{:?}", elab_test(r"a = 1; b = a + 10 * 10")), @r#"Ok("push 1; push (#[65])(#[0], (#[64])(10, 10)); ")"#)
 }
 
 #[test]
@@ -256,22 +309,22 @@ fn eval_assignment_pass1() {
 
 #[test]
 fn eval_pattern_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [_ GGGG rest:_] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCCCCCCCCCCC |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [_ GGGG rest:_] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCCCCCCCCCCC |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_pattern_pass2() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [_ GGGG rest:|3| _] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [_ GGGG rest:|3| _] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_pattern_pass3() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [first:|3| _] => {first.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("AAA |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [first:|3| _] => {first.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("AAA |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_pattern_pass4() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read is [_ last:|3|] => {last.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [_ last:|3|] => {last.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
 }
 
 #[test]
@@ -285,47 +338,47 @@ fn eval_rec_lit_pass2() {
 }
 #[test]
 fn eval_rec_lit_pass3() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.seq.len() }; if rec.a > 10 => 'long'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("long |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.seq.len() }; if rec.a > 10 { 'long'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("long |> { output = stdout }")"#)
 }
 
 #[test]
 fn eval_fastq_trim_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read is [start:|10| _] => start.out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("{ desc = , id = read1, qual = !@#$%^&*&^, seq = AAAAAAAAAG } |> { filename = trimmed.fq, output = file }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read matches [start:|10| _] => start.out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("{ desc = , id = read1, qual = !@#$%^&*&^, seq = AAAAAAAAAG } |> { filename = trimmed.fq, output = file }")"#)
 }
 #[test]
 fn eval_fastq_trim_pass2() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read is [start:|10| _] => (-start).out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("{ desc = , id = read1, qual = ^&*&^%$#@!, seq = CTTTTTTTTT } |> { filename = trimmed.fq, output = file }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read matches [start:|10| _] => (-start).out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("{ desc = , id = read1, qual = ^&*&^%$#@!, seq = CTTTTTTTTT } |> { filename = trimmed.fq, output = file }")"#)
 }
 
 #[test]
 fn eval_opt_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 7) => n; if f() > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("greater |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 7) => n; if f() > 5 { 'greater'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("greater |> { output = stdout }")"#)
 }
 #[test]
 fn eval_opt_pass2() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 7) => n; if f(n = 1) > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 7) => n; if f(n = 1) > 5 { 'greater'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("")"#)
 }
 #[test]
 fn eval_opt_pass3() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 3) => n; if f() > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 3) => n; if f() > 5 { 'greater'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("")"#)
 }
 #[test]
 fn eval_opt_fail1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 3) => n; if f(m = 1) > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Err(GenericError { location: Some(Location { start: 26, end: 34 }), message: "found optional argument named 'm'; only expected optional arguments { n: Num }" })"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 3) => n; if f(m = 1) > 5 { 'greater'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Err(GenericError { location: Some(Location { start: 26, end: 34 }), message: "found optional argument named 'm'; only expected optional arguments { n: Num }" })"#)
 }
 #[test]
 fn eval_opt_fail2() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 3) => n; if f(n = true) > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Err(GenericError { location: Some(Location { start: 32, end: 36 }), message: "mismatched types: expected Num, found Bool" })"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 3) => n; if f(n = true) > 5 { 'greater'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Err(GenericError { location: Some(Location { start: 32, end: 36 }), message: "mismatched types: expected Num, found Bool" })"#)
 }
 #[test]
 fn eval_opt_fail3() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = true) => n; if f() > 5 => 'greater'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Err(GenericError { location: Some(Location { start: 14, end: 18 }), message: "mismatched types: expected Num, found Bool" })"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = true) => n; if f() > 5 { 'greater'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Err(GenericError { location: Some(Location { start: 14, end: 18 }), message: "mismatched types: expected Num, found Bool" })"#)
 }
 
 #[test]
 fn eval_stmt_after_conditional_pass1() {
     insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"
-        if read is [_] => 'a' |> stdout!()
+        if read matches [_] => 'a' |> stdout!()
         'b' |> stdout!()
         ", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("a |> { output = stdout },b |> { output = stdout }")"#)
 }

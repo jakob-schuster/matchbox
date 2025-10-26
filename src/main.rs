@@ -1,3 +1,15 @@
+//! The compiler for the *matchbox* language, a bioinformatics DSL for processing sequencing reads.
+//!
+//! The flow of execution in *matchbox* is:
+//! - Arguments are parsed from the command line.
+//! - The *matchbox* script (provided as either a file `-s` or as a direct argument `-r`) is parsed into a surface-level AST (`parse.rs`).
+//! - The type of the input read value, `read`, is inferred from either the `-f` option or the file extension of the reads file (`input.rs`).
+//! - The surface-level AST is elaborated into a core AST (`surface.rs`). Bidirectional type checking is performed; where types are given, they are checked, and where they are not given, they are inferred.
+//! - The input reads are processed.
+//!   - This involves reading in a chunk of reads, then evaluating the program in parallel across the chunk of reads (`input.rs`).
+//!   - "Evaluating the program" involves creating an environment which includes the current read and evaluating the core AST in the context of this environment, which results in a vector of output effects (e.g. incrementing a global count, appending to a file, writing to stdout).
+//!   - The output effects for the chunk of reads are applied (`output.rs`).
+
 use core::{library::standard_library, make_portable, EvalError};
 use std::{fmt::Debug, fs::File, io::Read, path::Path, process::exit};
 
@@ -166,11 +178,10 @@ fn run_script(global_config: &GlobalConfig) {
     let code = if let Some(code) = &global_config.input_code.run {
         code.to_string()
     } else if let Some(filename) = &global_config.input_code.script_file {
-        let code = read_code_from_script(&filename)
+        read_code_from_script(&filename)
             .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
             // should never unwrap, because program terminates
-            .unwrap();
-        code
+            .unwrap()
     } else {
         // can't get here
         panic!()
@@ -188,19 +199,6 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .num_threads(global_config.threads)
         .build_global()
         .unwrap();
-
-    // need to know filetype of reads, for read type inference
-    // let filetype = if let Some(reads_filename) = &global_config.reads {
-    //     let (filetype, _) = get_filetype_and_buffer(reads_filename).unwrap();
-    //     filetype
-    // } else {
-    //     FileType::Fasta
-    // };
-
-    // let paired_filetype = global_config.paired_with.as_ref().map(|filename| {
-    //     let (filetype, _) = get_filetype_and_buffer(filename).unwrap();
-    //     filetype
-    // });
 
     // establish a global-level arena and context,
     // for values allocated during elaboration

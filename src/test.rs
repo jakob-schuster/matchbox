@@ -1,3 +1,5 @@
+//! Snapshot tests using insta.
+
 use std::collections::HashMap;
 
 use crate::parse::parse;

@@ -1,3 +1,5 @@
+//! WIP interactive terminal interface.
+
 use indicatif::{ProgressBar, ProgressDrawTarget};
 use ratatui::{
     layout::{Constraint, Layout},

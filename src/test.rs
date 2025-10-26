@@ -249,60 +249,60 @@ fn elab_assignment_pass4() {
 
 #[test]
 fn eval_read_name_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"read.id |> stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("read1 |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"read.id |> stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(read1)")"#)
 }
 
 #[test]
 fn eval_assignment_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"a = 'hello'; b = 10; c = '{a} and {b}'; c |> stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("hello and 10 |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"a = 'hello'; b = 10; c = '{a} and {b}'; c |> stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(hello and 10)")"#)
 }
 
 #[test]
 fn eval_pattern_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [_ GGGG rest:_] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCCCCCCCCCCC |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [_ GGGG rest:_] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(CCCCCCCCCCCC)")"#)
 }
 
 #[test]
 fn eval_pattern_pass2() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [_ GGGG rest:|3| _] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [_ GGGG rest:|3| _] => {rest.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(CCC)")"#)
 }
 
 #[test]
 fn eval_pattern_pass3() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [first:|3| _] => {first.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("AAA |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [first:|3| _] => {first.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(AAA)")"#)
 }
 
 #[test]
 fn eval_pattern_pass4() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [_ last:|3|] => {last.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("CCC |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"if read matches [_ last:|3|] => {last.seq |> stdout!()}", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(CCC)")"#)
 }
 
 #[test]
 fn eval_rec_lit_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.id }; 'hello'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("hello |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.id }; 'hello'.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(hello)")"#)
 }
 
 #[test]
 fn eval_rec_lit_pass2() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.id }; rec.a.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("read1 |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.id }; rec.a.stdout!()", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(read1)")"#)
 }
 #[test]
 fn eval_rec_lit_pass3() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.seq.len() }; if rec.a > 10 { 'long'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("long |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"rec = { a = read.seq.len() }; if rec.a > 10 { 'long'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(long)")"#)
 }
 
 #[test]
 fn eval_fastq_trim_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read matches [start:|10| _] => start.out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("{ desc = , id = read1, qual = !@#$%^&*&^, seq = AAAAAAAAAG } |> { filename = trimmed.fq, output = file }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read matches [start:|10| _] => start.out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("out!({ desc = , id = read1, qual = !@#$%^&*&^, seq = AAAAAAAAAG }, name = trimmed.fq)")"#)
 }
 #[test]
 fn eval_fastq_trim_pass2() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read matches [start:|10| _] => (-start).out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("{ desc = , id = read1, qual = ^&*&^%$#@!, seq = CTTTTTTTTT } |> { filename = trimmed.fq, output = file }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fastq_read_test(r"if read matches [start:|10| _] => (-start).out!('trimmed.fq')", b"AAAAAAAAAGGGGCCCCCCCCCCCC", b"!@#$%^&*&^%$#@#$%^&*^%^&*")), @r#"Ok("out!({ desc = , id = read1, qual = ^&*&^%$#@!, seq = CTTTTTTTTT }, name = trimmed.fq)")"#)
 }
 
 #[test]
 fn eval_opt_pass1() {
-    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 7) => n; if f() > 5 { 'greater'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("greater |> { output = stdout }")"#)
+    insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"f = (n: Num = 7) => n; if f() > 5 { 'greater'.stdout!() }", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(greater)")"#)
 }
 #[test]
 fn eval_opt_pass2() {
@@ -330,5 +330,5 @@ fn eval_stmt_after_conditional_pass1() {
     insta::assert_snapshot!(format!("{:?}", eval_one_fasta_read_test(r"
         if read matches [_] => 'a' |> stdout!()
         'b' |> stdout!()
-        ", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("a |> { output = stdout },b |> { output = stdout }")"#)
+        ", b"AAAAAAAAAGGGGCCCCCCCCCCCC")), @r#"Ok("stdout!(a),stdout!(b)")"#)
 }

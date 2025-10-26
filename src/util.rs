@@ -1,9 +1,14 @@
+//! Utility functions used throughout matchbox.
+
 use std::fmt::{self, Display, Formatter};
 
 use crate::core::InternalError;
 
 pub type Arena = bumpalo::Bump;
 
+/// A location in some matchbox code,
+/// with a start position and an end position.
+/// Used for displaying error messages.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
     pub start: usize,
@@ -34,6 +39,7 @@ impl<T: Display> Display for Located<T> {
     }
 }
 
+/// A field of a record.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RecField<T> {
     pub name: String,
@@ -52,6 +58,7 @@ impl<T: Display> Display for RecField<T> {
     }
 }
 
+/// A field of a core record.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CoreRecField<'a, T> {
     pub name: &'a [u8],
@@ -75,6 +82,7 @@ impl<'a, T: Display> Display for CoreRecField<'a, T> {
     }
 }
 
+/// An environment, which contains a number of elements.
 #[derive(Clone, Debug)]
 pub struct Env<A> {
     vec: Vec<A>,
@@ -85,6 +93,7 @@ impl<A> Env<A> {
         self.vec.iter()
     }
 
+    /// Get element at a De Bruijn index.
     pub fn get_level(&self, i: usize) -> &A {
         match self.vec.get(i) {
             Some(a) => a,
@@ -92,6 +101,7 @@ impl<A> Env<A> {
         }
     }
 
+    /// Get element at a De Bruijn levl.
     pub fn get_index(&self, i: usize) -> &A {
         match self.vec.get(self.vec.len() - 1 - i) {
             Some(a) => a,
@@ -104,12 +114,15 @@ impl<A> Env<A> {
     }
 }
 
+/// A cache of elements.
 #[derive(Clone, Debug)]
 pub struct Cache<A> {
     vec: Vec<A>,
 }
 
 impl<A: Clone + Display> Cache<A> {
+    /// Push an element to the top of the cache.
+    /// Returns a new cache, and the index at which the value is found.
     pub fn push(&self, a: A) -> (Cache<A>, usize) {
         let index = self.vec.len();
         let mut vec = self.vec.clone();
@@ -118,6 +131,7 @@ impl<A: Clone + Display> Cache<A> {
         (Cache { vec }, index)
     }
 
+    /// Get an item at an index in the cache.
     pub fn get(&self, index: usize) -> &A {
         self.vec.get(index).expect("Bad index in cache!")
     }
@@ -200,6 +214,7 @@ impl<A> Default for Env<A> {
     }
 }
 
+/// Convert a byte slice to a string.
 pub fn bytes_to_string(bytes: &[u8]) -> Result<String, InternalError> {
     String::from_utf8(bytes.to_vec()).map_err(|_| {
         InternalError::new(&format!(
@@ -209,6 +224,7 @@ pub fn bytes_to_string(bytes: &[u8]) -> Result<String, InternalError> {
     })
 }
 
+/// A range, from a start element to an end.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Ran<T> {
     pub start: T,
@@ -236,6 +252,7 @@ impl<T> Ran<T> {
 }
 
 impl<T: Ord> Ran<T> {
+    /// Checks if two Rans are disjoint.
     pub fn disjoint(&self, other: &Self) -> bool {
         other.start >= self.end || self.start >= other.end
     }
@@ -330,11 +347,12 @@ pub fn translate(seq: &[u8], stop_codon: &u8, illegal_codon: &u8) -> String {
     }
 }
 
+/// Takes the reverse complement of a sequence.
 pub fn rev_comp(seq: &[u8]) -> Vec<u8> {
     bio::alphabets::dna::revcomp(seq)
 }
 
-/// Returns true if the bit i places from the right in n is active
+/// Check if the bit i places from the right in n is active.
 pub fn get_bit(n: u16, i: usize) -> bool {
     (n >> i & 1) == 1
 }

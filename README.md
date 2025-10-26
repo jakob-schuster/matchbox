@@ -37,9 +37,4 @@ matchbox -s my_script.mb my_reads.fq
 - To process data on multiple threads for improved speed, use `--threads`
 - To handle paired reads, use `--paired-with`
 
-**[For plenty of examples and a full scripting language reference, check out the documentation!](https://jakob-schuster.github.io/matchbox-docs/)**
-
-# Todo
-
-- [ ] add search term parameters
-- [ ] add a terminal UI mode
+**[For examples and a full scripting language reference, check out the documentation!](https://jakob-schuster.github.io/matchbox-docs/)**

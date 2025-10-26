@@ -1,6 +1,10 @@
+//! Match sequences with error tolerance using [Myers' dynamic programming algorithm](https://dl.acm.org/doi/10.1145/316542.316550), with the Rust Bio implementation.
+
 use bio::pattern_matching::myers::{long, Myers};
 use itertools::Itertools;
 
+/// Myers (from the Rust Bio crate) can either be short or long, with different implementation.
+/// Wrap both `Myers<u64>` and `long::Myers<u64>`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VarMyers {
     Short(Myers<u64>),
@@ -8,6 +12,7 @@ pub enum VarMyers {
 }
 
 impl VarMyers {
+    /// Create a new VarMyers, selecting which enum branch based on the length of the sequence.
     pub fn new(seq: &[u8]) -> Self {
         if seq.len() <= 64 {
             VarMyers::Short(Myers::<u64>::new(seq))
@@ -16,6 +21,7 @@ impl VarMyers {
         }
     }
 
+    /// Find all matches within a target sequence, below a given edit distance.
     pub fn find_all(&self, seq: &[u8], edit_dist: usize) -> Vec<(usize, usize, usize)> {
         match self {
             VarMyers::Short(s) => s
@@ -27,6 +33,7 @@ impl VarMyers {
         }
     }
 
+    /// Find all disjoint matches within a target sequence, below a given edit distance.
     pub fn find_all_disjoint(&self, seq: &[u8], edit_dist: usize) -> Vec<(usize, usize, usize)> {
         let mut matches = self.find_all(seq, edit_dist);
 

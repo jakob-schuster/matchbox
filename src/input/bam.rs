@@ -1,3 +1,5 @@
+//! Handle binary alignment map (BAM) reading with noodles.
+
 use std::{collections::HashMap, fmt::Pointer, io::BufRead, sync::Arc};
 
 use itertools::Itertools;

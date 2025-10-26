@@ -1,3 +1,5 @@
+//! Handle sequence alignment map (SAM) reading with noodles.
+
 use std::{collections::HashMap, io::BufRead, sync::Arc};
 
 use itertools::Itertools;
@@ -9,8 +11,8 @@ use crate::{
         rec::{self, FullyConcreteRec},
         Effect, Val,
     },
-    output::OutputHandler,
     input::{AuxiliaryInputData, ExecError, Input, InputError, Progress, ProgressSummary, Reader},
+    output::OutputHandler,
     util::{Arena, Cache, CoreRecField, Env},
 };
 pub struct SamReader {

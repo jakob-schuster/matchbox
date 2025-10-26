@@ -1,3 +1,5 @@
+//! Handle input from various file formats.
+
 use std::{
     fmt::Display,
     fs::File,
@@ -38,6 +40,8 @@ pub enum ExecError {
     Output(OutputError),
 }
 
+/// An error raised if there was a problem with input files.
+/// This is normal, and should be rendered nicely.
 #[derive(Debug, Clone)]
 pub enum InputError {
     FileNameError { filename: String },
@@ -86,6 +90,7 @@ impl Display for InputError {
     }
 }
 
+/// An error raised if the filetype did not match what was expected.
 #[derive(Debug, Clone)]
 pub struct FileTypeError {
     pub extension: String,
@@ -106,6 +111,7 @@ impl Display for FileTypeError {
     }
 }
 
+/// A file type which can be specified in the CLI as an input format.
 #[derive(Clone, ValueEnum)]
 pub enum CLIFileType {
     Fa,
@@ -120,6 +126,7 @@ pub enum CLIFileType {
     Txt,
 }
 
+/// A file type. Collapses alternative representations of the same type (e.g. fq/fastq).
 #[derive(Clone)]
 pub enum FileType {
     Fasta,
@@ -234,6 +241,7 @@ pub fn get_filetype_and_buffer(
     }
 }
 
+/// A progress summary report to the progress bar.
 pub struct ProgressSummary {
     read_increment: usize,
     output_handler_summary: OutputHandlerSummary,
@@ -248,6 +256,7 @@ impl ProgressSummary {
     }
 }
 
+/// An interface which can display progress updates.
 pub trait Progress {
     fn update(&mut self, progress_summary: &ProgressSummary);
 
@@ -275,6 +284,7 @@ impl Progress for UIProgress {
     }
 }
 
+/// A bar which can display progress updates.
 pub struct BarProgress {
     bar: ProgressBar,
 }
@@ -332,6 +342,7 @@ impl Progress for BarProgress {
 //     }
 // }
 
+/// A reader with a progress bar.
 pub struct ReaderWithBar {
     bar: BarProgress,
     reader: Box<dyn Reader>,
@@ -360,7 +371,7 @@ impl ReaderWithBar {
                 bar.set_draw_target(ProgressDrawTarget::stderr());
 
                 Ok(ReaderWithBar {
-                    bar: BarProgress { bar },
+                    bar: BarProgress::new(bar),
                     reader,
                 })
             }
@@ -376,7 +387,7 @@ impl ReaderWithBar {
                     .with_prefix(filename);
 
                 Ok(ReaderWithBar {
-                    bar: BarProgress { bar },
+                    bar: BarProgress::new(bar),
                     reader,
                 })
             }
@@ -427,12 +438,15 @@ pub trait Reader {
     }
 }
 
+/// A source of reads, with a name, a filetype and a buffer.
+/// An intermediate representation between InputReads and Reader.
 struct ReadSource {
     name: String,
     filetype: FileType,
     buffer: Box<dyn BufRead>,
 }
 
+/// An input configuration. An intermediate representation between InputReads and Reader.
 pub enum Input {
     Single { source: ReadSource },
     Paired { r1: ReadSource, r2: ReadSource },
@@ -447,6 +461,7 @@ impl Input {
     }
 }
 
+/// Estimate the number of reads in a file.
 fn estimate(input_reads: &InputReads, buffer_len: u64) -> Result<Option<u64>, InputError> {
     if let Some(filetype) = &input_reads.stdin_format {
         // no estimate, reading from stdin
@@ -494,6 +509,7 @@ fn estimate(input_reads: &InputReads, buffer_len: u64) -> Result<Option<u64>, In
     }
 }
 
+/// Open the inputs specified in InputReads, returning an Input.
 pub fn open(input_reads: &InputReads) -> Result<Input, InputError> {
     if let Some(filetype) = &input_reads.stdin_format {
         // reads will be stdin
@@ -541,6 +557,7 @@ pub fn open(input_reads: &InputReads) -> Result<Input, InputError> {
     }
 }
 
+/// Takes an Input and selects the appropriate Reader.
 pub fn reader_from_input(input: Input) -> Result<Box<dyn Reader>, InputError> {
     match input {
         Input::Single { source } => match source.filetype {

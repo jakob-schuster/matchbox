@@ -1,3 +1,5 @@
+//! Handle delimiter separated value (DSV) file reading. Covers CSV and TSV.
+
 use std::{collections::HashMap, io::BufRead, sync::Arc};
 
 use itertools::Itertools;

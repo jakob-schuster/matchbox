@@ -18,7 +18,7 @@ use crate::{
 
 /// An error raised if there was a problem in the surface syntax,
 /// usually as a result of type errors. This is normal, and should be rendered
-/// nicely to the programmer.
+/// nicely.
 #[derive(Debug, Clone)]
 pub struct ElabError {
     pub location: Location,

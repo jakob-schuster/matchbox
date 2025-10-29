@@ -13,7 +13,7 @@ use crate::{
     },
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{Arena, Cache, CoreRecField, Env},
+    util::{Arena, Cache, CoreRecField, Env, Location},
 };
 
 pub struct FastqReader {
@@ -221,6 +221,113 @@ impl Reader for PairedFastqReader {
                             prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
                         }
                         _ => Err(ExecError::Input(InputError::Read)),
+                    })
+                    .collect_into_vec(&mut vec);
+
+                for result_effects in &vec {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
+                        output_handler.handle(effect).map_err(ExecError::Output)?;
+                    }
+                }
+
+                progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
+                Ok(progress0)
+            })?;
+
+        final_progress.finish();
+        output_handler.finish();
+
+        Ok(())
+    }
+
+    fn count(&mut self) -> usize {
+        let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
+
+        input_records.count()
+    }
+
+    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
+        self.ty.coerce()
+    }
+}
+
+pub struct RevCompFastqReader {
+    buffer: Box<dyn BufRead>,
+    ty: Val<'static>,
+}
+
+impl RevCompFastqReader {
+    pub fn new(buffer: Box<dyn BufRead>) -> RevCompFastqReader {
+        let ty = Val::RecTy {
+            fields: vec![
+                CoreRecField {
+                    name: b"seq",
+                    data: Val::StrTy,
+                },
+                CoreRecField {
+                    name: b"id",
+                    data: Val::StrTy,
+                },
+                CoreRecField {
+                    name: b"desc",
+                    data: Val::StrTy,
+                },
+                CoreRecField {
+                    name: b"qual",
+                    data: Val::StrTy,
+                },
+            ],
+        };
+
+        RevCompFastqReader { buffer, ty }
+    }
+}
+
+impl Reader for RevCompFastqReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        progress: &mut dyn Progress,
+    ) -> Result<(), ExecError> {
+        let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
+
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
+                let mut vec: Vec<Result<Vec<Effect>, ExecError>> = vec![];
+                chunk
+                    .collect_vec()
+                    .par_iter()
+                    .map(|record| match record {
+                        Ok(read) => {
+                            let arena = Arena::new();
+                            let val = core::Val::Rec {
+                                rec: Arc::new(rec::FastqRead { read }),
+                            };
+
+                            let reverse_complement_val =
+                                core::library::unary_read_reverse_complement(
+                                    &arena,
+                                    &Location::new(0, 0),
+                                    &vec![val.clone()],
+                                )
+                                // should never happen
+                                .unwrap();
+                            let effs_forward = prog
+                                .eval(&arena, env, cache, val)
+                                .map_err(ExecError::Eval)?;
+                            let effs_reverse = prog
+                                .eval(&arena, env, cache, reverse_complement_val)
+                                .map_err(ExecError::Eval)?;
+
+                            Ok(effs_forward.into_iter().chain(effs_reverse).collect_vec())
+                        }
+                        Err(_) => Err(ExecError::Input(InputError::Read)),
                     })
                     .collect_into_vec(&mut vec);
 

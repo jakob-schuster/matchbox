@@ -97,6 +97,10 @@ struct InputReads {
     #[arg(short, long, requires("reads"))]
     paired_with: Option<String>,
 
+    /// Also process the reverse complement of each input read. Only works for single-end FASTA/FASTQ/SAM/BAM.
+    #[arg(long, conflicts_with_all(["paired_with"]))]
+    with_reverse_complement: bool,
+
     /// Compile the script and output debug information
     #[arg(long, requires("stdin_format"), conflicts_with_all(["reads"]), conflicts_with_all(["reads"]))]
     debug: bool,
@@ -159,6 +163,7 @@ impl GlobalConfig {
                 reads: None,
                 debug: false,
                 paired_with: None,
+                with_reverse_complement: false,
             },
             input_code: InputCode {
                 script_file: Some("".to_string()),

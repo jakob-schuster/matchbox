@@ -15,11 +15,11 @@ use itertools::Itertools;
 use crate::{
     core::{self, EvalError, Val},
     input::{
-        bam::{BamReader, PairedBamReader},
+        bam::{BamReader, PairedBamReader, RevCompBamReader},
         dsv::DSVReader,
-        fasta::{FastaReader, PairedFastaReader},
-        fastq::{FastqReader, PairedFastqReader},
-        sam::{PairedSamReader, SamReader},
+        fasta::{FastaReader, PairedFastaReader, RevCompFastaReader},
+        fastq::{FastqReader, PairedFastqReader, RevCompFastqReader},
+        sam::{PairedSamReader, RevCompSamReader, SamReader},
     },
     output::{OutputError, OutputHandler, OutputHandlerSummary},
     ui::Interface,
@@ -448,14 +448,20 @@ struct ReadSource {
 
 /// An input configuration. An intermediate representation between InputReads and Reader.
 pub enum Input {
-    Single { source: ReadSource },
-    Paired { r1: ReadSource, r2: ReadSource },
+    Single {
+        source: ReadSource,
+        with_reverse_complement: bool,
+    },
+    Paired {
+        r1: ReadSource,
+        r2: ReadSource,
+    },
 }
 
 impl Input {
     fn name(&self) -> &str {
         match self {
-            Input::Single { source } => &source.name,
+            Input::Single { source, .. } => &source.name,
             Input::Paired { r1, r2 } => &r1.name,
         }
     }
@@ -494,6 +500,7 @@ fn estimate(input_reads: &InputReads, buffer_len: u64) -> Result<Option<u64>, In
         };
         let short_input = Input::Single {
             source: short_source,
+            with_reverse_complement: false,
         };
         let mut short_reader = reader_from_input(short_input)?;
 
@@ -519,6 +526,7 @@ pub fn open(input_reads: &InputReads) -> Result<Input, InputError> {
                 filetype: FileType::from(filetype.clone()),
                 buffer: Box::new(BufReader::new(stdin())),
             },
+            with_reverse_complement: input_reads.with_reverse_complement,
         })
     } else if let Some(input_reads_file) = &input_reads.reads {
         // reads are from a file; or maybe two files
@@ -549,6 +557,7 @@ pub fn open(input_reads: &InputReads) -> Result<Input, InputError> {
                     filetype: filetype.clone(),
                     buffer,
                 },
+                with_reverse_complement: input_reads.with_reverse_complement,
             })
         }
     } else {
@@ -560,15 +569,22 @@ pub fn open(input_reads: &InputReads) -> Result<Input, InputError> {
 /// Takes an Input and selects the appropriate Reader.
 pub fn reader_from_input(input: Input) -> Result<Box<dyn Reader>, InputError> {
     match input {
-        Input::Single { source } => match source.filetype {
-            FileType::Fasta => Ok(Box::new(FastaReader::new(source.buffer))),
-            FileType::Fastq => Ok(Box::new(FastqReader::new(source.buffer))),
-            FileType::Sam => Ok(Box::new(SamReader::new(source.buffer)?)),
-            FileType::Bam => Ok(Box::new(BamReader::new(source.buffer)?)),
-            FileType::Matchbox => todo!(),
-            FileType::List => todo!(),
-            FileType::CSV => Ok(Box::new(DSVReader::new(source.buffer, b','))),
-            FileType::TSV => Ok(Box::new(DSVReader::new(source.buffer, b'\t'))),
+        Input::Single {
+            source,
+            with_reverse_complement,
+        } => match (source.filetype, with_reverse_complement) {
+            (FileType::Fasta, false) => Ok(Box::new(FastaReader::new(source.buffer))),
+            (FileType::Fasta, true) => Ok(Box::new(RevCompFastaReader::new(source.buffer))),
+            (FileType::Fastq, false) => Ok(Box::new(FastqReader::new(source.buffer))),
+            (FileType::Fastq, true) => Ok(Box::new(RevCompFastqReader::new(source.buffer))),
+            (FileType::Sam, false) => Ok(Box::new(SamReader::new(source.buffer)?)),
+            (FileType::Sam, true) => Ok(Box::new(RevCompSamReader::new(source.buffer)?)),
+            (FileType::Bam, false) => Ok(Box::new(BamReader::new(source.buffer)?)),
+            (FileType::Bam, true) => Ok(Box::new(RevCompBamReader::new(source.buffer)?)),
+            (FileType::Matchbox, _) => todo!(),
+            (FileType::List, _) => todo!(),
+            (FileType::CSV, _) => Ok(Box::new(DSVReader::new(source.buffer, b','))),
+            (FileType::TSV, _) => Ok(Box::new(DSVReader::new(source.buffer, b'\t'))),
         },
         Input::Paired { r1, r2 } => match (&r1.filetype, &r2.filetype) {
             (FileType::Fasta, FileType::Fasta) => {

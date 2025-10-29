@@ -14,7 +14,7 @@ use crate::{
     },
     input::{AuxiliaryInputData, ExecError, Input, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{Arena, Cache, CoreRecField, Env},
+    util::{Arena, Cache, CoreRecField, Env, Location},
 };
 
 pub struct BamReader {
@@ -740,4 +740,225 @@ pub fn data_to_vec(data: &noodles::bam::record::Data) -> Result<Vec<u8>, InputEr
     let c = v.iter().intersperse(&vec![b'\t']).cloned().concat();
 
     Ok(c)
+}
+
+pub struct RevCompBamReader {
+    reader: noodles::bam::io::Reader<noodles::bgzf::io::Reader<Box<dyn BufRead>>>,
+    header: noodles::sam::Header,
+    ty: Val<'static>,
+}
+
+impl RevCompBamReader {
+    pub fn new(buffer: Box<dyn BufRead>) -> Result<RevCompBamReader, InputError> {
+        let mut reader = noodles::bam::io::Reader::new(buffer);
+        let header = reader.read_header().map_err(|e| InputError::Header)?;
+
+        let ty = Val::RecTy {
+            // in the order as described in the spec
+            fields: vec![
+                // Query template name
+                CoreRecField {
+                    name: b"qname",
+                    data: Val::StrTy,
+                },
+                CoreRecField {
+                    name: b"id",
+                    data: Val::StrTy,
+                },
+                // Bitwise flag
+                CoreRecField {
+                    name: b"flag",
+                    data: Val::NumTy,
+                },
+                // Reference sequence name
+                CoreRecField {
+                    name: b"rname",
+                    data: Val::StrTy,
+                },
+                // 1-based leftmost mapping position
+                CoreRecField {
+                    name: b"pos",
+                    data: Val::NumTy,
+                },
+                // Mapping quality
+                CoreRecField {
+                    name: b"mapq",
+                    data: Val::NumTy,
+                },
+                // The CIGAR string
+                CoreRecField {
+                    name: b"cigar",
+                    data: Val::StrTy,
+                },
+                // Reference name of the mate / next read
+                CoreRecField {
+                    name: b"rnext",
+                    data: Val::StrTy,
+                },
+                // Position of the mate / next read
+                CoreRecField {
+                    name: b"pnext",
+                    data: Val::NumTy,
+                },
+                // Observed template length
+                CoreRecField {
+                    name: b"tlen",
+                    data: Val::NumTy,
+                },
+                // The actual sequence of the alignment
+                CoreRecField {
+                    name: b"seq",
+                    data: Val::StrTy,
+                },
+                // The quality string of the alignment
+                CoreRecField {
+                    name: b"qual",
+                    data: Val::StrTy,
+                },
+                // The optional tags associated with the alignment
+                CoreRecField {
+                    name: b"tags",
+                    data: Val::StrTy,
+                    // data: Val::ListTy {
+                    //     ty: Arc::new(Val::StrTy),
+                    // },
+                },
+                // The optional tags associated with the alignment
+                CoreRecField {
+                    name: b"desc",
+                    data: Val::StrTy,
+                },
+            ],
+        };
+
+        Ok(RevCompBamReader { reader, header, ty })
+    }
+}
+
+impl Reader for RevCompBamReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        progress: &mut dyn Progress,
+    ) -> Result<(), ExecError> {
+        let reference_sequences = self
+            .header
+            .reference_sequences()
+            .keys()
+            .map(|rname| rname.to_vec())
+            .collect_vec();
+
+        let input_records = self.reader.records();
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
+                let mut vec: Vec<Result<Vec<Effect>, ExecError>> = vec![];
+                chunk
+                    .collect_vec()
+                    .par_iter()
+                    .map(|record| match record {
+                        Ok(read) => {
+                            let arena = Arena::new();
+                            let mut cigar = Vec::new();
+                            write_cigar(&mut cigar, &read.cigar());
+                            let seq = read.sequence().iter().collect_vec();
+                            let qual = read
+                                .quality_scores()
+                                .as_ref()
+                                .iter()
+                                .map(|a| a + 33)
+                                .collect_vec();
+                            let data = data_to_vec(&read.data()).map_err(ExecError::Input)?;
+
+                            let rname = match read.reference_sequence_id() {
+                                Some(id) => match reference_sequences
+                                    .get(id.map_err(|e| ExecError::Input(InputError::Read))?)
+                                {
+                                    Some(name) => name,
+                                    None => return Err(ExecError::Input(InputError::ReferenceID)),
+                                },
+                                // if there is no reference sequence ID, use the default '*'
+                                None => &vec![b'*'],
+                            };
+
+                            let mate_rname = match read.mate_reference_sequence_id() {
+                                Some(id) => match reference_sequences
+                                    .get(id.map_err(|e| ExecError::Input(InputError::Read))?)
+                                {
+                                    Some(name) => name,
+                                    None => return Err(ExecError::Input(InputError::ReferenceID)),
+                                },
+                                // if there is no reference sequence ID, use the default '*'
+                                None => &vec![b'*'],
+                            };
+
+                            let val = core::Val::Rec {
+                                rec: Arc::new(rec::BamRead {
+                                    read: &read,
+                                    rname,
+                                    mate_rname,
+                                    cigar: &cigar,
+                                    seq: &seq,
+                                    qual: &qual,
+                                    data: &data,
+                                }),
+                            };
+
+                            let reverse_complement_val =
+                                core::library::unary_read_reverse_complement(
+                                    &arena,
+                                    &Location::new(0, 0),
+                                    &vec![val.clone()],
+                                )
+                                // should never happen
+                                .unwrap();
+                            let effs_forward = prog
+                                .eval(&arena, env, cache, val)
+                                .map_err(ExecError::Eval)?;
+                            let effs_reverse = prog
+                                .eval(&arena, env, cache, reverse_complement_val)
+                                .map_err(ExecError::Eval)?;
+
+                            Ok(effs_forward.into_iter().chain(effs_reverse).collect_vec())
+                        }
+                        Err(_) => Err(ExecError::Input(InputError::Read)),
+                    })
+                    .collect_into_vec(&mut vec);
+
+                for result_effects in &vec {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
+                        output_handler.handle(effect).map_err(ExecError::Output)?;
+                    }
+                }
+
+                progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
+                Ok(progress0)
+            })?;
+
+        final_progress.finish();
+        output_handler.finish();
+
+        Ok(())
+    }
+
+    fn count(&mut self) -> usize {
+        let input_records = self.reader.records();
+
+        input_records.count()
+    }
+
+    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
+        self.ty.coerce()
+    }
+
+    fn get_aux_data(&self) -> super::AuxiliaryInputData {
+        AuxiliaryInputData::SAMHeader {
+            header: self.header.clone(),
+        }
+    }
 }

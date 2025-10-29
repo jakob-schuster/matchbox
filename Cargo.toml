@@ -1,6 +1,6 @@
 [package]
 name = "matchbox-cli"
-version = "0.1.1"
+version = "0.2.0"
 description = "A flexible processor for sequencing reads"
 homepage = "https://jakob-schuster.github.io/matchbox-docs/"
 license = "MIT"

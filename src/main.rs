@@ -18,6 +18,7 @@ use codespan_reporting::{
     files::{Error, SimpleFile},
     term::{self, termcolor::StandardStream},
 };
+use color_eyre::owo_colors::OwoColorize;
 use input::{
     get_extensions, get_filetype_and_buffer, FileType, FileTypeError, InputError, ReaderWithBar,
 };
@@ -37,7 +38,10 @@ mod test;
 mod ui;
 mod util;
 
-use clap::{Args, Parser};
+use clap::{
+    builder::styling::{self, Ansi256Color, AnsiColor, RgbColor},
+    crate_version, Args, Parser,
+};
 
 use crate::{
     input::{open, reader_from_input, BarProgress, CLIFileType, ExecError},
@@ -52,8 +56,19 @@ fn main() {
     run_script(&global_config)
 }
 
-/// The global configuration options, accessible as command line parameters.
+const MATCHBOX_YELLOW: RgbColor = RgbColor(239, 233, 64);
+const MATCHBOX_ORANGE: RgbColor = RgbColor(247, 146, 38);
+const MATCHBOX_RED: RgbColor = RgbColor(196, 39, 54);
+
+const STYLES: styling::Styles = styling::Styles::styled()
+    .header(MATCHBOX_ORANGE.on_default().bold())
+    .usage(MATCHBOX_ORANGE.on_default().bold())
+    .literal(MATCHBOX_YELLOW.on_default());
+// .placeholder(MATCHBOX_RED.on_default());
+
+// The global configuration options, accessible as command line parameters.
 #[derive(Parser)]
+#[command(version = crate_version!(), after_help = "For a guide to the matchbox scripting language, check out the docs at https://jakob-schuster.github.io/matchbox-docs/", styles = STYLES)]
 struct GlobalConfig {
     #[command(flatten)]
     input_reads: InputReads,
@@ -82,7 +97,7 @@ struct GlobalConfig {
     match_mode: MatchMode,
 }
 
-/// Global configuration options related to inputting reads.
+// Global configuration options related to inputting reads.
 #[derive(Args)]
 struct InputReads {
     /// The format for parsing stdin. To be used when piping input into matchbox
@@ -106,7 +121,7 @@ struct InputReads {
     debug: bool,
 }
 
-/// An optionally-paired reads file.
+// An optionally-paired reads file.
 #[derive(Args, Clone)]
 struct InputReadsFile {
     /// A read file to process.
@@ -118,7 +133,7 @@ struct InputReadsFile {
     paired_with: Option<String>,
 }
 
-/// Global configuration options related to inputting matchbox code.
+// Global configuration options related to inputting matchbox code.
 #[derive(Args)]
 #[group(required = true, multiple = false)]
 struct InputCode {

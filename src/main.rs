@@ -59,8 +59,8 @@ const MATCHBOX_RED: RgbColor = RgbColor(196, 39, 54);
 const STYLES: styling::Styles = styling::Styles::styled()
     .header(MATCHBOX_ORANGE.on_default().bold())
     .usage(MATCHBOX_ORANGE.on_default().bold())
-    .literal(MATCHBOX_YELLOW.on_default());
-// .placeholder(MATCHBOX_YELLOW.on_default());
+    .literal(MATCHBOX_YELLOW.on_default().bold())
+    .placeholder(MATCHBOX_YELLOW.on_default());
 
 // The global configuration options, accessible as command line parameters.
 #[derive(Parser)]

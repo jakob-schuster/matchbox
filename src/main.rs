@@ -10,22 +10,19 @@
 //!   - "Evaluating the program" involves creating an environment which includes the current read and evaluating the core AST in the context of this environment, which results in a vector of output effects (e.g. incrementing a global count, appending to a file, writing to stdout).
 //!   - The output effects for the chunk of reads are applied (`output.rs`).
 
-use core::{library::standard_library, make_portable, EvalError};
-use std::{fmt::Debug, fs::File, io::Read, path::Path, process::exit};
+use core::{library::standard_library, EvalError};
+use std::{fmt::Debug, fs::File, io::Read, process::exit};
 
 use codespan_reporting::{
     diagnostic::{Diagnostic, Label},
-    files::{Error, SimpleFile},
+    files::SimpleFile,
     term::{self, termcolor::StandardStream},
 };
-use input::{
-    get_extensions, get_filetype_and_buffer, FileType, FileTypeError, InputError, ReaderWithBar,
-};
+use input::{get_extensions, FileType, FileTypeError, InputError, ReaderWithBar};
 use output::{OutputError, OutputHandler};
 use parse::{parse, ParseError};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use surface::{elab_prog, elab_prog_for_ctx, Context, ElabError};
-use util::{Arena, Cache, Env, Location};
+use surface::{elab_prog, elab_prog_for_ctx, ElabError};
+use util::{Arena, Location};
 
 mod core;
 mod input;
@@ -37,10 +34,13 @@ mod test;
 mod ui;
 mod util;
 
-use clap::{Args, Parser};
+use clap::{
+    builder::styling::{self, RgbColor},
+    crate_version, Args, Parser,
+};
 
 use crate::{
-    input::{open, reader_from_input, BarProgress, CLIFileType, ExecError},
+    input::{CLIFileType, ExecError},
     surface::MatchMode,
 };
 
@@ -52,8 +52,19 @@ fn main() {
     run_script(&global_config)
 }
 
-/// The global configuration options, accessible as command line parameters.
+const MATCHBOX_YELLOW: RgbColor = RgbColor(239, 233, 64);
+const MATCHBOX_ORANGE: RgbColor = RgbColor(247, 146, 38);
+const MATCHBOX_RED: RgbColor = RgbColor(196, 39, 54);
+
+const STYLES: styling::Styles = styling::Styles::styled()
+    .header(MATCHBOX_ORANGE.on_default().bold())
+    .usage(MATCHBOX_ORANGE.on_default().bold())
+    .literal(MATCHBOX_YELLOW.on_default().bold())
+    .placeholder(MATCHBOX_YELLOW.on_default());
+
+// The global configuration options, accessible as command line parameters.
 #[derive(Parser)]
+#[command(version = crate_version!(), after_help = "For a guide to the matchbox scripting language, check out the docs at https://jakob-schuster.github.io/matchbox-docs/", styles = STYLES)]
 struct GlobalConfig {
     #[command(flatten)]
     input_reads: InputReads,
@@ -82,7 +93,7 @@ struct GlobalConfig {
     match_mode: MatchMode,
 }
 
-/// Global configuration options related to inputting reads.
+// Global configuration options related to inputting reads.
 #[derive(Args)]
 struct InputReads {
     /// The format for parsing stdin. To be used when piping input into matchbox
@@ -106,7 +117,7 @@ struct InputReads {
     debug: bool,
 }
 
-/// An optionally-paired reads file.
+// An optionally-paired reads file.
 #[derive(Args, Clone)]
 struct InputReadsFile {
     /// A read file to process.
@@ -118,7 +129,7 @@ struct InputReadsFile {
     paired_with: Option<String>,
 }
 
-/// Global configuration options related to inputting matchbox code.
+// Global configuration options related to inputting matchbox code.
 #[derive(Args)]
 #[group(required = true, multiple = false)]
 struct InputCode {
@@ -146,7 +157,7 @@ impl InputCode {
     /// Get the content of the code file.
     fn code(&self) -> Result<String, InputError> {
         if let Some(script_file) = &self.script_file {
-            read_code_from_script(&script_file)
+            read_code_from_script(script_file)
         } else if let Some(run) = &self.run {
             Ok(run.clone())
         } else {
@@ -187,7 +198,7 @@ fn run_script(global_config: &GlobalConfig) {
     let code = if let Some(code) = &global_config.input_code.run {
         code.to_string()
     } else if let Some(filename) = &global_config.input_code.script_file {
-        read_code_from_script(&filename)
+        read_code_from_script(filename)
             .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
             // should never unwrap, because program terminates
             .unwrap()
@@ -362,7 +373,7 @@ impl GenericError {
             None => Diagnostic::error().with_message(&self.message),
         };
 
-        term::emit(&mut writer, &config, &file, &diagnostic);
+        term::emit_to_io_write(&mut writer, &config, &file, &diagnostic);
         exit(1)
     }
 }

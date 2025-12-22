@@ -2,17 +2,15 @@
     <img src="figures/banner.png" title="matchbox" alt="matchbox" width="500">
 </p>
 
-A flexible read processor, capable of performing powerful transformations on your FASTA/FASTQ/SAM files. 
+A flexible read processor, capable of performing powerful transformations on your FASTA/FASTQ/SAM/BAM files. 
 
 You could use *matchbox* for:
 
-- Quick, error-tolerant searches for primers and known sequences
-- Validating the structure of your reads
-- Quantifying and filtering out sequencing artefacts
+- Quick, error-tolerant search for primers and known sequences
 - Demultiplexing even the most complex barcoding schemes
+- Investigating and filtering out sequencing artefacts
 
-
-**<a href="https://jakob-schuster.github.io/matchbox-docs/">Read the documentation site</a>** for more examples, or **<a href="https://www.biorxiv.org/content/10.1101/2025.11.09.685711v1">check out the preprint</a>** to learn more.
+**<a href="https://jakob-schuster.github.io/matchbox-docs/">Read the documentation site</a>** for more examples, or **<a href="https://www.biorxiv.org/content/10.1101/2025.11.09.685711v1">check out the preprint</a>**.
 
 
 # Installation

@@ -2,7 +2,7 @@
     <img src="figures/banner.png" title="matchbox" alt="matchbox" width="500">
 </p>
 
-A flexible read processor, capable of performing powerful transformations on your FASTA/FASTQ/SAM/BAM files. 
+A flexible read processor, capable of performing powerful transformations on your FASTA/FASTQ/BAM files. 
 
 You could use *matchbox* for:
 

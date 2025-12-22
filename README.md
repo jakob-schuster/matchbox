@@ -2,7 +2,7 @@
     <img src="figures/banner.png" title="matchbox" alt="matchbox" width="600">
 </p>
 
-A flexible read processor, capable of performing powerful transformations on your FASTA/FASTQ/SAM files. <a href="https://www.biorxiv.org/content/10.1101/2025.11.09.685711v1">Check out the preprint.</a>
+A flexible read processor, capable of performing powerful transformations on your FASTA/FASTQ/SAM files. For more details, <a href="https://www.biorxiv.org/content/10.1101/2025.11.09.685711v1">check out the preprint.</a>
 
 You could use *matchbox* for:
 
@@ -10,7 +10,7 @@ You could use *matchbox* for:
 - Validating the structure of your reads
 - Quantifying and filtering out sequencing artefacts
 - Demultiplexing even the most complex barcoding schemes
-- <a href="https://jakob-schuster.github.io/matchbox-docs/">Read the documentation for more examples!</a>
+- **<a href="https://jakob-schuster.github.io/matchbox-docs/">Read the documentation for more examples!</a>**
 
 # Installation
 
@@ -22,7 +22,7 @@ cargo install matchbox-cli
 
 # Usage
 
-Write your matchbox script in a `.mb` file, and give it to *matchbox* via `--script`.
+Write your *matchbox* script in a `.mb` file, and give it to *matchbox* via `--script`.
 
 ```bash
 matchbox -s my_script.mb my_reads.fq
@@ -32,7 +32,7 @@ matchbox -s my_script.mb my_reads.fq
 - To process data on multiple threads for improved speed, use `--threads`
 - To handle paired reads, use `--paired-with`
 
-**[For examples and a full scripting language reference, read the documentation!](https://jakob-schuster.github.io/matchbox-docs/)**
+[For examples and a full scripting language reference, read the documentation!](https://jakob-schuster.github.io/matchbox-docs/)
 
 # Citation
 

@@ -33,9 +33,8 @@ enum FileType {
 
 /// Represents all of the output files.
 pub struct FileHandler {
-    files: HashMap<Vec<u8>, BufWriter<File>>,
     types: HashMap<Vec<u8>, FileType>,
-    new_files: HashMap<Vec<u8>, Box<dyn FileWriter>>,
+    files: HashMap<Vec<u8>, Box<dyn FileWriter>>,
     dir: String,
     aux_data: AuxiliaryInputData,
 }
@@ -44,10 +43,8 @@ impl FileHandler {
     /// Create a new file handler, with the auxiliary data passed through from the input
     pub fn new(dir: String, aux_data: AuxiliaryInputData) -> FileHandler {
         FileHandler {
-            files: HashMap::default(),
             types: HashMap::default(),
-
-            new_files: HashMap::default(),
+            files: HashMap::default(),
             dir,
             aux_data,
         }
@@ -68,7 +65,7 @@ impl FileHandler {
 
     /// Handle a new value, by either creating a new file or adding it to an existing one.
     pub fn handle(&mut self, filename: &[u8], val: &PortableVal) -> Result<(), OutputError> {
-        if let Some(file) = self.new_files.get_mut(filename) {
+        if let Some(file) = self.files.get_mut(filename) {
             file.write(val)
         } else {
             // file needs to be created
@@ -96,7 +93,7 @@ impl FileHandler {
             };
 
             // and add to the list, just referring to it by name!
-            self.new_files.insert(filename.to_vec(), f);
+            self.files.insert(filename.to_vec(), f);
             self.types.insert(filename.to_vec(), t);
 
             // then, handle it!
@@ -107,7 +104,7 @@ impl FileHandler {
     /// Summarize the file handler by just getting the name of each file
     pub fn summarize(&self) -> FileHandlerSummary {
         FileHandlerSummary {
-            files: self.new_files.keys().cloned().collect(),
+            files: self.files.keys().cloned().collect(),
         }
     }
 }

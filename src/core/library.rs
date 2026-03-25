@@ -641,7 +641,7 @@ pub fn len<'a>(
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }] => Ok(Val::Num { n: s.len() as f32 }),
+        [Val::Str { s }] => Ok(Val::Num { n: s.len() as f64 }),
         _ => Err(EvalError::new(
             &location,
             "bad arguments given to function?!",
@@ -1154,7 +1154,7 @@ pub fn find_first<'a>(
                 .unwrap()
                 .find(&String::from_utf8((*s2).to_vec()).unwrap())
             {
-                Some(i) => i as f32,
+                Some(i) => i as f64,
                 None => -1.0,
             },
         }),
@@ -1177,7 +1177,7 @@ pub fn find_last<'a>(
                 .unwrap()
                 .rfind(&String::from_utf8((*s2).to_vec()).unwrap())
             {
-                Some(i) => i as f32,
+                Some(i) => i as f64,
                 None => -1.0,
             },
         }),
@@ -1197,7 +1197,7 @@ pub fn find_matches<'a>(
     match vtms {
         [Val::Str { s: s1 }, Val::Str { s: s2 }, Val::Num { n }] => {
             let myers = VarMyers::new(s2);
-            let edit_dist = (s2.len() as f32 * n).floor() as usize;
+            let edit_dist = (s2.len() as f64 * n).floor() as usize;
 
             myers.find_all_disjoint(s1, edit_dist);
 
@@ -1206,7 +1206,7 @@ pub fn find_matches<'a>(
                     .unwrap()
                     .rfind(&String::from_utf8((*s2).to_vec()).unwrap())
                 {
-                    Some(i) => i as f32,
+                    Some(i) => i as f64,
                     None => -1.0,
                 },
             })
@@ -1336,7 +1336,7 @@ pub fn describe<'a>(
                         VarMyers::new(seq)
                             .find_all_disjoint(
                                 read_seq,
-                                (error_rate * seq.len() as f32).round() as usize,
+                                (error_rate * seq.len() as f64).round() as usize,
                             )
                             .iter()
                             .map(|matches| (id, *matches))
@@ -1383,11 +1383,11 @@ pub fn count_matches<'a>(
                 .map_err(|e| EvalError::from_internal(e, location.clone()))?
             {
                 let matches = VarMyers::new(seq)
-                    .find_all_disjoint(read_seq, (error_rate * seq.len() as f32).round() as usize)
+                    .find_all_disjoint(read_seq, (error_rate * seq.len() as f64).round() as usize)
                     .len();
 
                 // allocate the description
-                Ok(Val::Num { n: matches as f32 })
+                Ok(Val::Num { n: matches as f64 })
             } else {
                 Err(EvalError::new(
                     location,
@@ -1438,7 +1438,7 @@ pub fn distance<'a>(
     match vtms {
         [Val::Str { s: s0 }, Val::Str { s: s1 }] => {
             let distance = bio::alignment::distance::levenshtein(s0, s1);
-            Ok(Val::Num { n: distance as f32 })
+            Ok(Val::Num { n: distance as f64 })
         }
 
         _ => Err(EvalError::new(
@@ -1477,7 +1477,7 @@ pub fn to_num<'a>(
         [Val::Str { s }] => Ok(Val::Num {
             n: String::from_utf8(s.to_vec())
                 .unwrap()
-                .parse::<f32>()
+                .parse::<f64>()
                 .map_err(|_| {
                     EvalError::new(
                         location,
@@ -1607,7 +1607,7 @@ pub fn min<'a>(
             for val in v {
                 match val {
                     Val::Num { n } => match min {
-                        Some(m) => min = Some(f32::min(*n, m)),
+                        Some(m) => min = Some(f64::min(*n, m)),
                         None => min = Some(*n),
                     },
                     _ => panic!("applying `min` on a non-Num val!?"),
@@ -1638,7 +1638,7 @@ pub fn max<'a>(
             for val in v {
                 match val {
                     Val::Num { n } => match max {
-                        Some(m) => max = Some(f32::max(*n, m)),
+                        Some(m) => max = Some(f64::max(*n, m)),
                         None => max = Some(*n),
                     },
                     _ => panic!("applying `max` on a non-Num val!?"),
@@ -1678,7 +1678,7 @@ pub fn mean<'a>(
 
             match total {
                 Some(t) => Ok(Val::Num {
-                    n: t / v.len() as f32,
+                    n: t / v.len() as f64,
                 }),
                 None => Err(EvalError::new(location, "can't apply `min` to empty list")),
             }
@@ -1710,7 +1710,7 @@ pub fn to_qscores<'a>(
 
                 let qscore = c - 33;
 
-                v.push(Val::Num { n: qscore as f32 });
+                v.push(Val::Num { n: qscore as f64 });
             }
 
             Ok(Val::List { v })

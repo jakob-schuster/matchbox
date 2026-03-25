@@ -74,7 +74,7 @@ struct GlobalConfig {
 
     /// Default error rate permitted when searching for sequences. Given as a proportion of total search sequence length.
     #[arg(short, long, default_value_t = 0.0)]
-    error: f32,
+    error: f64,
 
     /// Number of threads to use when processing reads.
     #[arg(short, long, default_value_t = 1)]

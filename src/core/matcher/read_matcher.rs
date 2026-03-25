@@ -972,11 +972,11 @@ pub struct Seq {
 }
 
 impl Seq {
-    pub fn new(bytes: &[u8], error: f32) -> Seq {
+    pub fn new(bytes: &[u8], error: f64) -> Seq {
         Seq {
             bytes: bytes.to_ascii_uppercase(),
             myers: VarMyers::new(&bytes.to_ascii_uppercase()),
-            dist: (bytes.len() as f32 * error).floor() as usize,
+            dist: (bytes.len() as f64 * error).floor() as usize,
         }
     }
 

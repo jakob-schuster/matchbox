@@ -449,7 +449,7 @@ pub enum TmData<'a> {
 
     NumTy,
     NumLit {
-        n: f32,
+        n: f64,
     },
 
     StrTy,
@@ -908,7 +908,7 @@ pub enum Val<'a> {
 
     NumTy,
     Num {
-        n: f32,
+        n: f64,
     },
 
     StrTy,
@@ -980,7 +980,7 @@ pub enum Effect {
     Stdout { val: PortableVal },
     Out { val: PortableVal, name: Vec<u8> },
     Count { val: PortableVal, name: Vec<u8> },
-    Mean { num: f32, name: Vec<u8> },
+    Mean { num: f64, name: Vec<u8> },
 }
 
 impl<'a> Val<'a> {
@@ -1532,7 +1532,7 @@ pub enum PortableVal {
 
     NumTy,
     Num {
-        n: f32,
+        n: f64,
     },
 
     StrTy,

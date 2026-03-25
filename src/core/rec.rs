@@ -340,7 +340,7 @@ impl<'p> Rec<'p> for SamRead<'p> {
             }),
 
             b"flag" => Ok(Val::Num {
-                n: self.read.flags().unwrap_or_default().bits() as f32,
+                n: self.read.flags().unwrap_or_default().bits() as f64,
             }),
             b"rname" => Ok(Val::Str {
                 s: self
@@ -354,7 +354,7 @@ impl<'p> Rec<'p> for SamRead<'p> {
                 n: self
                     .read
                     .alignment_start()
-                    .map(|r| r.map(|pos| pos.get() as f32))
+                    .map(|r| r.map(|pos| pos.get() as f64))
                     .unwrap_or(Ok(0.0))
                     .unwrap(),
             }),
@@ -363,7 +363,7 @@ impl<'p> Rec<'p> for SamRead<'p> {
                 n: self
                     .read
                     .mapping_quality()
-                    .map(|r| r.map(|mapq| mapq.get() as f32))
+                    .map(|r| r.map(|mapq| mapq.get() as f64))
                     .unwrap_or(Ok(-1.0))
                     .unwrap(),
             }),
@@ -387,7 +387,7 @@ impl<'p> Rec<'p> for SamRead<'p> {
                 n: self
                     .read
                     .mate_alignment_start()
-                    .map(|r| r.map(|pos| pos.get() as f32))
+                    .map(|r| r.map(|pos| pos.get() as f64))
                     .unwrap_or(Ok(0.0))
                     .unwrap(),
             }),
@@ -396,7 +396,7 @@ impl<'p> Rec<'p> for SamRead<'p> {
                 n: self
                     .read
                     .template_length()
-                    .map(|tlen| tlen as f32)
+                    .map(|tlen| tlen as f64)
                     .unwrap_or(0.0),
             }),
 
@@ -495,7 +495,7 @@ impl<'p> Rec<'p> for BamRead<'p> {
             }),
 
             b"flag" => Ok(Val::Num {
-                n: self.read.flags().bits() as f32,
+                n: self.read.flags().bits() as f64,
             }),
 
             b"rname" => Ok(Val::Str { s: self.rname }),
@@ -504,7 +504,7 @@ impl<'p> Rec<'p> for BamRead<'p> {
                 n: self
                     .read
                     .alignment_start()
-                    .map(|r| r.map(|pos| pos.get() as f32))
+                    .map(|r| r.map(|pos| pos.get() as f64))
                     .unwrap_or(Ok(0.0))
                     .unwrap(),
             }),
@@ -513,7 +513,7 @@ impl<'p> Rec<'p> for BamRead<'p> {
                 n: self
                     .read
                     .mapping_quality()
-                    .map(|mapq| mapq.get() as f32)
+                    .map(|mapq| mapq.get() as f64)
                     .unwrap_or(-1.0),
             }),
 
@@ -525,13 +525,13 @@ impl<'p> Rec<'p> for BamRead<'p> {
                 n: self
                     .read
                     .mate_alignment_start()
-                    .map(|r| r.map(|pos| pos.get() as f32))
+                    .map(|r| r.map(|pos| pos.get() as f64))
                     .unwrap_or(Ok(0.0))
                     .unwrap(),
             }),
 
             b"tlen" => Ok(Val::Num {
-                n: self.read.template_length() as f32,
+                n: self.read.template_length() as f64,
             }),
 
             b"seq" => Ok(Val::Str {

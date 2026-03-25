@@ -280,13 +280,13 @@ pub struct OptParam {
 #[derive(Clone, Debug)]
 pub enum Num {
     Int(i32),
-    Float(f32),
+    Float(f64),
 }
 
 impl Num {
-    fn get_float(&self) -> f32 {
+    fn get_float(&self) -> f64 {
         match self {
-            Num::Int(i) => *i as f32,
+            Num::Int(i) => *i as f64,
             Num::Float(f) => *f,
         }
     }

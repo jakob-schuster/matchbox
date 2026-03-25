@@ -130,6 +130,14 @@ impl Reader for SamReader {
                     .par_iter()
                     .map(|record| match record {
                         Ok(read) => {
+                            eprintln!(
+                                "read with pos {}",
+                                read.alignment_start()
+                                    .map(|r| r.map(|pos| pos.get() as f64))
+                                    .unwrap_or(Ok(0.0))
+                                    .unwrap(),
+                            );
+
                             let arena = Arena::new();
                             let cigar = read.cigar();
                             let seq = read.sequence();

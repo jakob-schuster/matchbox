@@ -1,5 +1,6 @@
 //! Accumulate a global mean.
 
+use core::f64;
 use std::{collections::HashMap, fs::File, io::Write};
 
 use itertools::Itertools;
@@ -12,7 +13,7 @@ pub struct MultiAverageHandler {
 }
 
 impl MultiAverageHandler {
-    pub fn handle(&mut self, val: f32, name: &[u8]) -> Result<(), OutputError> {
+    pub fn handle(&mut self, val: f64, name: &[u8]) -> Result<(), OutputError> {
         if let Some(handler) = self.map.get_mut(name) {
             handler.handle(val)?;
         } else {
@@ -81,15 +82,15 @@ pub struct MultiAverageHandlerSummary {
 #[derive(Default, PartialEq)]
 struct AverageHandler {
     count: i32,
-    mean: f32,
-    m2: f32,
+    mean: f64,
+    m2: f64,
 }
 
 impl AverageHandler {
-    fn handle(&mut self, num: f32) -> Result<(), OutputError> {
+    fn handle(&mut self, num: f64) -> Result<(), OutputError> {
         self.count += 1;
         let delta = num - self.mean;
-        self.mean += delta / self.count as f32;
+        self.mean += delta / self.count as f64;
         let delta2 = num - self.mean;
         self.m2 += delta * delta2;
 
@@ -109,13 +110,13 @@ impl AverageHandler {
         }
     }
 
-    fn variance(&self) -> f32 {
-        (self.m2 / self.count as f32).sqrt()
+    fn variance(&self) -> f64 {
+        (self.m2 / self.count as f64).sqrt()
     }
 }
 
 #[derive(Clone)]
 pub struct AverageHandlerSummary {
-    pub mean: f32,
-    pub variance: f32,
+    pub mean: f64,
+    pub variance: f64,
 }

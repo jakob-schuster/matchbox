@@ -293,7 +293,7 @@ peg::parser! {
             = "true" { true }
             / "false" { false }
         rule num_val() -> Num
-            = n:$(['0'..='9']+ "." ['0'..='9']+) { Num::Float(n.parse::<f32>().unwrap()) }
+            = n:$(['0'..='9']+ "." ['0'..='9']+) { Num::Float(n.parse::<f64>().unwrap()) }
             / n:$(['0'..='9']+) { Num::Int(n.parse::<i32>().unwrap()) }
 
         rule name() -> String

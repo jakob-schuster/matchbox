@@ -19,6 +19,7 @@ use crate::{
         dsv::DSVReader,
         fasta::{FastaReader, PairedFastaReader, RevCompFastaReader},
         fastq::{FastqReader, PairedFastqReader, RevCompFastqReader},
+        list::{ListReader, RevCompListReader},
         sam::{PairedSamReader, RevCompSamReader, SamReader},
     },
     output::{OutputError, OutputHandler, OutputHandlerSummary},
@@ -31,6 +32,7 @@ mod bam;
 mod dsv;
 mod fasta;
 mod fastq;
+mod list;
 mod sam;
 
 #[derive(Debug, Clone)]
@@ -581,8 +583,12 @@ pub fn reader_from_input(input: Input) -> Result<Box<dyn Reader>, InputError> {
             (FileType::Sam, true) => Ok(Box::new(RevCompSamReader::new(source.buffer)?)),
             (FileType::Bam, false) => Ok(Box::new(BamReader::new(source.buffer)?)),
             (FileType::Bam, true) => Ok(Box::new(RevCompBamReader::new(source.buffer)?)),
-            (FileType::Matchbox, _) => todo!(),
-            (FileType::List, _) => todo!(),
+            (FileType::Matchbox, false) | (FileType::List, false) => {
+                Ok(Box::new(ListReader::new(source.buffer)))
+            }
+            (FileType::Matchbox, true) | (FileType::List, true) => {
+                Ok(Box::new(RevCompListReader::new(source.buffer)))
+            }
             (FileType::CSV, _) => Ok(Box::new(DSVReader::new(source.buffer, b','))),
             (FileType::TSV, _) => Ok(Box::new(DSVReader::new(source.buffer, b'\t'))),
         },

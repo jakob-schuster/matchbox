@@ -33,7 +33,27 @@ matchbox -s my_script.mb my_reads.fq
 - To process data on multiple threads for improved speed, use `--threads`
 - To handle paired reads, use `--paired-with`
 
-**[For examples and a full scripting language reference, read the documentation!](https://jakob-schuster.github.io/matchbox-docs/)**
+## Example scripts
+
+Trim off the first 10 bases of each read:
+```
+if read matches [|10| rest:_] => rest.out!('trimmed.fq')
+```
+
+Extract the region between two primer sequences:
+```
+left_prim = ACGATGCTGA
+right_prim = AGCGTTGGGGGC
+
+if read matches {
+    [_ left_prim mid:_ right_prim _] => mid.out!('trimmed.fq')
+    
+    # also output the reads which did not contain the primers
+    [_] => read.out!('unmatched.fq')
+}
+```
+
+**[For more examples and a full scripting language reference, read the documentation!](https://jakob-schuster.github.io/matchbox-docs/)**
 
 # Citation
 

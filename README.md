@@ -42,11 +42,11 @@ if read matches [|10| rest:_] => rest.out!('trimmed.fq')
 
 Extract the region between two primer sequences:
 ```
-left_prim = ACGATGCTGA
-right_prim = AGCGTTGGGGGC
+left = TATTGCTGGG
+right = ACTTGCCTGTC
 
 if read matches {
-    [_ left_prim mid:_ right_prim _] => mid.out!('trimmed.fq')
+    [_ left mid:_ right _] => mid.out!('trimmed.fq')
     
     # also output the reads which did not contain the primers
     [_] => read.out!('unmatched.fq')

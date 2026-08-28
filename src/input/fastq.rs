@@ -357,3 +357,93 @@ impl Reader for RevCompFastqReader {
         self.ty.coerce()
     }
 }
+
+pub struct FastqDebugReader {
+    buffer: Box<dyn BufRead>,
+    ty: Val<'static>,
+}
+
+impl FastqDebugReader {
+    pub fn new(buffer: Box<dyn BufRead>) -> FastqDebugReader {
+        let ty = Val::RecTy {
+            fields: vec![
+                CoreRecField {
+                    name: b"seq",
+                    data: Val::StrTy,
+                },
+                CoreRecField {
+                    name: b"id",
+                    data: Val::StrTy,
+                },
+                CoreRecField {
+                    name: b"desc",
+                    data: Val::StrTy,
+                },
+                CoreRecField {
+                    name: b"qual",
+                    data: Val::StrTy,
+                },
+            ],
+        };
+
+        FastqDebugReader { buffer, ty }
+    }
+}
+
+impl Reader for FastqDebugReader {
+    fn map<'p>(
+        &mut self,
+        prog: &core::Prog<'p>,
+        env: &Env<Val<'p>>,
+        cache: &Cache<Val<'p>>,
+        output_handler: &mut OutputHandler,
+        progress: &mut dyn Progress,
+    ) -> Result<(), ExecError> {
+        let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
+
+        let final_progress = input_records
+            .into_iter()
+            .chunks(10000)
+            .into_iter()
+            .try_fold(progress, |progress0, chunk| {
+                let vec: Vec<Result<Vec<Effect>, ExecError>> = chunk
+                    .collect_vec()
+                    .iter()
+                    .map(|record| match record {
+                        Ok(read) => {
+                            let arena = Arena::new();
+                            let val = core::Val::Rec {
+                                rec: Arc::new(rec::FastqRead { read }),
+                            };
+                            prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
+                        }
+                        Err(_) => Err(ExecError::Input(InputError::Read)),
+                    })
+                    .collect_vec();
+
+                for result_effects in &vec {
+                    for effect in result_effects.as_ref().map_err(|e| e.clone())? {
+                        output_handler.handle(effect).map_err(ExecError::Output)?;
+                    }
+                }
+
+                progress0.update(&ProgressSummary::new(10000, output_handler.summarize()));
+                Ok(progress0)
+            })?;
+
+        final_progress.finish();
+        output_handler.finish();
+
+        Ok(())
+    }
+
+    fn count(&mut self) -> usize {
+        let input_records = bio::io::fastq::Reader::from_bufread(&mut self.buffer).records();
+
+        input_records.count()
+    }
+
+    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
+        self.ty.coerce()
+    }
+}

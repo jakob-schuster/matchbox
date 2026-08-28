@@ -113,8 +113,12 @@ struct InputReads {
     with_reverse_complement: bool,
 
     /// Compile the script and output debug information
-    #[arg(long, requires("stdin_format"), conflicts_with_all(["reads"]), conflicts_with_all(["reads"]))]
-    debug: bool,
+    #[arg(long, requires("stdin_format"), conflicts_with_all(["reads"]))]
+    debug_compilation: bool,
+
+    /// Run in a single-threaded mode, for easier profiling with flamegraph / samply
+    #[arg(long, conflicts_with_all(["debug_compilation", "threads", "with_reverse_complement"]))]
+    debug_single_threaded_run: bool,
 }
 
 // An optionally-paired reads file.
@@ -172,9 +176,10 @@ impl GlobalConfig {
             input_reads: InputReads {
                 stdin_format: Some(CLIFileType::Fastq),
                 reads: None,
-                debug: false,
+                debug_compilation: false,
                 paired_with: None,
                 with_reverse_complement: false,
+                debug_single_threaded_run: false,
             },
             input_code: InputCode {
                 script_file: Some("".to_string()),
@@ -215,10 +220,13 @@ fn run_script(global_config: &GlobalConfig) {
 /// Panic on evaluation errors or internal errors.
 fn run(code: &str, global_config: &GlobalConfig) {
     // set up the thread pool
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(global_config.threads)
-        .build_global()
-        .unwrap();
+    if !global_config.input_reads.debug_single_threaded_run {
+        eprintln!("starting threadpool");
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(global_config.threads)
+            .build_global()
+            .unwrap();
+    }
 
     // establish a global-level arena and context,
     // for values allocated during elaboration
@@ -280,7 +288,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .unwrap();
     // let cache = Cache::default();
 
-    if global_config.input_reads.debug {
+    if global_config.input_reads.debug_compilation {
         eprintln!("{}", core_prog);
     }
 

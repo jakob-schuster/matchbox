@@ -18,7 +18,7 @@ use crate::{
         bam::{BamReader, PairedBamReader, RevCompBamReader},
         dsv::DSVReader,
         fasta::{FastaReader, PairedFastaReader, RevCompFastaReader},
-        fastq::{FastqReader, PairedFastqReader, RevCompFastqReader},
+        fastq::{FastqDebugReader, FastqReader, PairedFastqReader, RevCompFastqReader},
         list::{ListReader, RevCompListReader},
         sam::{PairedSamReader, RevCompSamReader, SamReader},
     },
@@ -51,6 +51,10 @@ pub enum InputError {
     FileOpenError { filename: String },
     NoInputError,
     PairedFiletypes { r1: String, r2: String },
+
+    // tried to do a single-threaded debug pass but the file type was not supported
+    DebugFile { filetype: String },
+
     // A problem with a read
     Read,
 
@@ -88,6 +92,11 @@ impl Display for InputError {
             .fmt(f),
             InputError::BAMTag => "error parsing BAM tag".fmt(f),
             InputError::BAMArrayTag => "error parsing BAM array tag".fmt(f),
+            InputError::DebugFile { filetype } => format!(
+                "couldn't do a single-threaded debug run on reads of type '{}'",
+                filetype
+            )
+            .fmt(f),
         }
     }
 }
@@ -453,6 +462,7 @@ pub enum Input {
     Single {
         source: ReadSource,
         with_reverse_complement: bool,
+        debug_single_threaded_run: bool,
     },
     Paired {
         r1: ReadSource,
@@ -503,6 +513,7 @@ fn estimate(input_reads: &InputReads, buffer_len: u64) -> Result<Option<u64>, In
         let short_input = Input::Single {
             source: short_source,
             with_reverse_complement: false,
+            debug_single_threaded_run: input_reads.debug_single_threaded_run,
         };
         let mut short_reader = reader_from_input(short_input)?;
 
@@ -529,6 +540,7 @@ pub fn open(input_reads: &InputReads) -> Result<Input, InputError> {
                 buffer: Box::new(BufReader::new(stdin())),
             },
             with_reverse_complement: input_reads.with_reverse_complement,
+            debug_single_threaded_run: input_reads.debug_single_threaded_run,
         })
     } else if let Some(input_reads_file) = &input_reads.reads {
         // reads are from a file; or maybe two files
@@ -560,10 +572,11 @@ pub fn open(input_reads: &InputReads) -> Result<Input, InputError> {
                     buffer,
                 },
                 with_reverse_complement: input_reads.with_reverse_complement,
+                debug_single_threaded_run: input_reads.debug_single_threaded_run,
             })
         }
     } else {
-        // no reads; debug mode!
+        // no reads; debug compile-only mode!
         Err(InputError::NoInputError)
     }
 }
@@ -574,24 +587,37 @@ pub fn reader_from_input(input: Input) -> Result<Box<dyn Reader>, InputError> {
         Input::Single {
             source,
             with_reverse_complement,
-        } => match (source.filetype, with_reverse_complement) {
-            (FileType::Fasta, false) => Ok(Box::new(FastaReader::new(source.buffer))),
-            (FileType::Fasta, true) => Ok(Box::new(RevCompFastaReader::new(source.buffer))),
-            (FileType::Fastq, false) => Ok(Box::new(FastqReader::new(source.buffer))),
-            (FileType::Fastq, true) => Ok(Box::new(RevCompFastqReader::new(source.buffer))),
-            (FileType::Sam, false) => Ok(Box::new(SamReader::new(source.buffer)?)),
-            (FileType::Sam, true) => Ok(Box::new(RevCompSamReader::new(source.buffer)?)),
-            (FileType::Bam, false) => Ok(Box::new(BamReader::new(source.buffer)?)),
-            (FileType::Bam, true) => Ok(Box::new(RevCompBamReader::new(source.buffer)?)),
-            (FileType::Matchbox, false) | (FileType::List, false) => {
-                Ok(Box::new(ListReader::new(source.buffer)))
+            debug_single_threaded_run,
+        } => {
+            if debug_single_threaded_run {
+                match (source.filetype, with_reverse_complement) {
+                    (FileType::Fastq, false) => Ok(Box::new(FastqDebugReader::new(source.buffer))),
+                    (_, true) => panic!(), // should never happen because this was eliminated by the command-line argument parser
+                    (filetype, _) => Err(InputError::DebugFile {
+                        filetype: filetype.to_string(),
+                    }),
+                }
+            } else {
+                match (source.filetype, with_reverse_complement) {
+                    (FileType::Fasta, false) => Ok(Box::new(FastaReader::new(source.buffer))),
+                    (FileType::Fasta, true) => Ok(Box::new(RevCompFastaReader::new(source.buffer))),
+                    (FileType::Fastq, false) => Ok(Box::new(FastqReader::new(source.buffer))),
+                    (FileType::Fastq, true) => Ok(Box::new(RevCompFastqReader::new(source.buffer))),
+                    (FileType::Sam, false) => Ok(Box::new(SamReader::new(source.buffer)?)),
+                    (FileType::Sam, true) => Ok(Box::new(RevCompSamReader::new(source.buffer)?)),
+                    (FileType::Bam, false) => Ok(Box::new(BamReader::new(source.buffer)?)),
+                    (FileType::Bam, true) => Ok(Box::new(RevCompBamReader::new(source.buffer)?)),
+                    (FileType::Matchbox, false) | (FileType::List, false) => {
+                        Ok(Box::new(ListReader::new(source.buffer)))
+                    }
+                    (FileType::Matchbox, true) | (FileType::List, true) => {
+                        Ok(Box::new(RevCompListReader::new(source.buffer)))
+                    }
+                    (FileType::CSV, _) => Ok(Box::new(DSVReader::new(source.buffer, b','))),
+                    (FileType::TSV, _) => Ok(Box::new(DSVReader::new(source.buffer, b'\t'))),
+                }
             }
-            (FileType::Matchbox, true) | (FileType::List, true) => {
-                Ok(Box::new(RevCompListReader::new(source.buffer)))
-            }
-            (FileType::CSV, _) => Ok(Box::new(DSVReader::new(source.buffer, b','))),
-            (FileType::TSV, _) => Ok(Box::new(DSVReader::new(source.buffer, b'\t'))),
-        },
+        }
         Input::Paired { r1, r2 } => match (&r1.filetype, &r2.filetype) {
             (FileType::Fasta, FileType::Fasta) => {
                 Ok(Box::new(PairedFastaReader::new(r1.buffer, r2.buffer)))

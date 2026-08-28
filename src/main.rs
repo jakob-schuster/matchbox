@@ -221,7 +221,6 @@ fn run_script(global_config: &GlobalConfig) {
 fn run(code: &str, global_config: &GlobalConfig) {
     // set up the thread pool
     if !global_config.input_reads.debug_single_threaded_run {
-        eprintln!("starting threadpool");
         rayon::ThreadPoolBuilder::new()
             .num_threads(global_config.threads)
             .build_global()

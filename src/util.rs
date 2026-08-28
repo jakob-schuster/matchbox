@@ -132,7 +132,7 @@ impl<A: Clone + Display> Cache<A> {
     }
 
     /// Get an item at an index in the cache.
-    pub fn get(&self, index: usize) -> &A {
+    pub fn get<'a>(&self, index: usize) -> &A {
         self.vec.get(index).expect("Bad index in cache!")
     }
 }

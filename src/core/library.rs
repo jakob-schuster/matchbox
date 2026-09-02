@@ -5,7 +5,10 @@ use crate::{
     input::{get_filetype_and_buffer, FileType},
     myers::VarMyers,
     surface::Context,
-    util::{self, bytes_to_string, get_bit, Arena, Cache, CoreRecField, Env, Location},
+    util::{
+        self, bytes_to_string, cache::Cache, env::Env, get_bit, location::Location,
+        recfield::CoreRecField, Arena,
+    },
 };
 use std::{collections::HashMap, io::Read, path::Path, sync::Arc};
 

@@ -12,7 +12,10 @@ use crate::{
     },
     input::{FileType, InputError, Reader},
     parse,
-    util::{bytes_to_string, Arena, Cache, CoreRecField, Env, Located, Location, Ran, RecField},
+    util::{
+        bytes_to_string, cache::Cache, env::Env, location::Located, location::Location, ran::Ran,
+        recfield::CoreRecField, recfield::RecField, Arena,
+    },
 };
 
 /// An error raised if there was a problem in the surface syntax,
@@ -982,7 +985,7 @@ pub fn infer_tm<'a>(
                     fields: fields
                         .iter()
                         .map(|field| {
-                            Ok(crate::util::CoreRecField::new(
+                            Ok(crate::util::recfield::CoreRecField::new(
                                 field.name.as_bytes(),
                                 check_tm(arena, ctx, &field.data, &core::Val::Univ)?,
                             ))
@@ -999,7 +1002,7 @@ pub fn infer_tm<'a>(
                     fields: fields
                         .iter()
                         .map(|field| {
-                            Ok(crate::util::CoreRecField::new(
+                            Ok(crate::util::recfield::CoreRecField::new(
                                 field.name.as_bytes(),
                                 check_tm(arena, ctx, &field.data, &core::Val::Univ)?,
                             ))

@@ -14,7 +14,7 @@ use crate::{
     },
     input::{AuxiliaryInputData, ExecError, Input, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{Arena, Cache, CoreRecField, Env, Location},
+    util::{cache::Cache, env::Env, location::Location, recfield::CoreRecField, Arena},
 };
 
 pub struct BamReader {

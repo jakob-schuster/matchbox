@@ -6,7 +6,7 @@ use crate::{
     core::{self, matcher, EvalError, InternalError, Val},
     myers::VarMyers,
     surface::{self, check_tm, Context, ElabError, Region, RegionData},
-    util::{bytes_to_string, Arena, Cache, Env, Location, Ran},
+    util::{bytes_to_string, cache::Cache, env::Env, location::Location, ran::Ran, Arena},
 };
 
 use super::Matcher;

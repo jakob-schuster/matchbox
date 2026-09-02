@@ -9,7 +9,8 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use rec::{ConcreteRec, FastaRead, FullyConcreteRec, Rec};
 
 use crate::util::{
-    self, bytes_to_string, Arena, Cache, CoreRecField, Env, Located, Location, RecField,
+    self, bytes_to_string, cache::Cache, env::Env, recfield::CoreRecField, location::Located,
+    recfield::RecField, Arena, location::Location,
 };
 
 pub mod cache;

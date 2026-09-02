@@ -5,7 +5,7 @@ pub mod read_matcher;
 use crate::{
     myers::VarMyers,
     surface::Context,
-    util::{Arena, Env, Ran},
+    util::{env::Env, ran::Ran, Arena},
 };
 
 use super::{EvalError, Val};

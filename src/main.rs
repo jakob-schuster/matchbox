@@ -22,7 +22,7 @@ use input::{get_extensions, FileType, FileTypeError, InputError, ReaderWithBar};
 use output::{OutputError, OutputHandler};
 use parse::{parse, ParseError};
 use surface::{elab_prog, elab_prog_for_ctx, ElabError};
-use util::{Arena, Location};
+use util::{location::Location, Arena};
 
 mod core;
 mod input;

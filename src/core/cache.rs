@@ -5,7 +5,7 @@ use crate::{
         Branch, BranchData, EvalError, PatternBranch, PatternBranchData, Prog, ProgData, Stmt,
         StmtData, Tm, TmData, Val,
     },
-    util::{Arena, Cache, Env},
+    util::{cache::Cache, env::Env, Arena},
 };
 
 impl<'p> Prog<'p> {

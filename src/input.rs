@@ -24,7 +24,7 @@ use crate::{
     },
     output::{OutputError, OutputHandler, OutputHandlerSummary},
     ui::Interface,
-    util::{Arena, Cache, Env},
+    util::{cache::Cache, env::Env, Arena},
     InputReads,
 };
 

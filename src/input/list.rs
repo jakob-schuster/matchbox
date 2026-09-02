@@ -6,7 +6,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{library::unary_read_reverse_complement, Effect, Val},
     input::{ExecError, ProgressSummary, Reader},
-    util::{Arena, Location},
+    util::{location::Location, Arena},
 };
 
 pub struct ListReader {
@@ -25,8 +25,8 @@ impl Reader for ListReader {
     fn map<'p>(
         &mut self,
         prog: &crate::core::Prog<'p>,
-        env: &crate::util::Env<crate::core::Val<'p>>,
-        cache: &crate::util::Cache<crate::core::Val<'p>>,
+        env: &crate::util::env::Env<crate::core::Val<'p>>,
+        cache: &crate::util::cache::Cache<crate::core::Val<'p>>,
         output_handler: &mut crate::output::OutputHandler,
         progress: &mut dyn super::Progress,
     ) -> Result<(), super::ExecError> {
@@ -91,8 +91,8 @@ impl Reader for RevCompListReader {
     fn map<'p>(
         &mut self,
         prog: &crate::core::Prog<'p>,
-        env: &crate::util::Env<crate::core::Val<'p>>,
-        cache: &crate::util::Cache<crate::core::Val<'p>>,
+        env: &crate::util::env::Env<crate::core::Val<'p>>,
+        cache: &crate::util::cache::Cache<crate::core::Val<'p>>,
         output_handler: &mut crate::output::OutputHandler,
         progress: &mut dyn super::Progress,
     ) -> Result<(), super::ExecError> {

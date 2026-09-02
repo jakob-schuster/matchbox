@@ -13,7 +13,7 @@ use crate::{
     },
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{Arena, Cache, CoreRecField, Env},
+    util::{cache::Cache, env::Env, recfield::CoreRecField, Arena},
 };
 
 pub struct DSVReader {

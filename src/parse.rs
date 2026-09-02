@@ -4,7 +4,7 @@ use parser::{prog, tm};
 
 use crate::{
     surface::*,
-    util::{self, Location},
+    util::{self, location::Location},
     GlobalConfig,
 };
 use std::rc::Rc;
@@ -265,14 +265,14 @@ peg::parser! {
             = o:opt_arg() _ "," _ rest:opt_arg_list() { vec![o].into_iter().chain(rest).collect() }
             / o:opt_arg() (_ ",")? { vec![o] }
 
-        rule rec_lit_field() -> util::RecField<Tm>
-            = name:name() _ "=" _ tm:tm() { util::RecField::new(name, tm) }
+        rule rec_lit_field() -> util::recfield::RecField<Tm>
+            = name:name() _ "=" _ tm:tm() { util::recfield::RecField::new(name, tm) }
 
-        rule rec_ty_field() -> util::RecField<Tm>
-            = name:name() _ ":" _ tm:tm() { util::RecField::new(name, tm) }
+        rule rec_ty_field() -> util::recfield::RecField<Tm>
+            = name:name() _ ":" _ tm:tm() { util::recfield::RecField::new(name, tm) }
 
-        rule rec_pattern_field() -> util::RecField<Pattern>
-            = name:name() _ "=" _ pattern:pattern() { util::RecField::new(name, pattern) }
+        rule rec_pattern_field() -> util::recfield::RecField<Pattern>
+            = name:name() _ "=" _ pattern:pattern() { util::recfield::RecField::new(name, pattern) }
 
 
 
@@ -301,8 +301,8 @@ peg::parser! {
 
         //
 
-        rule located<T>(tr: rule<T>) -> util::Located<T>
-            = start:position!() t:tr() end:position!() { util::Located::new(util::Location::new(start, end), t) }
+        rule located<T>(tr: rule<T>) -> util::location::Located<T>
+            = start:position!() t:tr() end:position!() { util::location::Located::new(util::location::Location::new(start, end), t) }
 
         // WARN doesn't work
         rule list_then<T,V>(tr: rule<T>, tr2: rule<V>, sepr: rule<()>) -> (Vec<T>, Vec<V>)

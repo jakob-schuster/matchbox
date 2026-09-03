@@ -285,7 +285,6 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();
-    // let cache = Cache::default();
 
     if global_config.input_reads.debug_compilation {
         eprintln!("{}", core_prog);

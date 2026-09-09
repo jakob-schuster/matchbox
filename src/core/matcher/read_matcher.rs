@@ -681,7 +681,7 @@ pub enum OpVal<'a> {
         // the location to assign to
         loc: usize,
         // the
-        tm: LocTm<'a>,
+        tm: LocTm,
         // the closest known locations to check bounds against
         flanking: Ran<usize>,
     },
@@ -892,17 +892,17 @@ impl<'p> OpVal<'p> {
 }
 
 #[derive(Clone)]
-pub enum LocTm<'p> {
+pub enum LocTm {
     Var {
         loc: usize,
     },
     Plus {
-        loc_tm: Arc<LocTm<'p>>,
-        offset: core::Tm<'p>,
+        loc_tm: Arc<LocTm>,
+        offset: core::Tm,
     },
     Minus {
-        loc_tm: Arc<LocTm<'p>>,
-        offset: core::Tm<'p>,
+        loc_tm: Arc<LocTm>,
+        offset: core::Tm,
     },
 }
 

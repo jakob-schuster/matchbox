@@ -18,6 +18,9 @@ use crate::{
     },
 };
 
+mod elab;
+mod elab2;
+
 /// An error raised if there was a problem in the surface syntax,
 /// usually as a result of type errors. This is normal, and should be rendered
 /// nicely.
@@ -1271,7 +1274,7 @@ pub fn infer_tm<'a>(
                 // to a new val (which we expect to be concrete)
                 core::Val::FunReturnTyAwaiting {
                     data: core::FunData {
-                        env: ctx
+                        global: ctx
                             .tms
                             .iter()
                             .fold(Env::default(), |env0, val| env0.with((*val).clone())),
@@ -1418,7 +1421,7 @@ pub fn infer_tm<'a>(
         }
         TmData::Name { name } => match ctx.lookup(name.clone()) {
             Some((index, ty)) => Ok((
-                core::Tm::new(tm.location.clone(), core::TmData::Var { index }),
+                core::Tm::new(tm.location.clone(), core::TmData::Local { index }),
                 ty.clone(),
             )),
             None => Err(ElabError::new_unbound_name(&tm.location, name)),
@@ -1454,7 +1457,7 @@ fn infer_bin_op<'a>(
                         core::TmData::FunApp {
                             head: Arc::new(core::Tm::new(
                                 location.clone(),
-                                core::TmData::Var { index },
+                                core::TmData::Local { index },
                             )),
                             args: vec![ctm0, ctm1],
                         },
@@ -1534,7 +1537,7 @@ fn infer_un_op<'a>(
                             core::TmData::FunApp {
                                 head: Arc::new(core::Tm::new(
                                     location.clone(),
-                                    core::TmData::Var { index },
+                                    core::TmData::Local { index },
                                 )),
                                 args: vec![ctm0],
                             },
@@ -1560,7 +1563,7 @@ fn infer_un_op<'a>(
                                 core::TmData::FunApp {
                                     head: Arc::new(core::Tm::new(
                                         location.clone(),
-                                        core::TmData::Var { index },
+                                        core::TmData::Local { index },
                                     )),
                                     args: vec![ctm0],
                                 },
@@ -1580,7 +1583,7 @@ fn infer_un_op<'a>(
                                 core::TmData::FunApp {
                                     head: Arc::new(core::Tm::new(
                                         location.clone(),
-                                        core::TmData::Var { index },
+                                        core::TmData::Local { index },
                                     )),
                                     args: vec![ctm0],
                                 },
@@ -1605,7 +1608,7 @@ fn infer_un_op<'a>(
                                 core::TmData::FunApp {
                                     head: Arc::new(core::Tm::new(
                                         location.clone(),
-                                        core::TmData::Var { index },
+                                        core::TmData::Local { index },
                                     )),
                                     args: vec![ctm0],
                                 },

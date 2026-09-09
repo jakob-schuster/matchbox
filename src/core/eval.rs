@@ -186,10 +186,10 @@ impl<'p> Tm<'p> {
     {
         match &self.data {
             // WARN clumsy and wasteful coercion
-            TmData::Cached { index } => Ok(cache.get(*index).coerce()),
+            TmData::Global { index } => Ok(cache.get(*index).coerce()),
 
             // look up the variable in the environment
-            TmData::Var { index } => {
+            TmData::Local { index } => {
                 Ok(if *index < env.iter().len() {
                     (*env.get_index(*index)).clone()
                 } else {
@@ -250,7 +250,7 @@ impl<'p> Tm<'p> {
             // WARN we aren't giving an option for this to be neutral yet. is this a problem?
             TmData::FunLit { body } => Ok(Val::Fun {
                 data: FunData {
-                    env: env.clone() as Env<Val<'a>>,
+                    global: env.clone() as Env<Val<'a>>,
                     body: body.coerce(),
                 },
             }),

@@ -217,7 +217,7 @@ impl<'p> Tm<'p> {
                     let (cache, index) = cache.push(val);
 
                     Ok((
-                        Tm::new(self.location.clone(), TmData::Cached { index }),
+                        Tm::new(self.location.clone(), TmData::Global { index }),
                         cache,
                     ))
                 }

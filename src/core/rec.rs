@@ -5,6 +5,7 @@ use noodles::sam::{
 };
 
 use crate::{
+    core,
     input::{Input, InputError},
     util::{self, bytes_to_string, location::Location, recfield::CoreRecField, Arena},
 };
@@ -15,6 +16,51 @@ use super::{EvalError, InternalError, Val};
 #[derive(Debug)]
 pub enum RecError {
     BadIndex(String),
+}
+
+pub enum Rec2<'r> {
+    Concrete { r: ConcreteRec<'r> },
+    FastaRead { r: FastaRead<'r> },
+    FastqRead { r: FastqRead<'r> },
+    SamRead { r: SamRead<'r> },
+    BamRead { r: BamRead<'r> },
+    CSVRead { r: CSVRead<'r> },
+}
+
+impl<'r> Rec2<'r> {
+    pub fn get(&self, key: &[u8]) -> Result<Val<'r>, InternalError> {
+        match self {
+            Rec2::Concrete { r } => r.get(key),
+            Rec2::FastaRead { r } => r.get(key),
+            Rec2::FastqRead { r } => r.get(key),
+            Rec2::SamRead { r } => r.get(key),
+            Rec2::BamRead { r } => r.get(key),
+            Rec2::CSVRead { r } => r.get(key),
+        }
+    }
+
+    pub fn all(&self) -> HashMap<Vec<u8>, Val<'r>> {
+        match self {
+            Rec2::Concrete { r } => r.all(),
+            Rec2::FastaRead { r } => r.all(),
+            Rec2::FastqRead { r } => r.all(),
+            Rec2::SamRead { r } => r.all(),
+            Rec2::BamRead { r } => r.all(),
+            Rec2::CSVRead { r } => r.all(),
+        }
+    }
+
+    pub fn with(&self, key: &[u8], val: Val<'r>) -> Rec2<'r> {
+        todo!()
+    }
+
+    pub fn with_all(&self, entries: &[(&[u8], Val<'r>)]) -> Rec2<'r> {
+        todo!()
+    }
+
+    fn slice(&self, start: usize, end: usize) -> Result<Val<'a>, InternalError> {
+        todo!()
+    }
 }
 
 pub trait Rec<'p>: Display + Send + Sync {
@@ -209,12 +255,18 @@ impl<'p> Rec<'p> for FastaRead<'p> {
         'p: 'a,
     {
         match key {
-            b"seq" => Ok(Val::Str { s: self.read.seq() }),
+            b"seq" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.read.seq() },
+            }),
             b"id" => Ok(Val::Str {
-                s: self.read.id().as_bytes(),
+                s: core::StrVal::Reference {
+                    s: self.read.id().as_bytes(),
+                },
             }),
             b"desc" => Ok(Val::Str {
-                s: self.read.desc().unwrap_or_default().as_bytes(),
+                s: core::StrVal::Reference {
+                    s: self.read.desc().unwrap_or_default().as_bytes(),
+                },
             }),
 
             _ => Err(InternalError {
@@ -259,15 +311,23 @@ impl<'p> Rec<'p> for FastqRead<'p> {
         'p: 'a,
     {
         match key {
-            b"seq" => Ok(Val::Str { s: self.read.seq() }),
+            b"seq" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.read.seq() },
+            }),
             b"id" => Ok(Val::Str {
-                s: self.read.id().as_bytes(),
+                s: core::StrVal::Reference {
+                    s: self.read.id().as_bytes(),
+                },
             }),
             b"desc" => Ok(Val::Str {
-                s: self.read.desc().unwrap_or_default().as_bytes(),
+                s: core::StrVal::Reference {
+                    s: self.read.desc().unwrap_or_default().as_bytes(),
+                },
             }),
             b"qual" => Ok(Val::Str {
-                s: self.read.qual(),
+                s: core::StrVal::Reference {
+                    s: self.read.qual(),
+                },
             }),
 
             _ => Err(InternalError {
@@ -336,18 +396,22 @@ impl<'p> Rec<'p> for SamRead<'p> {
     {
         match key {
             b"qname" | b"id" => Ok(Val::Str {
-                s: self.read.name().unwrap_or_default(),
+                s: core::StrVal::Reference {
+                    s: self.read.name().unwrap_or_default(),
+                },
             }),
 
             b"flag" => Ok(Val::Num {
                 n: self.read.flags().unwrap_or_default().bits() as f64,
             }),
             b"rname" => Ok(Val::Str {
-                s: self
-                    .read
-                    .reference_sequence_name()
-                    .map(|a| a.as_ref())
-                    .unwrap_or(b"*"),
+                s: core::StrVal::Reference {
+                    s: self
+                        .read
+                        .reference_sequence_name()
+                        .map(|a| a.as_ref())
+                        .unwrap_or(b"*"),
+                },
             }),
 
             b"pos" => Ok(Val::Num {
@@ -370,17 +434,19 @@ impl<'p> Rec<'p> for SamRead<'p> {
 
             b"cigar" => Ok(Val::Str {
                 s: match self.cigar.as_ref() {
-                    b"" => b"*",
-                    r => r,
+                    b"" => core::StrVal::Reference { s: b"*" },
+                    r => core::StrVal::Reference { s: r },
                 },
             }),
 
             b"rnext" => Ok(Val::Str {
-                s: self
-                    .read
-                    .mate_reference_sequence_name()
-                    .map(|a| a.as_ref())
-                    .unwrap_or(b"*"),
+                s: core::StrVal::Reference {
+                    s: self
+                        .read
+                        .mate_reference_sequence_name()
+                        .map(|a| a.as_ref())
+                        .unwrap_or(b"*"),
+                },
             }),
 
             b"pnext" => Ok(Val::Num {
@@ -408,12 +474,16 @@ impl<'p> Rec<'p> for SamRead<'p> {
             }),
 
             b"qual" => Ok(Val::Str {
-                s: self.qual.as_ref(),
+                s: core::StrVal::Reference {
+                    s: self.qual.as_ref(),
+                },
             }),
 
             // WARN need to do this
             b"tags" | b"desc" => Ok(Val::Str {
-                s: self.data.as_ref(),
+                s: core::StrVal::Reference {
+                    s: self.data.as_ref(),
+                },
             }),
 
             _ => Err(InternalError {
@@ -491,14 +561,18 @@ impl<'p> Rec<'p> for BamRead<'p> {
     {
         match key {
             b"qname" | b"id" => Ok(Val::Str {
-                s: self.read.name().unwrap_or_default(),
+                s: core::StrVal::Reference {
+                    s: self.read.name().unwrap_or_default(),
+                },
             }),
 
             b"flag" => Ok(Val::Num {
                 n: self.read.flags().bits() as f64,
             }),
 
-            b"rname" => Ok(Val::Str { s: self.rname }),
+            b"rname" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.rname },
+            }),
 
             b"pos" => Ok(Val::Num {
                 n: self
@@ -517,9 +591,13 @@ impl<'p> Rec<'p> for BamRead<'p> {
                     .unwrap_or(-1.0),
             }),
 
-            b"cigar" => Ok(Val::Str { s: &self.cigar }),
+            b"cigar" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: &self.cigar },
+            }),
 
-            b"rnext" => Ok(Val::Str { s: self.mate_rname }),
+            b"rnext" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.mate_rname },
+            }),
 
             b"pnext" => Ok(Val::Num {
                 n: self
@@ -536,14 +614,18 @@ impl<'p> Rec<'p> for BamRead<'p> {
 
             b"seq" => Ok(Val::Str {
                 s: match self.seq {
-                    b"" => b"*",
-                    r => r,
+                    b"" => core::StrVal::Reference { s: b"*" },
+                    r => core::StrVal::Reference { s: r },
                 },
             }),
-            b"qual" => Ok(Val::Str { s: self.qual }),
+            b"qual" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.qual },
+            }),
 
             // WARN need to do this
-            b"tags" | b"desc" => Ok(Val::Str { s: self.data }),
+            b"tags" | b"desc" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.data },
+            }),
 
             _ => Err(InternalError {
                 message: String::from_utf8(key.to_vec()).expect("Couldn't convert vec to string!"),
@@ -677,7 +759,9 @@ impl<'p> Rec<'p> for CSVRead<'p> {
         'p: 'a,
     {
         match self.fields.get(self.header.get(key)?) {
-            Some(bytes) => Ok(Val::Str { s: bytes }),
+            Some(bytes) => Ok(Val::Str {
+                s: core::StrVal::Reference { s: bytes },
+            }),
             None => Err(InternalError::new("couldn't index CSV row correctly?!")),
         }
     }
@@ -691,7 +775,12 @@ impl<'p> Rec<'p> for CSVRead<'p> {
         for (key, index) in &self.header.map {
             let bytes = self.fields.get(*index).unwrap();
 
-            map.insert(key.clone(), Val::Str { s: bytes });
+            map.insert(
+                key.clone(),
+                Val::Str {
+                    s: core::StrVal::Reference { s: bytes },
+                },
+            );
         }
 
         map

@@ -8,13 +8,21 @@ use matcher::Matcher;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rec::{ConcreteRec, FastaRead, FullyConcreteRec, Rec};
 
-use crate::util::{
-    self, bytes_to_string, cache::Cache, env::Env, location::Located, location::Location,
-    recfield::CoreRecField, recfield::RecField, Arena,
+use crate::{
+    core::rec::Rec2,
+    util::{
+        self, bytes_to_string,
+        cache::Cache,
+        env::Env,
+        location::{Located, Location},
+        recfield::{CoreRecField, RecField},
+        Arena,
+    },
 };
 
 pub mod cache;
 pub mod eval;
+pub mod eval2;
 pub mod library;
 pub mod matcher;
 pub mod rec;
@@ -56,11 +64,11 @@ pub type Stmt<'p> = Located<StmtData<'p>>;
 #[derive(Clone)]
 pub enum StmtData<'p> {
     Let {
-        tm: Tm<'p>,
+        tm: Tm,
         next: Arc<Stmt<'p>>,
     },
     Tm {
-        tm: Tm<'p>,
+        tm: Tm,
         next: Arc<Stmt<'p>>,
     },
     If {
@@ -75,12 +83,12 @@ pub type Branch<'p> = Located<BranchData<'p>>;
 #[derive(Clone)]
 pub enum BranchData<'p> {
     Bool {
-        tm: Tm<'p>,
+        tm: Tm,
         stmt: Stmt<'p>,
     },
 
     Is {
-        tm: Tm<'p>,
+        tm: Tm,
         branches: Vec<PatternBranch<'p>>,
     },
 }
@@ -94,14 +102,14 @@ pub struct PatternBranchData<'p> {
     pub stmt: Stmt<'p>,
 }
 
-pub type Tm<'a> = Located<TmData<'a>>;
+pub type Tm = Located<TmData>;
 /// A term.
 #[derive(Clone)]
-pub enum TmData<'a> {
-    Cached {
+pub enum TmData {
+    Global {
         index: usize,
     },
-    Var {
+    Local {
         index: usize,
     },
 
@@ -120,50 +128,47 @@ pub enum TmData<'a> {
 
     StrTy,
     StrLit {
-        s: &'a [u8],
+        s: Vec<u8>,
     },
 
     // list types
     ListTy {
-        ty: Arc<Tm<'a>>,
+        ty: Arc<Tm>,
     },
     ListLit {
-        tms: Vec<Tm<'a>>,
+        tms: Vec<Tm>,
     },
 
     FunTy {
-        args: Vec<Tm<'a>>,
-        opts: Vec<(&'a [u8], Tm<'a>, Tm<'a>)>,
-        body: Arc<Tm<'a>>,
+        args: Vec<Tm>,
+        opts: Vec<(Vec<u8>, Tm, Tm)>,
+        body: Arc<Tm>,
     },
     // can't remember why we need args still...
     FunLit {
-        body: Arc<Tm<'a>>,
+        body: Arc<Tm>,
     },
     FunForeignLit {
-        body: Arc<
-            dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>
-                + Send
-                + Sync,
-        >,
+        body:
+            Arc<dyn for<'b> Fn(&Location, &[Val<'b>]) -> Result<Val<'b>, EvalError> + Send + Sync>,
     },
     FunApp {
-        head: Arc<Tm<'a>>,
-        args: Vec<Tm<'a>>,
+        head: Arc<Tm>,
+        args: Vec<Tm>,
     },
 
     RecTy {
-        fields: Vec<CoreRecField<'a, Tm<'a>>>,
+        fields: Vec<CoreRecField<Tm>>,
     },
     RecWithTy {
-        fields: Vec<CoreRecField<'a, Tm<'a>>>,
+        fields: Vec<CoreRecField<Tm>>,
     },
     RecLit {
-        fields: Vec<CoreRecField<'a, Tm<'a>>>,
+        fields: Vec<CoreRecField<Tm>>,
     },
     RecProj {
-        tm: Arc<Tm<'a>>,
-        name: &'a [u8],
+        tm: Arc<Tm>,
+        name: Vec<u8>,
     },
 
     // the return type of effectful functions
@@ -185,8 +190,8 @@ impl<'p> Tm<'p> {
         'p: 'a,
     {
         let tm_data = match &self.data {
-            TmData::Cached { index } => TmData::Cached { index: *index },
-            TmData::Var { index } => TmData::Var { index: *index },
+            TmData::Global { index } => TmData::Global { index: *index },
+            TmData::Local { index } => TmData::Local { index: *index },
             TmData::Univ => TmData::Univ,
             TmData::AnyTy => TmData::AnyTy,
             TmData::BoolTy => TmData::BoolTy,
@@ -248,26 +253,27 @@ impl<'p> Tm<'p> {
 
 /// Function that explicitly captures its environment.
 #[derive(Clone)]
-pub struct FunData<'a> {
-    pub env: Env<Val<'a>>,
-    pub body: Tm<'a>,
+pub struct FunData<'r> {
+    pub global: eval2::env::Env<Val<'r>>,
+    pub local: eval2::env::Env<Val<'r>>,
+    pub body: Tm,
 }
 
-impl<'a> FunData<'a> {
+impl<'r> FunData<'r> {
     /// Applies a function to a list of arguments, returning the result.
-    pub fn app(&self, arena: &'a Arena, args: Vec<Val<'a>>) -> Result<Val<'a>, EvalError> {
-        let new_env = args
-            .into_iter()
-            .fold(self.env.clone(), |env0, arg| env0.with(arg));
+    pub fn app<'p: 'r>(&'p self, args: Vec<Val<'r>>) -> Result<Val<'r>, EvalError> {
+        let mut new_local = self.local.clone();
+        for arg in args {
+            new_local.push(arg);
+        }
 
-        self.body
-            .eval(arena, &Env::default(), &Cache::default(), &new_env)
+        self.body.eval2(&self.global, &new_local)
     }
 }
 
 /// A value.
 #[derive(Clone)]
-pub enum Val<'a> {
+pub enum Val<'r> {
     /// Atomic values
     Univ,
     AnyTy,
@@ -284,58 +290,55 @@ pub enum Val<'a> {
 
     StrTy,
     Str {
-        s: &'a [u8],
+        s: StrVal<'r>,
     },
 
     ListTy {
-        ty: Arc<Val<'a>>,
+        ty: Arc<Val<'r>>,
     },
     List {
-        v: Vec<Val<'a>>,
+        v: ListVal<'r>,
     },
 
     /// Record values; can have any backend that implements the trait.
     /// This allows us to have some Record values that merely wrap the
     /// structures provided by readers.
     RecTy {
-        fields: Vec<CoreRecField<'a, Val<'a>>>,
+        fields: Vec<CoreRecField<Val<'r>>>,
     },
     /// A record type which requires certain fields;
     /// other fields can also be harmlessly present
     RecWithTy {
-        fields: Vec<CoreRecField<'a, Val<'a>>>,
+        fields: Vec<CoreRecField<Val<'r>>>,
     },
     Rec {
-        rec: Arc<dyn Rec<'a> + 'a>,
+        rec: Rec2<'r>,
     },
 
     /// Function value; defunctionalised, carries the context it needs
     /// and the Rust function it will execute, which takes this carried
     /// context and any arguments.
     FunTy {
-        args: Vec<Val<'a>>,
-        opts: Vec<(&'a [u8], Val<'a>, Tm<'a>)>,
-        body: Arc<Val<'a>>,
+        args: Vec<Val<'r>>,
+        opts: Vec<(&'r [u8], Val<'r>, Tm)>,
+        body: Arc<Val<'r>>,
     },
     Fun {
-        data: FunData<'a>,
+        data: FunData<'r>,
     },
     FunForeign {
-        body: Arc<
-            dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>
-                + Send
-                + Sync,
-        >,
+        body:
+            Arc<dyn for<'b> Fn(&Location, &[Val<'b>]) -> Result<Val<'b>, EvalError> + Send + Sync>,
     },
     /// Represents a dependent return type of a function,
     /// which can only be elaborated when the function is actually applied.
     /// Should probably come back and clean all of this up conceptually.
     FunReturnTyAwaiting {
-        data: FunData<'a>, // expected_ty: Arc<Val<'a>>,
+        data: FunData<'r>, // expected_ty: Arc<Val<'a>>,
     },
 
     Neutral {
-        neutral: Neutral<'a>,
+        neutral: Neutral<'r>,
     },
 
     EffectTy,
@@ -343,6 +346,66 @@ pub enum Val<'a> {
     Effect {
         effect: Effect,
     },
+}
+
+impl<'r> Val<'r> {
+    fn reference(&self) -> Val<'r> {
+        todo!()
+    }
+
+    fn concretise(&self) -> PortableVal {
+        todo!()
+    }
+}
+
+/// A string value, either a concrete u8 vector or a slice elsewhere (presumably in the global or local env)
+#[derive(Clone)]
+enum StrVal<'r> {
+    Reference { s: &'r [u8] },
+    Concrete { s: Vec<u8> },
+}
+
+impl<'r> StrVal<'r> {
+    fn new_reference(s: &'r [u8]) -> StrVal<'r> {
+        StrVal::Reference { s }
+    }
+
+    fn new_concrete(s: Vec<u8>) -> StrVal<'r> {
+        StrVal::Concrete { s }
+    }
+
+    /// Get the slice
+    fn get_reference(&self) -> &[u8] {
+        match self {
+            StrVal::Reference { s } => s,
+            StrVal::Concrete { s } => s,
+        }
+    }
+}
+
+/// A list value, either a concrete value vector or a slice elsewhere (presumably in the global or local env)
+#[derive(Clone)]
+enum ListVal<'r> {
+    Reference { v: &'r [Val<'r>] },
+    Concrete { v: Vec<Val<'r>> },
+}
+
+impl<'r> ListVal<'r> {
+    fn new_reference(v: &'r [Val<'r>]) -> ListVal<'r> {
+        ListVal::Reference { v }
+    }
+
+    fn new_concrete(v: Vec<Val<'r>>) -> ListVal<'r> {
+        ListVal::Concrete { v }
+    }
+
+    /// Get the slice
+    fn get_reference(&self) -> &[Val<'r>] {
+        match self {
+            ListVal::Reference { v } => v,
+            ListVal::Concrete { v } => v,
+        }
+    }
 }
 
 /// An effect, carrying a value and a handler.
@@ -627,7 +690,7 @@ impl<'a> Val<'a> {
             },
             Val::Fun { data } => Val::Fun {
                 data: FunData {
-                    env: Env::from_vec(data.env.iter().map(|val| val.coerce()).collect_vec()),
+                    global: Env::from_vec(data.global.iter().map(|val| val.coerce()).collect_vec()),
                     body: data.body.coerce(),
                 },
             },
@@ -991,8 +1054,8 @@ impl<'a> Display for PatternBranchData<'a> {
 impl<'a> Display for TmData<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TmData::Cached { index } => format!("#cached[{}]", index).fmt(f),
-            TmData::Var { index } => format!("#[{}]", index).fmt(f),
+            TmData::Global { index } => format!("#cached[{}]", index).fmt(f),
+            TmData::Local { index } => format!("#[{}]", index).fmt(f),
             TmData::Univ => "Univ".fmt(f),
             TmData::AnyTy => "Any".fmt(f),
             TmData::BoolTy => "Bool".fmt(f),
@@ -1201,7 +1264,7 @@ impl<'a> Display for Neutral<'a> {
 
 impl<'a> Display for FunData<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        format!("{} :: {}", self.body, self.env).fmt(f)
+        format!("{} :: {}", self.body, self.global).fmt(f)
     }
 }
 

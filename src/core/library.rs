@@ -779,6 +779,33 @@ pub fn translate<'a>(
     }
 }
 
+pub fn translate2<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
+    match vtms {
+        [Val::Str { s }, Val::Str { s: stop_codon_char }, Val::Str {
+            s: illegal_codon_char,
+        }] => match (
+            stop_codon_char.get_reference(),
+            illegal_codon_char.get_reference(),
+        ) {
+            ([c1], [c2]) => Ok(Val::Str {
+                s: core::StrVal::Concrete {
+                    s: util::translate(s.get_reference(), c1, c2)
+                        .as_bytes()
+                        .to_vec(),
+                },
+            }),
+            _ => Err(EvalError::new(
+                location,
+                "stop codon and illegal codon can only be represented by one character",
+            )),
+        },
+        _ => Err(EvalError::new(
+            location,
+            "bad arguments given to function?!",
+        )),
+    }
+}
+
 pub fn concat<'a>(
     arena: &'a Arena,
     location: &Location,

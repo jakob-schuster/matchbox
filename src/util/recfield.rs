@@ -23,18 +23,21 @@ impl<T: Display> Display for RecField<T> {
 
 /// A field of a core record.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct CoreRecField<'a, T> {
-    pub name: &'a [u8],
+pub struct CoreRecField<T> {
+    pub name: Vec<u8>,
     pub data: T,
 }
 
-impl<'a, T> CoreRecField<'a, T> {
-    pub fn new(name: &'a [u8], data: T) -> CoreRecField<'a, T> {
-        CoreRecField { name, data }
+impl<'a, T> CoreRecField<T> {
+    pub fn new(name: &'a [u8], data: T) -> CoreRecField<T> {
+        CoreRecField {
+            name: name.to_vec(),
+            data,
+        }
     }
 }
 
-impl<'a, T: Display> Display for CoreRecField<'a, T> {
+impl<'a, T: Display> Display for CoreRecField<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         format!(
             "{} = {}",

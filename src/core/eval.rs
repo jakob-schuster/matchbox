@@ -115,7 +115,7 @@ impl<'p> Branch<'p> {
                     tm.location.clone(),
                 )),
             },
-            BranchData::Is { tm, branches } => {
+            BranchData::Matches { tm, branches } => {
                 let val = tm.eval(arena, global_env, cache, env)?;
 
                 for branch in branches {

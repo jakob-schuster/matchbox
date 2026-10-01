@@ -21,7 +21,7 @@ impl<A> Env<A> {
         }
     }
 
-    /// Get element at a De Bruijn levl.
+    /// Get element at a De Bruijn level.
     pub fn get_index(&self, i: usize) -> &A {
         match self.vec.get(self.vec.len() - 1 - i) {
             Some(a) => a,

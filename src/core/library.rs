@@ -51,11 +51,7 @@ pub fn foreign<'a>(
     location: &Location,
     name: &str,
 ) -> Result<
-    Arc<
-        dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>
-            + Send
-            + Sync,
-    >,
+    Arc<dyn for<'b> Fn(&Location, &[Val<'b>]) -> Result<Val<'b>, EvalError> + Send + Sync>,
     EvalError,
 > {
     match name {

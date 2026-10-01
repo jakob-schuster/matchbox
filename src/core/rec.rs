@@ -18,6 +18,7 @@ pub enum RecError {
     BadIndex(String),
 }
 
+#[derive(Clone)]
 pub enum Rec2<'r> {
     Concrete { r: ConcreteRec<'r> },
     FastaRead { r: FastaRead<'r> },

@@ -12,6 +12,8 @@ use crate::{
 pub mod env {
     use std::fmt::{self, Display, Formatter};
 
+    use crate::core::{EvalError, InternalError, Val};
+
     #[derive(Clone)]
     pub(crate) struct Env<A> {
         pub(crate) vec: Vec<A>,
@@ -27,9 +29,19 @@ pub mod env {
             index
         }
 
+        /// Make a copy of the environment, pushing the new item,
+        pub fn with(&self, a: A) -> Env<A> {
+            let mut new = self.clone();
+            new.push(a);
+            new
+        }
+
         /// Get an item at an index in the cache.
-        pub fn get<'a>(&'a self, index: usize) -> &'a A {
-            self.vec.get(index).expect("Bad index in cache!")
+        pub fn get<'a>(&'a self, index: usize) -> Result<&'a A, InternalError> {
+            match self.vec.get(index) {
+                Some(a) => Ok(a),
+                None => Err(InternalError::new("couldn't index env at position ?!")),
+            }
         }
     }
 
@@ -51,6 +63,14 @@ pub mod env {
         fn default() -> Self {
             Env {
                 vec: Vec::default(),
+            }
+        }
+    }
+
+    impl<'p> Env<Val<'p>> {
+        pub fn reference(&self) -> Env<Val<'p>> {
+            Env {
+                vec: self.vec.iter().map(|val| val.reference()).collect(),
             }
         }
     }
@@ -158,7 +178,7 @@ impl<'p> Branch<'p> {
                     tm.location.clone(),
                 )),
             },
-            BranchData::Is { tm, branches } => {
+            BranchData::Matches { tm, branches } => {
                 let val = tm.eval2(global, local)?;
 
                 for branch in branches {
@@ -210,12 +230,18 @@ impl<'p> PatternBranch<'p> {
 impl Tm {
     pub fn eval2<'p: 'r, 'r: 'a, 'a>(
         &'p self,
-        global: &'p env::Env<Val<'p>>,
+        global: &'a env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
     ) -> Result<Val<'r>, EvalError> {
         match &self.data {
-            TmData::Global { index } => Ok(global.get(*index).reference()),
-            TmData::Local { index } => Ok(local.get(*index).clone()),
+            TmData::Global { index } => Ok(global
+                .get(*index)
+                .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
+                .reference()),
+            TmData::Local { index } => Ok(local
+                .get(*index)
+                .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
+                .clone()),
             TmData::Univ => Ok(Val::Univ),
             TmData::AnyTy => Ok(Val::AnyTy),
             TmData::BoolTy => Ok(Val::BoolTy),
@@ -401,6 +427,8 @@ impl Tm {
                 )),
             },
             TmData::EffectTy => Ok(Val::EffectTy),
+            TmData::ErrorTy => Ok(Val::ErrorTy),
+            TmData::Error => Ok(Val::Error),
         }
     }
 }

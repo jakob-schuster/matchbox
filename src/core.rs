@@ -78,6 +78,35 @@ pub enum StmtData<'p> {
     End,
 }
 
+impl<'p> Stmt<'p> {
+    pub fn append(&self, stmt: Stmt<'p>) -> Stmt<'p> {
+        match &self.data {
+            StmtData::Let { tm, next } => Stmt::new(
+                self.location.clone(),
+                StmtData::Let {
+                    tm: tm.clone(),
+                    next: Arc::new(next.append(stmt)),
+                },
+            ),
+            StmtData::Tm { tm, next } => Stmt::new(
+                self.location.clone(),
+                StmtData::Tm {
+                    tm: tm.clone(),
+                    next: Arc::new(next.append(stmt)),
+                },
+            ),
+            StmtData::If { branches, next } => Stmt::new(
+                self.location.clone(),
+                StmtData::If {
+                    branches: branches.clone(),
+                    next: Arc::new(next.append(stmt)),
+                },
+            ),
+            StmtData::End => stmt,
+        }
+    }
+}
+
 pub type Branch<'p> = Located<BranchData<'p>>;
 /// A conditional branch which is either a single conditional, or a list of match branches.
 #[derive(Clone)]
@@ -87,7 +116,7 @@ pub enum BranchData<'p> {
         stmt: Stmt<'p>,
     },
 
-    Is {
+    Matches {
         tm: Tm,
         branches: Vec<PatternBranch<'p>>,
     },
@@ -173,22 +202,22 @@ pub enum TmData {
 
     // the return type of effectful functions
     EffectTy,
+
+    ErrorTy,
+    Error,
 }
 
 /// A function signature, which contains a list of arguments,
 /// a list of named optional arguments with default values, and a return type.
 #[derive(Clone)]
-struct FunSig<'a> {
-    args: Vec<Tm<'a>>,
-    opts: Vec<(&'a [u8], Tm<'a>, Tm<'a>)>,
-    body: Arc<Tm<'a>>,
+struct FunSig {
+    args: Vec<Tm>,
+    opts: Vec<(Vec<u8>, Tm, Tm)>,
+    body: Arc<Tm>,
 }
 
-impl<'p> Tm<'p> {
-    fn coerce<'a>(&self) -> Tm<'a>
-    where
-        'p: 'a,
-    {
+impl Tm {
+    fn coerce(&self) -> Tm {
         let tm_data = match &self.data {
             TmData::Global { index } => TmData::Global { index: *index },
             TmData::Local { index } => TmData::Local { index: *index },
@@ -210,7 +239,7 @@ impl<'p> Tm<'p> {
                 args: args.iter().map(|tm| tm.coerce()).collect(),
                 opts: opts
                     .iter()
-                    .map(|(name, ty, val)| (*name as &'a [u8], ty.coerce(), val.coerce()))
+                    .map(|(name, ty, val)| (name.clone(), ty.coerce(), val.coerce()))
                     .collect(),
                 body: Arc::new(body.coerce()),
             },
@@ -225,7 +254,7 @@ impl<'p> Tm<'p> {
             TmData::RecTy { fields } => TmData::RecTy {
                 fields: fields
                     .iter()
-                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
+                    .map(|field| CoreRecField::new(field.name.clone(), field.data.coerce()))
                     .collect(),
             },
             TmData::RecWithTy { fields } => TmData::RecWithTy {
@@ -245,6 +274,8 @@ impl<'p> Tm<'p> {
                 name,
             },
             TmData::EffectTy => TmData::EffectTy,
+            TmData::ErrorTy => todo!(),
+            TmData::Error => todo!(),
         };
 
         Tm::new(self.location.clone(), tm_data)
@@ -346,36 +377,40 @@ pub enum Val<'r> {
     Effect {
         effect: Effect,
     },
+
+    // errors, or holes
+    ErrorTy,
+    Error,
 }
 
 impl<'r> Val<'r> {
-    fn reference(&self) -> Val<'r> {
+    pub fn reference(&self) -> Val<'r> {
         todo!()
     }
 
-    fn concretise(&self) -> PortableVal {
+    pub fn concretise(&self) -> PortableVal {
         todo!()
     }
 }
 
 /// A string value, either a concrete u8 vector or a slice elsewhere (presumably in the global or local env)
 #[derive(Clone)]
-enum StrVal<'r> {
+pub enum StrVal<'r> {
     Reference { s: &'r [u8] },
     Concrete { s: Vec<u8> },
 }
 
 impl<'r> StrVal<'r> {
-    fn new_reference(s: &'r [u8]) -> StrVal<'r> {
+    pub fn new_reference(s: &'r [u8]) -> StrVal<'r> {
         StrVal::Reference { s }
     }
 
-    fn new_concrete(s: Vec<u8>) -> StrVal<'r> {
+    pub fn new_concrete(s: Vec<u8>) -> StrVal<'r> {
         StrVal::Concrete { s }
     }
 
     /// Get the slice
-    fn get_reference(&self) -> &[u8] {
+    pub fn get_reference(&self) -> &[u8] {
         match self {
             StrVal::Reference { s } => s,
             StrVal::Concrete { s } => s,
@@ -432,16 +467,15 @@ impl<'a> Val<'a> {
             }
             out
         };
-        let get_opt =
-            |fields: &[(&[u8], Val<'a>, Tm<'a>)], name: &[u8]| -> Option<(Val<'a>, Tm<'a>)> {
-                let mut out = None;
-                for (field_name, ty, val) in fields {
-                    if field_name.eq(&name) {
-                        out = Some((ty.clone(), val.clone()))
-                    }
+        let get_opt = |fields: &[(&[u8], Val<'a>, Tm)], name: &[u8]| -> Option<(Val<'a>, Tm)> {
+            let mut out = None;
+            for (field_name, ty, val) in fields {
+                if field_name.eq(&name) {
+                    out = Some((ty.clone(), val.clone()))
                 }
-                out
-            };
+            }
+            out
+        };
 
         match (self, other) {
             // Neutrals we just let through; what else can we do?
@@ -532,7 +566,7 @@ impl<'a> Val<'a> {
                 with_names.clone().all(|name| names.clone().contains(name))
                     && fields
                         .iter()
-                        .all(|field| match get(with_fields, field.name) {
+                        .all(|field| match get(with_fields, field.name.clone()) {
                             // if it contains it, they must be equiv
                             Some(ty) => field.data.equiv(&ty),
                             // if it doesn't contain it, that's fine
@@ -760,13 +794,13 @@ pub enum Neutral<'a> {
     },
     //
     RecTy {
-        fields: Vec<CoreRecField<'a, Val<'a>>>,
+        fields: Vec<CoreRecField<Val<'a>>>,
     },
     RecWithTy {
-        fields: Vec<CoreRecField<'a, Val<'a>>>,
+        fields: Vec<CoreRecField<Val<'a>>>,
     },
     RecLit {
-        fields: Vec<CoreRecField<'a, Val<'a>>>,
+        fields: Vec<CoreRecField<Val<'a>>>,
     },
     RecProj {
         tm: Arc<Val<'a>>,
@@ -848,7 +882,7 @@ pub fn app<'a>(
     } else {
         match head {
             Val::Fun { data } => {
-                data.app(arena, args)
+                data.app(args)
 
                 // eval(
                 //     arena,
@@ -1035,8 +1069,8 @@ impl<'a> Display for BranchData<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BranchData::Bool { tm, stmt } => format!("{} => {}", tm, stmt).fmt(f),
-            BranchData::Is { tm, branches } => format!(
-                "{} is {}",
+            BranchData::Matches { tm, branches } => format!(
+                "{} matches {}",
                 tm,
                 branches.iter().map(|b| b.to_string()).join(", ")
             )

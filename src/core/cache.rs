@@ -135,7 +135,7 @@ impl<'p> Branch<'p> {
                     cache,
                 ))
             }
-            BranchData::Is { tm, branches } => {
+            BranchData::Matches { tm, branches } => {
                 let (tm, cache) = tm.cache(arena, global_env, cache, env)?;
                 let (branches, cache) = branches.iter().try_fold(
                     (vec![], cache.clone()),
@@ -153,7 +153,7 @@ impl<'p> Branch<'p> {
                 )?;
 
                 Ok((
-                    Branch::new(self.location.clone(), BranchData::Is { tm, branches }),
+                    Branch::new(self.location.clone(), BranchData::Matches { tm, branches }),
                     cache,
                 ))
             }

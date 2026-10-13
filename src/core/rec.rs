@@ -59,7 +59,7 @@ impl<'r> Rec2<'r> {
         todo!()
     }
 
-    fn slice(&self, start: usize, end: usize) -> Result<Val<'a>, InternalError> {
+    pub fn slice(&self, start: usize, end: usize) -> Result<Val<'r>, InternalError> {
         todo!()
     }
 }
@@ -117,7 +117,7 @@ pub trait Rec<'p>: Display + Send + Sync {
             .map_err(|_| InternalError::new("trying to slice a non-read record?!"))?
             as Val<'p>
         {
-            let s2 = seq as &'a [u8];
+            let s2 = seq.get_reference() as &'a [u8];
 
             match self.get(b"qual") {
                 Ok(Val::Str { s: qual }) => Ok(Val::Rec {

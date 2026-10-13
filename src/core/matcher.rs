@@ -1,6 +1,7 @@
 use bio::data_structures::qgram_index::Match;
 use itertools::Itertools;
 pub mod read_matcher;
+pub mod read_matcher2;
 
 use crate::{
     core::eval2::env,
@@ -139,12 +140,14 @@ impl Display for Bind {
 }
 
 pub struct Equal<'p> {
-    pub val: &'p Val<'p>,
+    pub val: Val<'p>,
 }
 
 impl<'p> Equal<'p> {
-    pub fn new(val: &'p Val<'p>) -> Equal<'p> {
-        Equal { val }
+    pub fn new(val: &Val<'p>) -> Equal<'p> {
+        Equal {
+            val: val.reference(),
+        }
     }
 }
 

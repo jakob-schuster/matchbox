@@ -5,7 +5,8 @@ use crate::core::{self, Val};
 use crate::surface::elab::ElabError;
 use crate::surface::elab2::context::Address;
 use crate::surface::{elab2::context::Context, Tm};
-use crate::surface::{Branch, Stmt, StmtData, TmData};
+use crate::surface::{Branch, Pattern, PatternBranch, PatternData, Stmt, StmtData, TmData};
+use crate::util::recfield::CoreRecField;
 
 mod context {
     use std::sync::Arc;
@@ -104,11 +105,11 @@ mod context {
             self.bind_global(name, ty, tm)
         }
 
-        pub fn bind_param<'a>(&self, name: &str, ty: Val<'a>) -> Context<'a>
+        pub fn bind_param<'a>(&self, name: &str, ty: &Val<'a>) -> Context<'a>
         where
             'p: 'a,
         {
-            self.bind_local(name, ty, self.next_neutral())
+            self.bind_local(name, ty.reference(), self.next_neutral())
         }
 
         /// Retain the local bindings, but carry the global bindings and errors from the new context
@@ -174,7 +175,7 @@ impl Stmt {
 
                 // update the context accordingly
                 let c3 = if val.is_neutral() {
-                    c2.bind_param(name, ty)
+                    c2.bind_param(name, &ty)
                 } else {
                     c2.bind(name, ty, val.reference())
                 };
@@ -228,7 +229,13 @@ impl Stmt {
                     c2,
                 )
             }
-            StmtData::If { branches } => todo!(),
+            StmtData::If { branches } => {
+                for branch in branches {}
+
+                todo!();
+
+                todo!()
+            }
         }
     }
 }
@@ -251,7 +258,116 @@ impl Branch {
                     c2,
                 )
             }
-            super::BranchData::Is { tm, branches } => todo!(),
+            super::BranchData::Is { tm, branches } => {
+                let (ctm, cty, c1) = tm.infer(c0);
+
+                for branch in branches {}
+
+                todo!()
+            }
+        }
+    }
+}
+
+impl PatternBranch {
+    fn elab<'p>(&self, c0: &Context<'p>) -> () {
+        // let (matcher, cty1, bind_tys) = ;
+
+        todo!()
+    }
+}
+
+impl Pattern {
+    fn infer<'p>(
+        &self,
+        c0: &Context<'p>,
+        ty: &Val<'p>,
+    ) -> (
+        Arc<dyn core::matcher::Matcher<'p> + 'p>,
+        Val<'p>,
+        Context<'p>,
+    ) {
+        match &self.data {
+            PatternData::Named { name, pattern } => {
+                // TODO warn if name is already assigned
+
+                let (matcher, ty1, c1) = pattern.infer(c0, ty);
+                let c2 = c1.bind_param(name, &ty1);
+
+                (matcher, ty1, c2)
+            }
+            PatternData::Hole => (
+                Arc::new(core::matcher::Succeed {}),
+                Val::AnyTy,
+                c0.reference(),
+            ),
+            PatternData::BoolLit { b } => (
+                Arc::new(core::matcher::Equal::new(&Val::Bool { b: *b })),
+                Val::BoolTy,
+                c0.reference(),
+            ),
+            PatternData::NumLit { n } => (
+                Arc::new(core::matcher::Equal::new(&Val::Num { n: n.get_float() })),
+                Val::NumTy,
+                c0.reference(),
+            ),
+            PatternData::StrLit { s } => (
+                // WARN could be wasteful
+                Arc::new(core::matcher::Equal::new(&Val::Str {
+                    s: core::StrVal::new_concrete(s.clone()),
+                })),
+                Val::StrTy,
+                c0.reference(),
+            ),
+            PatternData::RecLit { fields } => {
+                // TODO warn if the name is already assigned
+
+                // for each field, infer the pattern
+                let (matcher, tys, c1) = fields.iter().fold(
+                    (
+                        Arc::new(core::matcher::Succeed {}) as Arc<dyn core::matcher::Matcher>,
+                        vec![],
+                        c0.reference(),
+                    ),
+                    |(m0, tys, cx), field| {
+                        let (m1, ty1, c1) = field.data.infer(&cx, ty);
+
+                        let mut tys1 = tys;
+                        tys1.push(CoreRecField::new(field.name.as_bytes(), ty1));
+
+                        (
+                            Arc::new(core::matcher::Chain {
+                                m1: Arc::new(core::matcher::FieldAccess {
+                                    name: field.name.clone(),
+                                    inner: m1,
+                                }),
+                                m2: m0,
+                            }),
+                            tys1,
+                            c1,
+                        )
+                    },
+                );
+
+                (matcher, Val::RecTy { fields: tys }, c1)
+            }
+            PatternData::Read { regs, binds, mode } => {
+                // typecheck all the binds;
+                // end up with the name of each bind, the (list) value that it is SELECTING from,
+                // and the type of it itself
+                let params = binds.iter().fold(c0, |cx, param| {
+                    let (ctm, cty, c1) = param.data.tm.infer(cx);
+
+                    let val = match ctm.eval2(&c0.get_global_env(), &c0.get_local_env()) {
+                        Ok(val) => todo!(),
+                        Err(err) => (Val::Error,),
+                    };
+
+                    todo!()
+                });
+
+                todo!()
+            }
         }
     }
 }

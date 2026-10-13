@@ -55,7 +55,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                 // first, generate all the worlds from the operations
                 let loc_ctx = LocCtx::default()
                     .with(0, 0)
-                    .with(self.end, seq.len() as i32);
+                    .with(self.end, seq.get_reference().len() as i32);
                 let worlds =
                     self.ops
                         .iter()
@@ -63,7 +63,14 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                             worlds
                                 .iter()
                                 .flat_map(|(bind_ctx, loc_ctx, edit_dist)| {
-                                    op.exec(arena, env, seq, loc_ctx, bind_ctx, *edit_dist)
+                                    op.exec(
+                                        arena,
+                                        env,
+                                        seq.get_reference(),
+                                        loc_ctx,
+                                        bind_ctx,
+                                        *edit_dist,
+                                    )
                                 })
                                 .flatten()
                                 .collect::<Vec<_>>()
@@ -207,9 +214,9 @@ impl<'a> Display for ReadMatcher<'a> {
 }
 
 #[derive(Clone)]
-enum Reg<'p> {
+enum Reg {
     Hole,
-    Exp(Vec<String>, core::Tm<'p>, core::Tm<'p>),
+    Exp(Vec<String>, core::Tm, core::Tm),
 }
 
 fn flatten_regs<'a>(
@@ -217,16 +224,16 @@ fn flatten_regs<'a>(
     bind_tys: &HashMap<String, core::Val<'a>>,
     i: usize,
     regs: Vec<&'a Region>,
-    sized_acc: Vec<(core::Tm<'a>, Ran<usize>)>,
+    sized_acc: Vec<(core::Tm, Ran<usize>)>,
     named_acc: Vec<(String, Ran<usize>)>,
-    regs_acc: Vec<(Reg<'a>, Ran<usize>)>,
+    regs_acc: Vec<(Reg, Ran<usize>)>,
     arena: &'a Arena,
     ctx: &Context<'a>,
 ) -> Result<
     (
-        Vec<(core::Tm<'a>, Ran<usize>)>,
+        Vec<(core::Tm, Ran<usize>)>,
         Vec<(String, Ran<usize>)>,
-        Vec<(Reg<'a>, Ran<usize>)>,
+        Vec<(Reg, Ran<usize>)>,
     ),
     ElabError,
 > {
@@ -251,7 +258,7 @@ fn flatten_regs<'a>(
             ),
             RegionData::Term { tm, error } => {
                 // get the ids used in the tm
-                let ids = surface::get_ids(tm)
+                let ids = surface::elab::get_ids(tm)
                     .into_iter()
                     .filter(|id| binds.contains(id))
                     .collect::<Vec<_>>();
@@ -377,7 +384,7 @@ pub fn infer_read_pattern<'a>(
     fn check_all_fixed_lens<'a>(
         ops: &Vec<OpTm<'a>>,
         known: &mut Vec<usize>,
-        sized: &Vec<(core::Tm<'a>, Ran<usize>)>,
+        sized: &Vec<(core::Tm, Ran<usize>)>,
         arena: &'a Arena,
     ) -> (Vec<usize>, Vec<OpTm<'a>>) {
         fn learn_new_fixed_lens<'aa>(
@@ -529,19 +536,19 @@ pub fn infer_read_pattern<'a>(
 }
 
 #[derive(Clone)]
-pub enum OpTm<'p> {
+pub enum OpTm {
     Let {
         // the location to assign to
         loc: usize,
         // the
-        tm: LocTm<'p>,
+        tm: LocTm,
         // the closest known locations to check bounds against
         flanking: Ran<usize>,
     },
     Restrict {
         // list of new binds to make
         ids: Vec<String>,
-        tm: core::Tm<'p>,
+        tm: core::Tm,
         // the location range to search between
         ran: Ran<usize>,
         // whether the ends are fixed
@@ -549,21 +556,18 @@ pub enum OpTm<'p> {
         // the locations to save
         save: Vec<Ran<usize>>,
         // the error rate to apply
-        error: core::Tm<'p>,
+        error: core::Tm,
     },
 }
 
-impl<'p> OpTm<'p> {
+impl OpTm {
     pub fn eval<'a>(
         &self,
         arena: &'a Arena,
         ctx: &Context<'a>,
         params: HashMap<String, Vec<Val<'a>>>,
         param_indices: HashMap<String, usize>,
-    ) -> Result<OpVal<'a>, EvalError>
-    where
-        'p: 'a,
-    {
+    ) -> Result<OpVal<'a>, EvalError> {
         match self {
             OpTm::Let { loc, tm, flanking } => Ok(OpVal::Let {
                 loc: *loc,

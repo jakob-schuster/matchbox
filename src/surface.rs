@@ -18,8 +18,8 @@ use crate::{
     },
 };
 
-mod elab;
-mod elab2;
+pub mod elab;
+pub mod elab2;
 
 pub type Prog = Located<ProgData>;
 /// A matchbox program, consisting of a list of statements.

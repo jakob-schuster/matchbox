@@ -6,7 +6,6 @@ pub mod read_matcher2;
 use crate::{
     core::eval2::env,
     myers::VarMyers,
-    surface::Context,
     util::{env::Env, ran::Ran, Arena},
 };
 
@@ -28,7 +27,7 @@ pub trait Matcher<'p>: Send + Sync + Display {
         global: &'p env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
         val: &Val<'r>,
-    ) -> Result<Vec<Vec<Val<'r>>>, EvalError>
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
         'p: 'r,
         'r: 'a,

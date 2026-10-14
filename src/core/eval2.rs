@@ -210,14 +210,7 @@ impl<'p> PatternBranch<'p> {
             bind_options => Ok(Some(
                 bind_options
                     .iter()
-                    .map(|binds| {
-                        let mut new_local = local.clone();
-                        for bind in binds {
-                            new_local.push(bind.reference());
-                        }
-
-                        self.data.stmt.eval2(global, &new_local)
-                    })
+                    .map(|new_local| self.data.stmt.eval2(global, &new_local))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .flatten()

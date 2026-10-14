@@ -8,7 +8,7 @@ use crate::surface::{elab2::context::Context, Tm};
 use crate::surface::{Branch, Pattern, PatternBranch, PatternData, Stmt, StmtData, TmData};
 use crate::util::recfield::CoreRecField;
 
-mod context {
+pub mod context {
     use std::sync::Arc;
 
     use crate::{
@@ -357,11 +357,6 @@ impl Pattern {
                 // and the type of it itself
                 let params = binds.iter().fold(c0, |cx, param| {
                     let (ctm, cty, c1) = param.data.tm.infer(cx);
-
-                    let val = match ctm.eval2(&c0.get_global_env(), &c0.get_local_env()) {
-                        Ok(val) => todo!(),
-                        Err(err) => (Val::Error,),
-                    };
 
                     todo!()
                 });

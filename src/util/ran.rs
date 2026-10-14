@@ -25,6 +25,10 @@ impl<T> Ran<T> {
         Ran::new(f(&self.start), f(&self.end))
     }
 
+    pub fn try_map<B, E>(&self, f: impl Fn(&T) -> Result<B, E>) -> Result<Ran<B>, E> {
+        Ok(Ran::new(f(&self.start)?, f(&self.end)?))
+    }
+
     pub fn to_tuple(&self) -> (&T, &T) {
         (&self.start, &self.end)
     }

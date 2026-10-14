@@ -984,7 +984,7 @@ impl Seq {
         }
     }
 
-    fn find_all_disjoint(
+    pub fn find_all_disjoint(
         &self,
         seq: &[u8],
         search_ran: &Ran<usize>,
@@ -1033,8 +1033,8 @@ impl Seq {
 
 #[derive(Debug)]
 struct Mat {
-    ran: Ran<usize>,
-    dist: u8,
+    pub ran: Ran<usize>,
+    pub dist: u8,
 }
 
 impl Mat {

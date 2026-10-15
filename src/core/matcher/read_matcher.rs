@@ -216,7 +216,11 @@ impl<'a> Display for ReadMatcher<'a> {
 #[derive(Clone)]
 enum Reg {
     Hole,
-    Exp(Vec<String>, core::Tm, core::Tm),
+    Exp {
+        ids: Vec<String>,
+        ctm: core::Tm,
+        error_ctm: core::Tm,
+    },
 }
 
 fn flatten_regs<'a>(
@@ -283,11 +287,11 @@ fn flatten_regs<'a>(
                     regs_acc
                         .into_iter()
                         .chain([(
-                            Reg::Exp(
-                                // collect only the ids present in both the
-                                // exp and the binds
-                                ids, ctm, error_ctm,
-                            ),
+                            Reg::Exp {
+                                ids,
+                                ctm,
+                                error_ctm,
+                            },
                             Ran::new(i, i + 1),
                         )])
                         .collect(),
@@ -476,7 +480,11 @@ pub fn infer_read_pattern<'a>(
 
     let bindable_regs = regs.iter().flat_map(|(reg, ran)| match reg {
         Reg::Hole => None,
-        Reg::Exp(binds, exp, error) => Some((ran.clone(), (binds, exp.clone(), error.clone()))),
+        Reg::Exp {
+            ids: binds,
+            ctm: exp,
+            error_ctm: error,
+        } => Some((ran.clone(), (binds, exp.clone(), error.clone()))),
     });
 
     for (ran, (binds, exp, error)) in bindable_regs {
@@ -969,6 +977,7 @@ impl<'p> LocTm<'p> {
     }
 }
 
+#[derive(Clone)]
 pub struct Seq {
     bytes: Vec<u8>,
     dist: usize,
@@ -1084,9 +1093,11 @@ impl<'a> Display for Reg<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Reg::Hole => "_".fmt(f),
-            Reg::Exp(items, located, error) => {
-                format!("({}){}<{}>", items.join(","), located, error).fmt(f)
-            }
+            Reg::Exp {
+                ids: items,
+                ctm: located,
+                error_ctm: error,
+            } => format!("({}){}<{}>", items.join(","), located, error).fmt(f),
         }
     }
 }

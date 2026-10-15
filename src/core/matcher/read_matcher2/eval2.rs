@@ -174,12 +174,12 @@ impl<'p> A<'p> {
         local: &'a env::Env<Val<'r>>,
     ) -> &Vec<(BindContext<'p>, Seq)> {
         match self {
-            A::A { tm, error } => todo!(),
-            A::Aa { tm, error } => todo!(),
-            A::Ab { tm, error } => {
+            A::Unevaluated { tm, error } => todo!(),
+            A::PartialA { tm, error } => todo!(),
+            A::PartialB { tm, error } => {
                 todo!()
             }
-            A::B { ctxs } => ctxs,
+            A::Evaluated { ctxs } => ctxs,
         }
     }
 }
@@ -289,7 +289,7 @@ pub mod match_context {
 
         use std::collections::HashMap;
 
-        #[derive(Default)]
+        #[derive(Clone, Default)]
         pub struct BindContext<'p> {
             pub map: HashMap<usize, Val<'p>>,
         }

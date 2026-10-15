@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::core::eval2::env::Env;
-use crate::core::{self, Val};
+use crate::core::matcher::read_matcher2::ReadMatcher;
+use crate::core::{self, StrVal, Val};
 use crate::surface::elab::ElabError;
 use crate::surface::elab2::context::Address;
 use crate::surface::{elab2::context::Context, Tm};
@@ -355,13 +356,27 @@ impl Pattern {
                 // typecheck all the binds;
                 // end up with the name of each bind, the (list) value that it is SELECTING from,
                 // and the type of it itself
-                let params = binds.iter().fold(c0, |cx, param| {
+
+                // first, typecheck all the binds
+                let c1 = binds.iter().fold(c0, |cx, param| {
                     let (ctm, cty, c1) = param.data.tm.infer(cx);
 
                     todo!()
                 });
 
-                todo!()
+                // everything else happens in here
+                let (matcher, c2) = ReadMatcher::infer(c1, regs, todo!(), mode);
+
+                (
+                    Arc::new(matcher),
+                    Val::RecWithTy {
+                        fields: vec![CoreRecField {
+                            name: b"seq".to_vec(),
+                            data: Val::StrTy,
+                        }],
+                    },
+                    c2,
+                )
             }
         }
     }

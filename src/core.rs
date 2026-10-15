@@ -441,6 +441,13 @@ impl<'r> ListVal<'r> {
             ListVal::Concrete { v } => v,
         }
     }
+
+    pub fn reference(&'r self) -> ListVal<'r> {
+        match self {
+            ListVal::Reference { v } => ListVal::Reference { v },
+            ListVal::Concrete { v } => ListVal::Reference { v },
+        }
+    }
 }
 
 /// An effect, carrying a value and a handler.

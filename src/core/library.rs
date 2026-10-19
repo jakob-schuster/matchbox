@@ -375,7 +375,7 @@ pub fn unary_reverse_complement<'a>(
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }] => Ok(Val::Str {
-            s: arena.alloc(util::rev_comp(s)),
+            s: arena.alloc_slice_copy(&util::rev_comp(s)),
         }),
 
         _ => Err(EvalError {
@@ -402,13 +402,13 @@ pub fn unary_read_reverse_complement<'a>(
                             (
                                 b"seq",
                                 Val::Str {
-                                    s: arena.alloc(util::rev_comp(seq)),
+                                    s: arena.alloc_slice_copy(&util::rev_comp(seq)),
                                 },
                             ),
                             (
                                 b"qual",
                                 Val::Str {
-                                    s: arena.alloc(rev_qual),
+                                    s: arena.alloc_slice_copy(&rev_qual),
                                 },
                             ),
                         ])),
@@ -418,7 +418,7 @@ pub fn unary_read_reverse_complement<'a>(
                         rec: Arc::new(rec.with(
                             b"seq",
                             Val::Str {
-                                s: arena.alloc(util::rev_comp(seq)),
+                                s: arena.alloc_slice_copy(&util::rev_comp(seq)),
                             },
                         )),
                     })
@@ -696,7 +696,7 @@ pub fn tag<'a>(
             match desc {
                 Val::Str { s: old_s } => {
                     let new_desc = &arena
-                        .alloc(old_s.iter().chain(*prefix).chain(*s).cloned().collect_vec())[..];
+                        .alloc_slice_copy(&old_s.iter().chain(*prefix).chain(*s).cloned().collect_vec())[..];
 
                     Ok(Val::Rec {
                         rec: Arc::new(if rec.get(b"tags").is_ok() {
@@ -765,7 +765,7 @@ pub fn translate<'a>(
             s: illegal_codon_char,
         }] => match (*stop_codon_char, illegal_codon_char) {
             ([c1], [c2]) => Ok(Val::Str {
-                s: arena.alloc(util::translate(s, c1, c2)).as_bytes(),
+                s: arena.alloc_str(&util::translate(s, c1, c2)).as_bytes(),
             }),
             _ => Err(EvalError::new(
                 location,
@@ -810,13 +810,13 @@ pub fn concat<'a>(
 
             // Combine sequences
             let new_seq = Val::Str {
-                s: arena.alloc(seq0.iter().chain(seq1).cloned().collect::<Vec<_>>()),
+                s: arena.alloc_slice_copy(&seq0.iter().chain(seq1).cloned().collect::<Vec<_>>()),
             };
 
             match (read0.get(b"qual"), read1.get(b"qual")) {
                 (Ok(Val::Str { s: qual0 }), Ok(Val::Str { s: qual1 })) => {
                     let new_qual = Val::Str {
-                        s: arena.alloc(qual0.iter().chain(qual1).cloned().collect::<Vec<_>>()),
+                        s: arena.alloc_slice_copy(&qual0.iter().chain(qual1).cloned().collect::<Vec<_>>()),
                     };
 
                     Ok(Val::Rec {
@@ -842,7 +842,7 @@ pub fn str_concat<'a>(
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: s0 }, Val::Str { s: s1 }] => Ok(Val::Str {
-            s: &arena.alloc((*s0).iter().chain(*s1).cloned().collect::<Vec<_>>())[..],
+            s: &arena.alloc_slice_copy(&(*s0).iter().chain(*s1).cloned().collect::<Vec<_>>())[..],
         }),
 
         _ => Err(EvalError::new(
@@ -1263,7 +1263,7 @@ pub fn to_upper<'a>(
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }] => Ok(Val::Str {
-            s: arena.alloc(s.to_ascii_uppercase().to_vec()),
+            s: arena.alloc_slice_copy(&s.to_ascii_uppercase()),
         }),
 
         _ => Err(EvalError::new(
@@ -1280,7 +1280,7 @@ pub fn to_lower<'a>(
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }] => Ok(Val::Str {
-            s: arena.alloc(s.to_ascii_lowercase().to_vec()),
+            s: arena.alloc_slice_copy(&s.to_ascii_lowercase()),
         }),
 
         _ => Err(EvalError::new(
@@ -1326,7 +1326,7 @@ pub fn describe<'a>(
                             format!("-{}", util::bytes_to_string(id).unwrap())
                                 .as_bytes()
                                 .to_vec(),
-                            little_arena.alloc(util::rev_comp(seq)),
+                            little_arena.alloc_slice_copy(&util::rev_comp(seq)),
                         );
                     }
                     map = new_map;
@@ -1352,7 +1352,7 @@ pub fn describe<'a>(
                 // allocate the description
                 Ok(Val::Str {
                     s: arena
-                        .alloc(if description.is_empty() {
+                        .alloc_str(&if description.is_empty() {
                             String::from("[ _ ]")
                         } else {
                             format!("[ _ {description} _ ]")
@@ -1461,7 +1461,7 @@ pub fn to_str<'a>(
         [v @ Val::Str { .. }] => Ok(v.clone()),
         // all else is turned into a string and then allocated
         [v] => Ok(Val::Str {
-            s: arena.alloc(v.to_string()).as_bytes(),
+            s: arena.alloc_str(&v.to_string()).as_bytes(),
         }),
 
         _ => Err(EvalError::new(

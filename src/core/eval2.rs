@@ -110,7 +110,7 @@ impl<'p> Stmt<'p> {
                 // evaluate the term
                 let val = tm.eval2(global, local)?;
                 // bind the result in the environment
-                let mut local2 = local.clone();
+                let mut local2 = local.reference();
                 local2.push(val);
                 // and then evaluate the statement with that binding
                 next.eval2(global, &local2)

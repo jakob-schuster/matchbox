@@ -416,6 +416,13 @@ impl<'r> StrVal<'r> {
             StrVal::Concrete { s } => s,
         }
     }
+
+    pub fn reference(&'r self) -> StrVal<'r> {
+        match self {
+            StrVal::Reference { s } => StrVal::Reference { s },
+            StrVal::Concrete { s } => StrVal::Reference { s },
+        }
+    }
 }
 
 /// A list value, either a concrete value vector or a slice elsewhere (presumably in the global or local env)
@@ -1229,6 +1236,8 @@ impl<'a> Display for Val<'a> {
             Val::Neutral { neutral } => format!("#neutral({})", neutral).fmt(f),
             Val::EffectTy => "Effect".fmt(f),
             Val::Effect { effect } => format!("#effect({})", effect).fmt(f),
+            Val::ErrorTy => "ErrorTy".fmt(f),
+            Val::Error => "Error".fmt(f),
         }
     }
 }

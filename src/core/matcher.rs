@@ -6,7 +6,7 @@ pub mod read_matcher2;
 use crate::{
     core::eval2::env,
     myers::VarMyers,
-    util::{env::Env, ran::Ran, Arena},
+    util::{env::Env, location::Location, ran::Ran, Arena},
 };
 
 use super::{EvalError, Val};
@@ -172,5 +172,53 @@ impl<'p> Matcher<'p> for Equal<'p> {
 impl<'p> Display for Equal<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         format!("equal({})", self.val).fmt(f)
+    }
+}
+
+struct ErrorMatcher {
+    location: Location,
+}
+
+impl ErrorMatcher {
+    fn new(location: &Location) -> ErrorMatcher {
+        ErrorMatcher {
+            location: location.clone(),
+        }
+    }
+}
+
+impl Display for ErrorMatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        "error".fmt(f)
+    }
+}
+
+impl<'p> Matcher<'p> for ErrorMatcher {
+    fn evaluate<'a>(
+        &self,
+        arena: &'a Arena,
+        env: &Env<Val<'a>>,
+        val: &Val<'a>,
+    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    where
+        'p: 'a,
+    {
+        todo!()
+    }
+
+    fn eval2<'r, 'a>(
+        &'p self,
+        global: &'p env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
+    where
+        'p: 'r,
+        'r: 'a,
+    {
+        Err(EvalError::new(
+            &self.location,
+            "trying to evaluate error branch?!",
+        ))
     }
 }

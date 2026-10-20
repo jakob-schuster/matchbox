@@ -6,7 +6,9 @@ use crate::core::{self, StrVal, Val};
 use crate::surface::elab::ElabError;
 use crate::surface::elab2::context::Address;
 use crate::surface::{elab2::context::Context, Tm};
-use crate::surface::{Branch, Pattern, PatternBranch, PatternData, Stmt, StmtData, TmData};
+use crate::surface::{
+    Branch, MatchMode, Pattern, PatternBranch, PatternData, Stmt, StmtData, TmData,
+};
 use crate::util::recfield::CoreRecField;
 
 pub mod context {
@@ -19,10 +21,6 @@ pub mod context {
 
     #[derive(Clone)]
     pub struct Context<'p> {
-        // the reference to the global cache is mutable,
-        // to avoid doing big clones
-        // global: &'p mut Env<Val<'p>>,
-        // pub(crate) global: Arc<Env<Val<'p>>>,
         local: Env<Val<'p>>,
 
         global: Env<Val<'p>>,
@@ -357,15 +355,8 @@ impl Pattern {
                 // end up with the name of each bind, the (list) value that it is SELECTING from,
                 // and the type of it itself
 
-                // first, typecheck all the binds
-                let c1 = binds.iter().fold(c0, |cx, param| {
-                    let (ctm, cty, c1) = param.data.tm.infer(cx);
-
-                    todo!()
-                });
-
                 // everything else happens in here
-                let (matcher, c2) = ReadMatcher::infer(c1, regs, todo!(), mode);
+                let (matcher, c2) = ReadMatcher::infer(c0, regs, binds, mode, &self.location);
 
                 (
                     Arc::new(matcher),
@@ -383,11 +374,11 @@ impl Pattern {
 }
 
 impl Tm {
-    fn check<'p>(&self, ctx: &Context<'p>, expected: &Val<'p>) -> (core::Tm, Context<'p>) {
+    pub fn check<'p>(&self, ctx: &Context<'p>, expected: &Val<'p>) -> (core::Tm, Context<'p>) {
         todo!()
     }
 
-    fn infer<'p>(&self, ctx: &Context<'p>) -> (core::Tm, Val<'p>, Context<'p>) {
+    pub fn infer<'p>(&self, ctx: &Context<'p>) -> (core::Tm, Val<'p>, Context<'p>) {
         match &self.data {
             TmData::BoolLit { b } => (
                 core::Tm::new(self.location.clone(), core::TmData::BoolLit { b: *b }),
@@ -418,6 +409,41 @@ impl Tm {
             }
 
             _ => todo!(),
+        }
+    }
+
+    pub fn get_ids(&self) -> Vec<String> {
+        match self.data {
+            TmData::BoolLit { .. } | TmData::NumLit { .. } => vec![],
+            TmData::StrLit { regs } => todo!(),
+            TmData::RecTy { fields } => todo!(),
+            TmData::RecWithTy { fields } => todo!(),
+            TmData::RecLit { fields } => todo!(),
+            TmData::RecProj { tm, name } => todo!(),
+            TmData::ListTy { tm } => todo!(),
+            TmData::ListLit { tms } => todo!(),
+            TmData::FunTy { args, opts, body } => todo!(),
+            TmData::FunLit { args, opts, body } => todo!(),
+            TmData::FunLitForeign {
+                args,
+                opts,
+                ty,
+                name,
+            } => todo!(),
+            TmData::FunApp { head, args, opts } => todo!(),
+            TmData::BinOp { tm0, tm1, op } => todo!(),
+            TmData::UnOp { tm, op } => todo!(),
+            TmData::Name { name } => vec![name.clone()],
+        }
+    }
+}
+
+impl MatchMode {
+    pub fn elab(&self) -> core::matcher::read_matcher2::MatchMode {
+        match self {
+            MatchMode::All => core::matcher::read_matcher2::MatchMode::All,
+            MatchMode::AllBest => core::matcher::read_matcher2::MatchMode::One,
+            MatchMode::OneBest => core::matcher::read_matcher2::MatchMode::Unique,
         }
     }
 }

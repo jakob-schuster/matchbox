@@ -172,16 +172,129 @@ impl<'p> A<'p> {
         &self,
         global: &'a env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
-    ) -> &Vec<(BindContext<'p>, Seq)> {
+        location: &Location,
+    ) -> Result<&Vec<(BindContext<'p>, Seq)>, EvalError> {
+        todo!()
+    }
+
+    pub fn partial_eval<'r, 'a>(
+        &self,
+        global: &'a env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        location: &Location,
+    ) -> Result<A<'r>, EvalError>
+    where
+        'p: 'r,
+        'r: 'a,
+    {
         match self {
-            A::Unevaluated { tm, error } => todo!(),
-            A::PartialA { tm, error } => todo!(),
-            A::PartialB { tm, error } => {
-                todo!()
+            A::Unevaluated { params, tm, error } => todo!(),
+            // {
+            //     let mut new_params: Vec<Either<&'p core::Tm, ListVal<'r>>> = vec![];
+            //     for param in params {
+            //         match param {
+            //             Either::Left(tm) => {
+            //                 let val: Val<'r> = tm.eval2(global, local)?;
+
+            //                 if val.is_neutral() {
+            //                     new_params.push(Either::Left(tm));
+            //                 } else {
+            //                     match val {
+            //                         Val::List { v } => {
+            //                             let lv: ListVal<'r> = v;
+            //                             new_params.push(Either::Right(lv));
+            //                         }
+            //                         _ => {
+            //                             return Err(EvalError::new(
+            //                                 location,
+            //                                 "match parameter was not a list value?!",
+            //                             ))
+            //                         }
+            //                     }
+            //                 }
+            //             }
+            //             Either::Right(list_val) => {
+            //                 new_params.push(Either::Right(list_val.reference()))
+            //             }
+            //         }
+            //     }
+
+            //     if new_params.iter().all(|a| a.is_right()) {
+            //         let mut list_vals = vec![];
+            //         for param in new_params {
+            //             if let Either::Right(list_val) = param {
+            //                 list_vals.push(list_val);
+            //             } else {
+            //                 return Err(EvalError::new(location, "message"));
+            //             }
+            //         }
+
+            //         let ctxs = core_read_params_to_ctxs(&list_vals);
+            //         Ok(A::PartialParams { ctxs, tm, error })
+            //     } else {
+            //         Ok(A::Unevaluated {
+            //             params: new_params,
+            //             tm,
+            //             error,
+            //         })
+            //     }
+            // }
+            A::PartialParams { ctxs, tm, error } => {
+                let val = tm.eval2(global, local)?;
+                let error_val = tm.eval2(global, local)?;
+
+                match (val.is_neutral(), error_val.is_neutral()) {
+                    // can't do anything
+                    (true, true) => Ok(A::PartialParams {
+                        ctxs: ctxs.iter().map(|ctx| ctx.reference()).collect(),
+                        tm: tm.clone(),
+                        error: error.clone(),
+                    }),
+                    // simplify out the error
+                    (true, false) => {
+                        let new_ctxs = ctxs.iter().map(|ctx| );
+                        
+                        Ok(A::PartialError {
+                        ctxs: new_ctxs,
+                        tm: tm.clone(),
+                    })},
+                    // simplify out the
+                    (false, true) => {
+                        let s = match val {
+                            Val::Str { s } => s,
+                            _ => return Err(EvalError::new(location, "term was not a Str?!")),
+                        };
+
+                        Ok(A::PartialTm {
+                            ctxs: ctxs.iter().map(|ctx| (ctx, )),
+                            error: (),
+                        })
+                    }
+                    (false, false) => todo!(),
+                }
             }
-            A::Evaluated { ctxs } => ctxs,
+            A::PartialTm { ctxs, error } => todo!(),
+            A::PartialError { ctxs, tm, error } => todo!(),
+            A::Evaluated { ctxs } => todo!(),
         }
     }
+}
+
+fn core_read_params_to_ctxs<'p>(list_vals: &[ListVal<'p>]) -> Vec<env::Env<Val<'p>>> {
+    let mut ctxs = vec![env::Env::default()];
+    for list_val in list_vals {
+        let mut new_ctxs = vec![];
+        for ctx in &ctxs {
+            for val in list_val.get_reference() {
+                let new_ctx = ctx.with(val.reference());
+                new_ctxs.push(new_ctx);
+            }
+        }
+
+        ctxs = new_ctxs;
+    }
+
+    ctxs
 }
 
 pub mod match_context {
@@ -367,7 +480,7 @@ impl<'p> Op<'p> {
                 a,
             } => {
                 // we must be able to concretise A at this point; otherwise, we're in trouble
-                let ctxs = a.eval(global, local);
+                let ctxs = a.eval(global, local, location)?;
 
                 let filtered = ctxs.iter().filter(|(bs, _)| {
                     bs.iter().all(|(id, val)| {

@@ -167,6 +167,133 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
     }
 }
 
+impl<'p> A2<'p> {
+    pub fn get_result(&self) -> Result<impl Iterator<Item = (&env::Env<Val<'p>>, &Seq)>, InternalError> {
+        match &self.ctxs {
+            Either::Left(_) => {return Err(InternalError::new("message"));},
+            Either::Right(a) => {
+                Ok(a.iter().map(|(env, b)| {
+                    (env, match b {
+                        Either::Left(_) => return Err(InternalError::new("message")),
+                        Either::Right(seq) => seq,
+                    })
+                }))
+            },
+        }
+    }
+
+    pub fn eval<'r,'a>(&'p self, global: &'a env::Env<Val<'p>>, local: &'a env::Env<Val<'r>>) -> Result<Vec<>>
+
+    pub fn partial_eval<'r, 'a>(&self, global: &'a env::Env<Val<'p>>, local: &'a env::Env<Val<'r>>, location: &Location) -> Result<A2<'p>, EvalError>{
+        match &self.ctxs {
+            Either::Left((params, tm, error_tm)) => {
+                // go through and see if we can evaluate all the params
+                let mut new_params: Vec<Either<core::Tm, ListVal<'p>>> = vec![];
+                let mut all_evaluated = true;
+
+                for param in params {
+                    match param {
+                        Either::Left(param_tm) => {
+                            let param_val = match param_tm.eval2(global, local) {
+                                Ok(val) => val,
+                                Err(e) => return Err(e),
+                            };
+
+                            if param_val.is_neutral() {
+                                new_params.push(Either::Left(param_tm.clone()));
+                                all_evaluated = false;
+                            } else {
+                                match param_val {
+                                    Val::List { v } => {
+                                        new_params.push(Either::Right(v.concretise()))
+                                    },
+                                    _ => return Err(EvalError::new(location, "parameter was not a list value, despite type checking correctly?!"))
+                                }
+                            }
+                        },
+                        Either::Right(list_val) => new_params.push(Either::Right(list_val.concretise())),
+                    }
+                }
+
+                if all_evaluated {
+                    let list_vals = new_params.iter().map(|param| match param {
+                        Either::Left(_) => Err(EvalError::new(location, "parameter did not evaluate despite having passed the evaluation check?!")),
+                        Either::Right(list_val) => Ok(list_val.reference()),
+                    }).collect::<Result<Vec<_>,_>>()?; 
+
+                    let ctxs = core_read_params_to_ctxs(&list_vals);
+
+                    let ctxs2 = ctxs.iter().map(|ctx| (ctx.concretise(), Either::Left((Either::Left(tm.clone()), Either::Left(error_tm.clone()))))).collect();
+
+                    // evaluate further!
+                    A2 {
+                        ctxs: Either::Right(ctxs2),
+                    }.partial_eval(global, local, location)
+                } else {
+                    Ok(A2 {
+                        ctxs: Either::Left((new_params, tm.clone(), error_tm.clone()))
+                    })
+                }
+            },
+            Either::Right(b) => {
+                let mut new_b: Vec<(env::Env<Val<'p>>, Either<(Either<core::Tm, StrVal>, Either<core::Tm, f64>), Seq>)> = vec![];
+
+                for (env, seq_or) in b {
+                    match seq_or {
+                        Either::Left((tm_or, error_tm_or)) => {
+                            let new_local = env.get_slice().iter().fold(local.reference(), |local0, val| local.with(val.reference()));
+                            
+                            let tm1: Either<core::Tm, StrVal<'p>> = match tm_or {
+                                Either::Left(tm) => {
+                                    let val = tm.eval2(global, &new_local)?;
+
+                                    if val.is_neutral() {
+                                        Ok(Either::Left(tm.clone()))
+                                    } else {
+                                        match val {
+                                            Val::Str { s } => Ok(Either::Right(s.concretise())),
+                                            _ => Err(EvalError::new(location, "term did not produce Str despite type checking?!"))
+                                        }
+                                    }
+                                },
+                                Either::Right(val) => Ok(Either::Right(val.concretise())),
+                            }?;
+
+                            let error_tm1: Either<core::Tm, f64> = match error_tm_or {
+                                Either::Left(tm) => {
+                                    let val = tm.eval2(global, &new_local)?;
+
+                                    if val.is_neutral() {
+                                        Ok(Either::Left(tm.clone()))
+                                    } else {
+                                        match val {
+                                            Val::Num { n } => Ok(Either::Right(n)),
+                                            _ => Err(EvalError::new(location, "term did not produce Str despite type checking?!"))
+                                        }
+                                    }
+                                },
+                                Either::Right(val) => Ok(Either::Right(*val)),
+                            }?;
+
+                            let a = match (&tm1, &error_tm1) {
+                                (Either::Right(val), Either::Right(error)) => (env.concretise(), Either::Right(Seq::new(val.get_reference(), *error))),
+                                _ => (env.concretise(), Either::Left((tm1.clone(), error_tm1.clone())))
+                            };
+                            
+                            new_b.push(a);
+                        },
+                        Either::Right(seq) => {
+                            new_b.push((env.concretise(), Either::Right(seq.clone())));
+                        },
+                    }
+                }
+
+                Ok(A2 { ctxs: Either::Right(new_b) })
+            },
+        }
+    }
+}
+
 impl<'p> A<'p> {
     pub fn eval<'r: 'a, 'a>(
         &self,
@@ -188,57 +315,56 @@ impl<'p> A<'p> {
         'r: 'a,
     {
         match self {
-            A::Unevaluated { params, tm, error } => todo!(),
-            // {
-            //     let mut new_params: Vec<Either<&'p core::Tm, ListVal<'r>>> = vec![];
-            //     for param in params {
-            //         match param {
-            //             Either::Left(tm) => {
-            //                 let val: Val<'r> = tm.eval2(global, local)?;
+            A::Unevaluated { params, tm, error } => {
+                let mut new_params: Vec<Either<&'p core::Tm, ListVal<'r>>> = vec![];
+                for param in params {
+                    match param {
+                        Either::Left(tm) => {
+                            let val: Val<'r> = tm.eval2(global, local)?;
 
-            //                 if val.is_neutral() {
-            //                     new_params.push(Either::Left(tm));
-            //                 } else {
-            //                     match val {
-            //                         Val::List { v } => {
-            //                             let lv: ListVal<'r> = v;
-            //                             new_params.push(Either::Right(lv));
-            //                         }
-            //                         _ => {
-            //                             return Err(EvalError::new(
-            //                                 location,
-            //                                 "match parameter was not a list value?!",
-            //                             ))
-            //                         }
-            //                     }
-            //                 }
-            //             }
-            //             Either::Right(list_val) => {
-            //                 new_params.push(Either::Right(list_val.reference()))
-            //             }
-            //         }
-            //     }
+                            if val.is_neutral() {
+                                new_params.push(Either::Left(tm));
+                            } else {
+                                match val {
+                                    Val::List { v } => {
+                                        let lv: ListVal<'r> = v;
+                                        new_params.push(Either::Right(lv));
+                                    }
+                                    _ => {
+                                        return Err(EvalError::new(
+                                            location,
+                                            "match parameter was not a list value?!",
+                                        ))
+                                    }
+                                }
+                            }
+                        }
+                        Either::Right(list_val) => {
+                            new_params.push(Either::Right(list_val.concretise()))
+                        }
+                    }
+                }
 
-            //     if new_params.iter().all(|a| a.is_right()) {
-            //         let mut list_vals = vec![];
-            //         for param in new_params {
-            //             if let Either::Right(list_val) = param {
-            //                 list_vals.push(list_val);
-            //             } else {
-            //                 return Err(EvalError::new(location, "message"));
-            //             }
-            //         }
+                if new_params.iter().all(|a| a.is_right()) {
+                    let mut list_vals = vec![];
+                    for param in new_params {
+                        if let Either::Right(list_val) = param {
+                            list_vals.push(list_val);
+                        } else {
+                            return Err(EvalError::new(location, "message"));
+                        }
+                    }
 
-            //         let ctxs = core_read_params_to_ctxs(&list_vals);
-            //         Ok(A::PartialParams { ctxs, tm, error })
-            //     } else {
-            //         Ok(A::Unevaluated {
-            //             params: new_params,
-            //             tm,
-            //             error,
-            //         })
-            //     }
-            // }
+                    let ctxs = core_read_params_to_ctxs(&list_vals);
+                    Ok(A::PartialParams { ctxs, tm, error })
+                } else {
+                    Ok(A::Unevaluated {
+                        params: new_params,
+                        tm,
+                        error,
+                    })
+                }
+            }
             A::PartialParams { ctxs, tm, error } => {
                 let val = tm.eval2(global, local)?;
                 let error_val = tm.eval2(global, local)?;
@@ -252,12 +378,16 @@ impl<'p> A<'p> {
                     }),
                     // simplify out the error
                     (true, false) => {
-                        let new_ctxs = ctxs.iter().map(|ctx| );
-                        
+                        let new_ctxs = ctxs.iter().map(|ctx| {
+                            let error_val = 
+                            
+                            (ctx.reference(), )}).collect();
+
                         Ok(A::PartialError {
-                        ctxs: new_ctxs,
-                        tm: tm.clone(),
-                    })},
+                            ctxs: new_ctxs,
+                            tm: tm.clone(),
+                        })
+                    }
                     // simplify out the
                     (false, true) => {
                         let s = match val {
@@ -266,7 +396,7 @@ impl<'p> A<'p> {
                         };
 
                         Ok(A::PartialTm {
-                            ctxs: ctxs.iter().map(|ctx| (ctx, )),
+                            ctxs: ctxs.iter().map(|ctx| (ctx,)),
                             error: (),
                         })
                     }
@@ -274,7 +404,7 @@ impl<'p> A<'p> {
                 }
             }
             A::PartialTm { ctxs, error } => todo!(),
-            A::PartialError { ctxs, tm, error } => todo!(),
+            A::PartialError { ctxs, tm } => todo!(),
             A::Evaluated { ctxs } => todo!(),
         }
     }

@@ -43,6 +43,10 @@ pub mod env {
                 None => Err(InternalError::new("couldn't index env at position ?!")),
             }
         }
+
+        pub fn get_slice(&self) -> &[A] {
+            &self.vec
+        }
     }
 
     impl<A: Display> Display for Env<A> {
@@ -71,6 +75,12 @@ pub mod env {
         pub fn reference(&self) -> Env<Val<'p>> {
             Env {
                 vec: self.vec.iter().map(|val| val.reference()).collect(),
+            }
+        }
+
+        pub fn concretise<'q>(&self) -> Env<Val<'q>> {
+            Env {
+                vec: self.vec.iter().map(|val| val.concretise()).collect(),
             }
         }
     }

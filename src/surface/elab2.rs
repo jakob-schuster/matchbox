@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::core::eval2::env::Env;
 use crate::core::matcher::read_matcher2::ReadMatcher;
+use crate::core::matcher::Matcher;
 use crate::core::{self, StrVal, Val};
 use crate::surface::elab::ElabError;
 use crate::surface::elab2::context::Address;
@@ -75,7 +76,7 @@ pub mod context {
             }
         }
 
-        fn bind_local<'a>(&self, name: &str, ty: Val<'a>, tm: Val<'a>) -> Context<'a>
+        fn bind_local<'a>(&self, name: &str, ty: Val<'a>, tm: Val<'a>) -> Context<'p>
         where
             'p: 'a,
         {
@@ -84,19 +85,23 @@ pub mod context {
             todo!()
         }
 
-        fn bind_global<'a, 'b>(&self, name: &str, ty: Val<'a>, tm: Val<'b>) -> Context<'a>
+        fn bind_global<'a, 'b>(&self, name: &str, ty: Val<'a>, tm: Val<'b>) -> Context<'b>
         where
             'p: 'a,
             'p: 'b,
         {
-            let global1 = self.global.with(tm.clone());
+            let global1: Env<Val<'p>> = self.global.with(tm.concretise());
 
             // and then add this to the global and assign the address correctly
 
-            todo!()
+            Context {
+                local: self.local.reference(),
+                global: global1,
+                errors: self.errors.clone(),
+            }
         }
 
-        pub fn bind<'a, 'b>(&self, name: &str, ty: Val<'a>, tm: Val<'b>) -> Context<'a>
+        pub fn bind<'a, 'b>(&self, name: &str, ty: Val<'a>, tm: Val<'b>) -> Context<'b>
         where
             'p: 'a,
             'p: 'b,
@@ -104,11 +109,11 @@ pub mod context {
             self.bind_global(name, ty, tm)
         }
 
-        pub fn bind_param<'a>(&self, name: &str, ty: &Val<'a>) -> Context<'a>
+        pub fn bind_param<'a>(&self, name: &str, ty: &Val<'a>) -> Context<'p>
         where
             'p: 'a,
         {
-            self.bind_local(name, ty.reference(), self.next_neutral())
+            self.bind_local(name, ty.concretise(), self.next_neutral())
         }
 
         /// Retain the local bindings, but carry the global bindings and errors from the new context
@@ -167,10 +172,11 @@ impl Stmt {
                 // otherwise, it needs to be represented as a core bind
                 //
                 // if there is an eval error, we also need to report it
-                let (val, c2) = match ctm.eval2(&c1.get_global_env(), &c1.get_local_env()) {
-                    Ok(val) => (val, c1),
-                    Err(e) => (Val::Error, c1.report(ElabError::from_eval_error(e))),
-                };
+                let (val, c2): (Val<'p>, Context<'_>) =
+                    match ctm.eval2(&c1.get_global_env(), &c1.get_local_env()) {
+                        Ok(val) => (val.concretise(), c1),
+                        Err(e) => (Val::Error, c1.report(ElabError::from_eval_error(e))),
+                    };
 
                 // update the context accordingly
                 let c3 = if val.is_neutral() {
@@ -194,7 +200,7 @@ impl Stmt {
                         core::Stmt::new(
                             self.location.clone(),
                             core::StmtData::Let {
-                                tm: ctm,
+                                tm: ctm.clone(),
                                 next: Arc::new(rest_cstmt),
                             },
                         ),
@@ -358,8 +364,13 @@ impl Pattern {
                 // everything else happens in here
                 let (matcher, c2) = ReadMatcher::infer(c0, regs, binds, mode, &self.location);
 
+                let matcher1 = match matcher {
+                    itertools::Either::Left(m) => Arc::new(m) as Arc<dyn Matcher>,
+                    itertools::Either::Right(m) => Arc::new(m) as Arc<dyn Matcher>,
+                };
+
                 (
-                    Arc::new(matcher),
+                    matcher1,
                     Val::RecWithTy {
                         fields: vec![CoreRecField {
                             name: b"seq".to_vec(),
@@ -378,7 +389,10 @@ impl Tm {
         todo!()
     }
 
-    pub fn infer<'p>(&self, ctx: &Context<'p>) -> (core::Tm, Val<'p>, Context<'p>) {
+    pub fn infer<'p, 'q>(&self, ctx: &Context<'q>) -> (core::Tm, Val<'p>, Context<'q>)
+    where
+        'q: 'p,
+    {
         match &self.data {
             TmData::BoolLit { b } => (
                 core::Tm::new(self.location.clone(), core::TmData::BoolLit { b: *b }),
@@ -413,7 +427,7 @@ impl Tm {
     }
 
     pub fn get_ids(&self) -> Vec<String> {
-        match self.data {
+        match &self.data {
             TmData::BoolLit { .. } | TmData::NumLit { .. } => vec![],
             TmData::StrLit { regs } => todo!(),
             TmData::RecTy { fields } => todo!(),

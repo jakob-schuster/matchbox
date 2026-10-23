@@ -135,12 +135,12 @@ impl<'p> CoreReadParameterData<'p> {
     }
 }
 
-struct ParamTable<'p> {
-    vec: Vec<(String, ParamOption<'p>)>
+struct ParamTable<'a> {
+    vec: Vec<(String, core::Tm, Option<ListVal<'a>>)>
 }
 
-impl<'p> ParamTable<'p> {
-    fn new(c0: Context<'p>, params: &[ReadParameter]) -> (Option<ParamTable<'p>>, Context<'p>) {
+impl<'a> ParamTable<'a> {
+    fn new(c0: Context<'a>, params: &[ReadParameter]) -> (Option<ParamTable<'a>>, Context<'a>) {
         // elaborate each read parameter
         let mut cx = c0.reference();
         let mut v = vec![];
@@ -151,19 +151,26 @@ impl<'p> ParamTable<'p> {
             // extract the inner type;
             let inner_ty = match ty {
                 Val::ListTy { ty } => ty.reference(),
-                _ => return (None, cx)
+                _ => return (None, cx.report(ElabError::new(&param.location, &format!("parameter {} must be selecting from a List", param.data.name))))
             };
 
             // try to evaluate
-            let val = match ctm.eval2(&cx.get_global_env(), &cx.get_local_env()) {
-                Ok(val) => val,
+            let owned_ctm = ctm.clone();
+
+            let val = match owned_ctm.eval2(&cx.get_global_env(), &cx.get_local_env()) {
+                Ok(val) => val.concretise(),
                 Err(_) => return (None, cx),
             };
 
             if val.is_neutral() {
-                v.push(ParamOption::Tm { tm: ctm.clone() });
+                v.push((param.data.name.clone(), ctm.clone(), None));
             } else {
-                v.push(ParamOption::Val { address: Address:: });
+                match &val {
+                    Val::List { v: list_val } => {
+                        v.push((param.data.name.clone(), owned_ctm, Some(val.clone())));
+                    }
+                    _ => return (None, cx)
+                }
             }
         }
 
@@ -172,8 +179,8 @@ impl<'p> ParamTable<'p> {
 }
 
 enum ParamOption<'p> {
-    Tm { tm: core::Tm },
-    Val { address: Address }
+    Tm { tm: core::Tm, val: Option<ListVal<'_>> },
+    Val { val: ListVal<'_>, tm: core::Tm }
 }
 
 impl<'p> ReadMatcher<'p> {
@@ -270,6 +277,20 @@ impl<'p> ReadMatcher<'p> {
 
             (sized_ctm, cx)
         };
+
+        // go through each parameter, evaluating where possible
+        let (table,c3): (ParamTable<'p>, Context<'p>) = {
+            todo!()
+        };
+
+        // now we have a map from name to (core::Tm / Val)
+
+        // now go through each term, and if all the params are already evaluated, then build ctxs and try to evaluate the tm and the error_tm
+        let (core_regs, c4): (Vec<Ranged<CoreFlatRegion>>, Context<'p>) = {
+            todo!()
+        };
+
+        // now we have a list of partially evaluated term forms which can live for 'p and we will just write an eval function which is a normal eval function
 
         // go through the FlatRegions and typecheck,
         // making sure that each is a string,

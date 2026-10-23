@@ -388,7 +388,11 @@ impl<'r> Val<'r> {
         todo!()
     }
 
-    pub fn concretise(&self) -> PortableVal {
+    pub fn concretise<'p>(&self) -> Val<'p> {
+        todo!()
+    }
+
+    pub fn to_portable(&self) -> PortableVal {
         todo!()
     }
 }
@@ -423,6 +427,13 @@ impl<'r> StrVal<'r> {
             StrVal::Concrete { s } => StrVal::Reference { s },
         }
     }
+
+    pub fn concretise<'p>(&self) -> StrVal<'p> {
+        match self {
+            StrVal::Reference { s } => StrVal::Concrete { s: s.to_vec() },
+            StrVal::Concrete { s } => StrVal::Concrete { s: s.clone() },
+        }
+    }
 }
 
 /// A list value, either a concrete value vector or a slice elsewhere (presumably in the global or local env)
@@ -453,6 +464,17 @@ impl<'r> ListVal<'r> {
         match self {
             ListVal::Reference { v } => ListVal::Reference { v },
             ListVal::Concrete { v } => ListVal::Reference { v },
+        }
+    }
+
+    pub fn concretise<'p>(&'r self) -> ListVal<'p> {
+        match self {
+            ListVal::Reference { v } => ListVal::Concrete {
+                v: v.iter().map(|v| v.concretise()).collect(),
+            },
+            ListVal::Concrete { v } => ListVal::Concrete {
+                v: v.iter().map(|v| v.concretise()).collect(),
+            },
         }
     }
 }

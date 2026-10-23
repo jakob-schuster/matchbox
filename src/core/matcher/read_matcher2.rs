@@ -145,6 +145,21 @@ enum A<'p> {
     },
 }
 
+#[derive(Clone)]
+struct A2<'p> {
+    ctxs: Either<
+        (
+            Vec<(usize, Either<core::Tm, ListVal<'p>>)>,
+            core::Tm,
+            core::Tm,
+        ),
+        Vec<(
+            Vec<(usize, Val<'p>)>,
+            Either<(Either<core::Tm, StrVal<'p>>, Either<core::Tm, f64>), Seq>,
+        )>,
+    >,
+}
+
 impl<'p> A<'p> {
     fn new(params: &'p [core::Tm], tm: &'p core::Tm, error: &'p core::Tm) -> A<'p> {
         A::Unevaluated {

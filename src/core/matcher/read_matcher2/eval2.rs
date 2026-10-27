@@ -410,7 +410,7 @@ impl<'p> A<'p> {
     }
 }
 
-fn core_read_params_to_ctxs<'p>(list_vals: &[ListVal<'p>]) -> Vec<env::Env<Val<'p>>> {
+pub fn core_read_params_to_ctxs<'p>(list_vals: &[ListVal<'p>]) -> Vec<env::Env<Val<'p>>> {
     let mut ctxs = vec![env::Env::default()];
     for list_val in list_vals {
         let mut new_ctxs = vec![];
@@ -426,6 +426,7 @@ fn core_read_params_to_ctxs<'p>(list_vals: &[ListVal<'p>]) -> Vec<env::Env<Val<'
 
     ctxs
 }
+
 
 pub mod match_context {
     use crate::core::{
@@ -526,9 +527,12 @@ pub mod match_context {
     }
 
     pub mod bind_context {
-        use crate::core::InternalError;
+        use itertools::Itertools;
+
+use crate::core::InternalError;
 
         use crate::core::Val;
+use crate::core::eval2::env;
 
         use std::collections::HashMap;
 
@@ -567,6 +571,10 @@ pub mod match_context {
                         .map(|(id, val)| (*id, val.reference()))
                         .collect(),
                 }
+            }
+
+            pub fn to_env(&self, env0: &env::Env<Val<'p>>) -> env::Env<Val<'p>> {
+                self.map.iter().sorted_by_key(|(index, _)| **index).fold(env0.reference(), |env0, (_, val)| env0.with(val.reference()))
             }
 
             pub fn iter(&self) -> std::collections::hash_map::Iter<'_, usize, Val<'_>> {

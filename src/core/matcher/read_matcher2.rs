@@ -23,6 +23,7 @@ use crate::{
 
 pub mod elab2;
 pub mod eval2;
+pub mod seq;
 
 #[derive(Clone)]
 pub enum MatchMode {
@@ -79,7 +80,7 @@ pub enum Op<'p> {
         // the locations to save
         save: Vec<Ran<usize>>,
         // partially computed list of binds to make
-        a: A<'p>,
+        data: OpData<'p>,
     },
 }
 
@@ -95,15 +96,150 @@ impl<'p> Op<'p> {
                 ran,
                 fixed,
                 save,
-                a,
+                data,
             } => Op::Restrict {
                 ran: ran.clone(),
                 fixed: fixed.clone(),
                 save: save.clone(),
-                a: a.reference(),
+                data: data.reference(),
             },
         }
     }
+}
+
+#[derive(Clone)]
+enum OpData<'p> {
+    Unevaluated {
+        params: Vec<ParamData<'p>>,
+        tm: core::Tm,
+        error_tm: core::Tm,
+    },
+
+    PartialA {
+        binds: Vec<BindContext<'p>>,
+        tm: core::Tm,
+        error_tm: core::Tm,
+    },
+    PartialB {
+        binds: Vec<(BindContext<'p>, StrVal<'p>)>,
+        error_tm: core::Tm,
+    },
+    PartialC {
+        binds: Vec<(BindContext<'p>, f64)>,
+        tm: core::Tm,
+    },
+
+    FullyEvaluated {
+        binds: Vec<(BindContext<'p>, Seq)>,
+    },
+}
+
+impl<'p> OpData<'p> {
+    fn new_unevaluated(params: &[ParamData<'p>], tm: core::Tm, error_tm: core::Tm) -> OpData<'p> {
+        OpData::Unevaluated {
+            params: params.to_vec(),
+            tm,
+            error_tm,
+        }
+    }
+
+    fn new_partial_a(binds: &[BindContext<'p>], tm: core::Tm, error_tm: core::Tm) -> OpData<'p> {
+        OpData::PartialA {
+            binds: binds.to_vec(),
+            tm,
+            error_tm,
+        }
+    }
+
+    fn new_partial_b(binds: &[(BindContext<'p>, StrVal<'p>)], error_tm: core::Tm) -> OpData<'p> {
+        OpData::PartialB {
+            binds: binds.to_vec(),
+            error_tm,
+        }
+    }
+
+    fn new_partial_c(binds: &[(BindContext<'p>, f64)], tm: core::Tm) -> OpData<'p> {
+        OpData::PartialC {
+            binds: binds.to_vec(),
+            tm,
+        }
+    }
+
+    fn new_evaluated(binds: &[(BindContext<'p>, Seq)]) -> OpData<'p> {
+        OpData::FullyEvaluated {
+            binds: binds.to_vec(),
+        }
+    }
+
+    fn reference<'r>(&'r self) -> OpData<'r> {
+        todo!()
+    }
+
+    fn get_priority(&self) -> usize {
+        todo!()
+    }
+}
+
+#[derive(Clone)]
+struct ParamContext<'p> {
+    map: HashMap<String, ParamData<'p>>,
+}
+
+impl<'p> ParamContext<'p> {
+    fn new() -> ParamContext<'p> {
+        todo!()
+    }
+
+    fn with(&self, name: &str, param_data: ParamData<'p>) -> ParamContext<'p> {
+        todo!()
+    }
+
+    fn get(&self, name: &str) -> Option<ParamData<'p>> {
+        todo!()
+    }
+}
+
+#[derive(Clone)]
+enum ParamData<'p> {
+    Unevaluated {
+        index: usize,
+        tm: core::Tm,
+        ty: core::Val<'p>,
+    },
+    Evaluated {
+        index: usize,
+        vals: ListVal<'p>,
+        ty: core::Val<'p>,
+    },
+}
+
+impl<'p> ParamData<'p> {
+    fn new_unevaluated(index: usize, tm: core::Tm, ty: core::Val<'p>) -> ParamData<'p> {
+        ParamData::Unevaluated { index, tm, ty }
+    }
+
+    fn new_evaluated(index: usize, vals: ListVal<'p>, ty: core::Val<'p>) -> ParamData<'p> {
+        ParamData::Evaluated { index, vals, ty }
+    }
+
+    fn get_ty(&self) -> &Val<'p> {
+        match self {
+            ParamData::Unevaluated { index, tm, ty } => ty,
+            ParamData::Evaluated { index, vals, ty } => ty,
+        }
+    }
+
+    fn get_index(&self) -> usize {
+        match self {
+            ParamData::Unevaluated { index, tm, ty } => *index,
+            ParamData::Evaluated { index, vals, ty } => *index,
+        }
+    }
+}
+
+struct Bind<'p> {
+    index: usize,
+    val: Val<'p>,
 }
 
 struct ATm<'p> {
@@ -203,10 +339,9 @@ impl<'p> A<'p> {
                     .collect(),
                 error: error.clone(),
             },
-            A::PartialError { ctxs, tm, error } => A::PartialError {
+            A::PartialError { ctxs, tm } => A::PartialError {
                 ctxs: ctxs.iter().map(env::Env::reference).collect(),
                 tm: tm.clone(),
-                error: *error,
             },
             A::Evaluated { ctxs } => A::Evaluated {
                 ctxs: ctxs

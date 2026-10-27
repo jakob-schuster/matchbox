@@ -676,7 +676,8 @@ impl OpTm {
                     })
                     .collect::<Result<Vec<_>, EvalError>>()?;
 
-                    Ok(OpVal::Restrict {
+                                        for ran in self.binds.iter() {
+        Ok(OpVal::Restrict {
                         ctxs,
                         ran: ran.clone(),
                         fixed: fixed.clone(),

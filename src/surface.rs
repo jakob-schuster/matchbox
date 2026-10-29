@@ -60,7 +60,7 @@ pub enum BranchData {
 
     /// A pattern-matching branch
     /// [ read matches [_ tso _] => read |> filtered ]
-    Is {
+    Matches {
         tm: Tm,
         branches: Vec<PatternBranch>,
     },

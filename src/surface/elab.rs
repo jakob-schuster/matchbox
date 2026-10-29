@@ -262,7 +262,7 @@ fn elab_branch<'a>(
                 },
             ))
         }
-        BranchData::Is { tm, branches } => {
+        BranchData::Matches { tm, branches } => {
             // need to also check that each branch's pattern's ty matches the ty of tm
             let (core_tm, core_ty) = infer_tm(arena, ctx, tm)?;
 

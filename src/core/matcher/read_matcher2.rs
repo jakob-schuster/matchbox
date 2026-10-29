@@ -6,14 +6,10 @@ use crate::{
     core::{
         self,
         eval2::env,
-        matcher::{
-            read_matcher::Seq,
-            read_matcher2::{
-                elab2::{CoreReadParameter, CoreReadParameterData},
-                eval2::match_context::{
-                    bind_context::BindContext, location_context::LocationContext,
-                },
-            },
+        matcher::read_matcher2::{
+            elab2::{CoreReadParameter, CoreReadParameterData},
+            eval2::match_context::{bind_context::BindContext, location_context::LocationContext},
+            seq::Seq,
         },
         InternalError, ListVal, StrVal, Val,
     },
@@ -105,6 +101,27 @@ impl<'p> Op<'p> {
             },
         }
     }
+
+    fn concretise<'q>(&self) -> Op<'q> {
+        match self {
+            Op::Let { loc, op, flanking } => Op::Let {
+                loc: *loc,
+                op: op.clone(),
+                flanking: flanking.clone(),
+            },
+            Op::Restrict {
+                ran,
+                fixed,
+                save,
+                data,
+            } => Op::Restrict {
+                ran: ran.clone(),
+                fixed: fixed.clone(),
+                save: save.clone(),
+                data: data.concretise(),
+            },
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -175,8 +192,60 @@ impl<'p> OpData<'p> {
         todo!()
     }
 
+    fn concretise<'q>(&self) -> OpData<'q> {
+        match self {
+            OpData::Unevaluated {
+                params,
+                tm,
+                error_tm,
+            } => OpData::Unevaluated {
+                params: params.iter().map(|param| param.concretise()).collect(),
+                tm: tm.clone(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialA {
+                binds,
+                tm,
+                error_tm,
+            } => OpData::PartialA {
+                binds: binds.iter().map(|bind_ctx| bind_ctx.concretise()).collect(),
+                tm: tm.clone(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialB { binds, error_tm } => OpData::PartialB {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, str_val)| (bind_ctx.concretise(), str_val.concretise()))
+                    .collect(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialC { binds, tm } => OpData::PartialC {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, error_val)| (bind_ctx.concretise(), *error_val))
+                    .collect(),
+                tm: tm.clone(),
+            },
+            OpData::FullyEvaluated { binds } => OpData::FullyEvaluated {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, seq)| (bind_ctx.concretise(), seq.clone()))
+                    .collect(),
+            },
+        }
+    }
+
     fn get_priority(&self) -> usize {
-        todo!()
+        match self {
+            // if unevaluated, we can just roughly estimate by how many parameters are involved
+            OpData::Unevaluated { params, .. } => params.len(),
+
+            // otherwise, based on the number of different bind contexts that must be considered
+            OpData::PartialA { binds, .. } => binds.len(),
+            OpData::PartialB { binds, .. } => binds.len(),
+            OpData::PartialC { binds, .. } => binds.len(),
+            OpData::FullyEvaluated { binds } => binds.len(),
+        }
     }
 }
 
@@ -235,122 +304,41 @@ impl<'p> ParamData<'p> {
             ParamData::Evaluated { index, vals, ty } => *index,
         }
     }
+
+    fn reference<'r>(&'r self) -> ParamData<'r> {
+        match self {
+            ParamData::Unevaluated { index, tm, ty } => ParamData::Unevaluated {
+                index: *index,
+                tm: tm.clone(),
+                ty: ty.reference(),
+            },
+            ParamData::Evaluated { index, vals, ty } => ParamData::Evaluated {
+                index: *index,
+                vals: vals.reference(),
+                ty: ty.reference(),
+            },
+        }
+    }
+
+    fn concretise<'q>(&self) -> ParamData<'q> {
+        match self {
+            ParamData::Unevaluated { index, tm, ty } => ParamData::Unevaluated {
+                index: *index,
+                tm: tm.clone(),
+                ty: ty.concretise(),
+            },
+            ParamData::Evaluated { index, vals, ty } => ParamData::Evaluated {
+                index: *index,
+                vals: vals.concretise(),
+                ty: ty.concretise(),
+            },
+        }
+    }
 }
 
 struct Bind<'p> {
     index: usize,
     val: Val<'p>,
-}
-
-struct ATm<'p> {
-    params: Vec<CoreReadParameterData<'p>>,
-    tm: core::Tm,
-    error: core::Tm,
-}
-
-#[derive(Clone)]
-enum A<'p> {
-    // fully unevaluated form
-    Unevaluated {
-        params: Vec<Either<&'p core::Tm, ListVal<'p>>>,
-        tm: &'p core::Tm,
-        error: &'p core::Tm,
-    },
-
-    // partially evaluated; the params have been evaluated
-    PartialParams {
-        ctxs: Vec<env::Env<Val<'p>>>,
-        tm: &'p core::Tm,
-        error: &'p core::Tm,
-    },
-
-    // partially evaluated; either the term or the error rate has additionally been evaluated
-    PartialTm {
-        ctxs: Vec<(env::Env<Val<'p>>, StrVal<'p>)>,
-        error: &'p core::Tm,
-    },
-    PartialError {
-        ctxs: Vec<(env::Env<Val<'p>>, f64)>,
-        tm: &'p core::Tm,
-    },
-
-    // fully evaluated form
-    // contains one world per possible set of input binds
-    Evaluated {
-        ctxs: Vec<(env::Env<Val<'p>>, Seq)>,
-    },
-}
-
-#[derive(Clone)]
-struct A2<'p> {
-    ctxs: Either<
-        (
-            Vec<(usize, Either<core::Tm, ListVal<'p>>)>,
-            core::Tm,
-            core::Tm,
-        ),
-        Vec<(
-            Vec<(usize, Val<'p>)>,
-            Either<(Either<core::Tm, StrVal<'p>>, Either<core::Tm, f64>), Seq>,
-        )>,
-    >,
-}
-
-impl<'p> A<'p> {
-    fn new(params: &'p [core::Tm], tm: &'p core::Tm, error: &'p core::Tm) -> A<'p> {
-        A::Unevaluated {
-            // WARN could be costly clone
-            params: params.iter().map(|param| Either::Left(param)).collect(),
-            tm,
-            error,
-        }
-    }
-
-    fn get_priority(&self) -> usize {
-        match self {
-            // we don't know enough about this form
-            A::Unevaluated { tm, .. } => todo!(),
-
-            // computed region results with more options to search for
-            // are lower priority
-            A::PartialParams { ctxs, .. } => ctxs.len(),
-            A::PartialTm { ctxs, .. } => ctxs.len(),
-            A::PartialError { ctxs, .. } => ctxs.len(),
-            A::Evaluated { ctxs, .. } => ctxs.len(),
-        }
-    }
-
-    fn reference<'r>(&'r self) -> A<'r> {
-        match self {
-            A::Unevaluated { params, tm, error } => A::Unevaluated {
-                params: params.to_vec(),
-                tm: tm.clone(),
-                error: error.clone(),
-            },
-            A::PartialParams { ctxs, tm, error } => A::PartialParams {
-                ctxs: ctxs.iter().map(env::Env::reference).collect(),
-                tm: tm.clone(),
-                error: error.clone(),
-            },
-            A::PartialTm { ctxs, error } => A::PartialTm {
-                ctxs: ctxs
-                    .iter()
-                    .map(|(bind_context, s)| (bind_context.reference(), s.reference()))
-                    .collect(),
-                error: error.clone(),
-            },
-            A::PartialError { ctxs, tm } => A::PartialError {
-                ctxs: ctxs.iter().map(env::Env::reference).collect(),
-                tm: tm.clone(),
-            },
-            A::Evaluated { ctxs } => A::Evaluated {
-                ctxs: ctxs
-                    .iter()
-                    .map(|(ctx, seq)| (ctx.reference(), seq.clone()))
-                    .collect(),
-            },
-        }
-    }
 }
 
 #[derive(Clone)]

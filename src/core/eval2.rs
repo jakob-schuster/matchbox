@@ -72,6 +72,12 @@ pub mod env {
     }
 
     impl<'p> Env<Val<'p>> {
+        pub fn with_val(&self, val: Val<'p>) -> Env<Val<'p>> {
+            let mut new = self.reference();
+            new.push(val);
+            new
+        }
+
         pub fn reference(&self) -> Env<Val<'p>> {
             Env {
                 vec: self.vec.iter().map(|val| val.reference()).collect(),

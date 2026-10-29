@@ -7,11 +7,9 @@ use crate::{
         self,
         eval2::env,
         matcher::{
-            read_matcher,
             read_matcher2::{
-                eval2::{core_read_params_to_ctxs, match_context::bind_context::BindContext},
-                seq::Seq,
-                Direction, LocOp, Op, OpData, ParamContext, ParamData, ReadMatcher, A,
+                eval2::match_context::bind_context::BindContext, seq::Seq, Direction, LocOp, Op,
+                OpData, ParamContext, ParamData, ReadMatcher,
             },
             ErrorMatcher,
         },
@@ -264,7 +262,7 @@ impl<'p> ReadMatcher<'p> {
 
                 // try to evaluate the parameter
                 let (val, cy) = match ctm.eval2(&cx.get_global_env(), &cx.get_local_env()) {
-                    Ok(val) => (val, cx),
+                    Ok(val) => (val.concretise(), cx),
                     Err(e) => (Val::Error, cx.report(ElabError::from_eval_error(e))),
                 };
                 cx = cy;
@@ -272,14 +270,14 @@ impl<'p> ReadMatcher<'p> {
                 if val.is_neutral() {
                     params_ctx = params_ctx.with(
                         &param.data.name,
-                        ParamData::new_unevaluated(index, ctm.clone(), ty.clone()),
+                        ParamData::new_unevaluated(index, ctm.clone(), inner_ty),
                     )
                 } else {
                     match val {
                         Val::List { v } => {
                             params_ctx = params_ctx.with(
                                 &param.data.name,
-                                ParamData::new_evaluated(index, v, ty.clone()),
+                                ParamData::new_evaluated(index, v, inner_ty),
                             );
                         }
                         _ => {
@@ -323,15 +321,15 @@ impl<'p> ReadMatcher<'p> {
             let mut core_regs = vec![];
             let mut cx = c2.reference();
 
-            for reg in regs {
-                let core_reg = match reg.data {
+            for reg in &regs {
+                let core_reg = match &reg.data {
                     FlatRegion::Hole => Ranged::new(CoreFlatRegion::new_hole(), reg.ran.clone()),
                     FlatRegion::Tm { tm, error_tm } => {
                         // first, get the list of parameters that need to be bound in this region
                         // get the ids from the term that are also in the ids of the params
                         let param_names = params
                             .iter()
-                            .map(|param| param.data.name)
+                            .map(|param| param.data.name.clone())
                             .collect::<Vec<_>>();
 
                         let param_names_in_tm = tm
@@ -340,27 +338,33 @@ impl<'p> ReadMatcher<'p> {
                             .chain(error_tm.get_ids().iter())
                             .filter(|name| param_names.contains(name))
                             .unique()
+                            .cloned()
                             .collect::<Vec<_>>();
 
                         let params = param_names_in_tm
                             .iter()
-                            .flat_map(|name| Some((name, params_ctx.get(name)?)));
+                            .flat_map(|name| Some((name.clone(), params_ctx.get(name)?)))
+                            .collect::<Vec<_>>();
 
                         // build a context with all of these bound in order
                         let c3 = params
+                            .iter()
                             .sorted_by_key(|(_, param)| param.get_index())
                             .fold(c2.reference(), |c0, (name, param)| {
                                 c0.bind_param(name, param.get_ty())
                             });
                         // elaborate the terms
-                        let (ctm, tm_ctx) = tm.check(&cx, &Val::StrTy);
+                        let (ctm, tm_ctx) = tm.check(&c3, &Val::StrTy);
                         let (error_ctm, error_tm_ctx) = error_tm.check(&tm_ctx, &Val::StrTy);
                         cx = cx.with_global_from(tm_ctx).with_global_from(error_tm_ctx);
 
                         if let Some(a) = params
+                            .iter()
                             .map(|(_, param)| match param {
                                 ParamData::Unevaluated { .. } => None,
-                                ParamData::Evaluated { index, vals, ty } => Some((index, vals)),
+                                ParamData::Evaluated { index, vals, ty } => {
+                                    Some((*index, vals.concretise()))
+                                }
                             })
                             .collect::<Option<Vec<_>>>()
                         {
@@ -374,12 +378,12 @@ impl<'p> ReadMatcher<'p> {
 
                             let mut vals = vec![];
                             let mut error_vals = vec![];
-                            for bind_ctx in bind_ctxs {
+                            for bind_ctx in &bind_ctxs {
                                 let local = bind_ctx.to_env(&cx.get_local_env());
 
                                 if all_tm_evaluated {
                                     let val = match ctm.eval2(&cx.get_global_env(), &local) {
-                                        Ok(val) => val,
+                                        Ok(val) => val.concretise(),
                                         Err(e) => {
                                             return (
                                                 Either::Right(ErrorMatcher::new(location)),
@@ -401,7 +405,7 @@ impl<'p> ReadMatcher<'p> {
                                 if all_error_tm_evaluated {
                                     let error_val =
                                         match error_ctm.eval2(&cx.get_global_env(), &local) {
-                                            Ok(val) => val,
+                                            Ok(val) => val.concretise(),
                                             Err(e) => {
                                                 return (
                                                     Either::Right(ErrorMatcher::new(location)),
@@ -429,22 +433,37 @@ impl<'p> ReadMatcher<'p> {
                                             .zip(vals)
                                             .zip(error_vals)
                                             .map(|((bind_ctx, str_val), error)| {
-                                                (bind_ctx, Seq::new(str_val.get_reference(), error))
+                                                (
+                                                    bind_ctx.reference(),
+                                                    Seq::new(str_val.get_reference(), error),
+                                                )
                                             })
-                                            .collect()[..],
+                                            .collect::<Vec<_>>()[..],
                                     )),
                                     reg.ran.clone(),
                                 ),
                                 (true, false) => Ranged::new(
                                     CoreFlatRegion::new_tm(OpData::new_partial_b(
-                                        &bind_ctxs.iter().zip(vals).collect()[..],
+                                        &bind_ctxs
+                                            .iter()
+                                            .zip(vals)
+                                            .map(|(bind_ctx, str_val)| {
+                                                (bind_ctx.reference(), str_val)
+                                            })
+                                            .collect::<Vec<_>>()[..],
                                         error_ctm.clone(),
                                     )),
                                     reg.ran.clone(),
                                 ),
                                 (false, true) => Ranged::new(
                                     CoreFlatRegion::new_tm(OpData::new_partial_c(
-                                        &bind_ctxs.iter().zip(error_vals).collect()[..],
+                                        &bind_ctxs
+                                            .iter()
+                                            .zip(error_vals)
+                                            .map(|(bind_ctx, error_val)| {
+                                                (bind_ctx.reference(), error_val)
+                                            })
+                                            .collect::<Vec<_>>()[..],
                                         ctm.clone(),
                                     )),
                                     reg.ran.clone(),
@@ -462,7 +481,10 @@ impl<'p> ReadMatcher<'p> {
                             // can't evaluate
                             Ranged::new(
                                 CoreFlatRegion::new_tm(OpData::new_unevaluated(
-                                    &params.map(|(_, param)| param).collect(),
+                                    &params
+                                        .iter()
+                                        .map(|(_, param)| param.clone())
+                                        .collect::<Vec<_>>()[..],
                                     ctm,
                                     error_ctm,
                                 )),
@@ -485,7 +507,7 @@ impl<'p> ReadMatcher<'p> {
             .flat_map(|ranged| match &ranged.data {
                 CoreFlatRegion::Hole => None,
                 CoreFlatRegion::Tm { data } => Some(Ranged {
-                    data: data.reference(),
+                    data: data.concretise(),
                     ran: ranged.ran.clone(),
                 }),
             })
@@ -496,7 +518,7 @@ impl<'p> ReadMatcher<'p> {
             .collect();
 
         fn check_all_fixed_lens<'p>(
-            ops: &'p [Op<'p>],
+            ops: &[Op<'p>],
             known: &[usize],
             sized: &[Ranged<core::Tm>],
         ) -> Result<(Vec<usize>, Vec<Op<'p>>), InternalError> {
@@ -551,7 +573,7 @@ impl<'p> ReadMatcher<'p> {
                 Ok(ops)
             }
 
-            let mut ops1 = ops.iter().map(Op::reference).collect::<Vec<_>>();
+            let mut ops1 = ops.iter().map(Op::concretise).collect::<Vec<_>>();
             let mut known1 = known.to_vec();
             let mut previous_len = ops1.len();
 
@@ -582,20 +604,23 @@ impl<'p> ReadMatcher<'p> {
         }
 
         let mut known = vec![0, core_regs.len()];
-        let mut ops: Vec<Op<'p>> = vec![];
+        let mut ops: Vec<Op<'_>> = vec![];
 
         //
 
         // now, we go through each of the bindable regions
         for op_data in &bindable_regs {
-            let (known, ops) = match check_all_fixed_lens(&ops, &known, &sized_ctm) {
+            let (known1, ops1) = match check_all_fixed_lens(&ops, &known, &sized_ctm) {
                 Ok(data) => data,
-                Err(e) => return (Either::Right(ErrorMatcher::new(location)), c3),
+                Err(e) => return (Either::Right(ErrorMatcher::new(location)), c4),
             };
+
+            known = known1;
+            ops = ops1;
 
             let search: Ran<usize> = match get_tightest_known(&known, &op_data.ran) {
                 Ok(ran) => ran,
-                Err(e) => return (Either::Right(ErrorMatcher::new(location)), c3),
+                Err(e) => return (Either::Right(ErrorMatcher::new(location)), c4),
             };
 
             let fixed = Ran::new(
@@ -617,18 +642,18 @@ impl<'p> ReadMatcher<'p> {
         // check for range restriction one final time
         let (known, ops) = match check_all_fixed_lens(&ops, &known, &sized_ctm) {
             Ok(data) => data,
-            Err(e) => return (Either::Right(ErrorMatcher::new(location)), c3),
+            Err(e) => return (Either::Right(ErrorMatcher::new(location)), c4),
         };
 
         (
             Either::Left(ReadMatcher {
-                ops,
+                ops: ops.iter().map(Op::concretise).collect(),
                 binds: named.iter().map(|a| a.ran.clone()).collect(),
                 end: regs.len(),
                 mode: mode.elab(),
                 location: location.clone(),
             }),
-            c2,
+            c4,
         )
     }
 }
@@ -732,7 +757,9 @@ fn get_length(regs: &[Region]) -> usize {
     get_length_recursive(regs, 0)
 }
 
-fn core_read_params_to_bind_ctxs<'p>(list_vals: &[(usize, ListVal<'p>)]) -> Vec<BindContext<'p>> {
+pub fn core_read_params_to_bind_ctxs<'p>(
+    list_vals: &[(usize, ListVal<'p>)],
+) -> Vec<BindContext<'p>> {
     let mut ctxs = vec![BindContext::default()];
     for (index, list_val) in list_vals {
         let mut new_ctxs = vec![];

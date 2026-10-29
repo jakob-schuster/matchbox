@@ -50,8 +50,8 @@ peg::parser! {
         rule stmt_data() -> StmtData
             = name:name() _ "=" _ tm:tm() { StmtData::Let { name, tm } }
             // for now, just keep it to two kinds of if statement - boolean conditionals and match statements
-            / "if" _ tm:tm() _ "matches" _ branch:pattern_branch() { StmtData::If { branches: vec![Branch::new(tm.location.clone(), BranchData::Is { tm, branches: vec![branch] })] } }
-            / "if" _ tm:tm() _ "matches" _ "{" _ branches:whitespace_sensitive_list_without_final_delimiter(<pattern_branch()>, <whitespace_except_newline() [','|'\n']() _>) _ "}" { StmtData::If { branches: vec![Branch::new(tm.location.clone(), BranchData::Is { tm, branches })] } }
+            / "if" _ tm:tm() _ "matches" _ branch:pattern_branch() { StmtData::If { branches: vec![Branch::new(tm.location.clone(), BranchData::Matches { tm, branches: vec![branch] })] } }
+            / "if" _ tm:tm() _ "matches" _ "{" _ branches:whitespace_sensitive_list_without_final_delimiter(<pattern_branch()>, <whitespace_except_newline() [','|'\n']() _>) _ "}" { StmtData::If { branches: vec![Branch::new(tm.location.clone(), BranchData::Matches { tm, branches })] } }
             / "if"  _ tm:tm() _ stmt1:group_stmt() _ "else" _ stmt2:group_stmt() { StmtData::If { branches: vec![Branch { location: tm.location.clone(), data: BranchData::Bool { tm: tm.clone(), stmt: stmt1 } }, Branch { location: tm.location.clone(), data: BranchData::Bool { tm: Tm { location: tm.location.clone(), data: TmData::BoolLit { b: true } }, stmt: stmt2 } }] } }
             / "if"  _ tm:tm() _ stmt:group_stmt() { StmtData::If { branches: vec![Branch { location: tm.location.clone(), data: BranchData::Bool { tm, stmt } }] } }
             / tm:tm() { StmtData::Tm { tm } }

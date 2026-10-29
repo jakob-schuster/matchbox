@@ -1,3 +1,5 @@
+use crate::{myers::VarMyers, util::ran::Ran};
+
 #[derive(Clone)]
 pub struct Seq {
     bytes: Vec<u8>,
@@ -58,5 +60,17 @@ impl Seq {
                 )
             })
             .collect()
+    }
+}
+
+#[derive(Debug)]
+pub struct Mat {
+    pub ran: Ran<usize>,
+    pub dist: u8,
+}
+
+impl Mat {
+    pub fn new(ran: Ran<usize>, dist: u8) -> Mat {
+        Mat { ran, dist }
     }
 }

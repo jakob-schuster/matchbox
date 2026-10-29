@@ -1,7 +1,6 @@
+use crate::core::matcher::read_matcher2::elab2::core_read_params_to_bind_ctxs;
 use crate::core::matcher::read_matcher2::eval2::match_context::MatchContext;
 use crate::util::location::Location;
-
-use crate::core::matcher::read_matcher::Seq;
 
 use crate::core::EvalError;
 
@@ -167,266 +166,22 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
     }
 }
 
-impl<'p> A2<'p> {
-    pub fn get_result(&self) -> Result<impl Iterator<Item = (&env::Env<Val<'p>>, &Seq)>, InternalError> {
-        match &self.ctxs {
-            Either::Left(_) => {return Err(InternalError::new("message"));},
-            Either::Right(a) => {
-                Ok(a.iter().map(|(env, b)| {
-                    (env, match b {
-                        Either::Left(_) => return Err(InternalError::new("message")),
-                        Either::Right(seq) => seq,
-                    })
-                }))
-            },
-        }
-    }
+// pub fn core_read_params_to_ctxs<'p>(list_vals: &[ListVal<'p>]) -> Vec<env::Env<Val<'p>>> {
+//     let mut ctxs = vec![env::Env::default()];
+//     for list_val in list_vals {
+//         let mut new_ctxs = vec![];
+//         for ctx in &ctxs {
+//             for val in list_val.get_reference() {
+//                 let new_ctx = ctx.with(val.reference());
+//                 new_ctxs.push(new_ctx);
+//             }
+//         }
 
-    pub fn eval<'r,'a>(&'p self, global: &'a env::Env<Val<'p>>, local: &'a env::Env<Val<'r>>) -> Result<Vec<>>
+//         ctxs = new_ctxs;
+//     }
 
-    pub fn partial_eval<'r, 'a>(&self, global: &'a env::Env<Val<'p>>, local: &'a env::Env<Val<'r>>, location: &Location) -> Result<A2<'p>, EvalError>{
-        match &self.ctxs {
-            Either::Left((params, tm, error_tm)) => {
-                // go through and see if we can evaluate all the params
-                let mut new_params: Vec<Either<core::Tm, ListVal<'p>>> = vec![];
-                let mut all_evaluated = true;
-
-                for param in params {
-                    match param {
-                        Either::Left(param_tm) => {
-                            let param_val = match param_tm.eval2(global, local) {
-                                Ok(val) => val,
-                                Err(e) => return Err(e),
-                            };
-
-                            if param_val.is_neutral() {
-                                new_params.push(Either::Left(param_tm.clone()));
-                                all_evaluated = false;
-                            } else {
-                                match param_val {
-                                    Val::List { v } => {
-                                        new_params.push(Either::Right(v.concretise()))
-                                    },
-                                    _ => return Err(EvalError::new(location, "parameter was not a list value, despite type checking correctly?!"))
-                                }
-                            }
-                        },
-                        Either::Right(list_val) => new_params.push(Either::Right(list_val.concretise())),
-                    }
-                }
-
-                if all_evaluated {
-                    let list_vals = new_params.iter().map(|param| match param {
-                        Either::Left(_) => Err(EvalError::new(location, "parameter did not evaluate despite having passed the evaluation check?!")),
-                        Either::Right(list_val) => Ok(list_val.reference()),
-                    }).collect::<Result<Vec<_>,_>>()?; 
-
-                    let ctxs = core_read_params_to_ctxs(&list_vals);
-
-                    let ctxs2 = ctxs.iter().map(|ctx| (ctx.concretise(), Either::Left((Either::Left(tm.clone()), Either::Left(error_tm.clone()))))).collect();
-
-                    // evaluate further!
-                    A2 {
-                        ctxs: Either::Right(ctxs2),
-                    }.partial_eval(global, local, location)
-                } else {
-                    Ok(A2 {
-                        ctxs: Either::Left((new_params, tm.clone(), error_tm.clone()))
-                    })
-                }
-            },
-            Either::Right(b) => {
-                let mut new_b: Vec<(env::Env<Val<'p>>, Either<(Either<core::Tm, StrVal>, Either<core::Tm, f64>), Seq>)> = vec![];
-
-                for (env, seq_or) in b {
-                    match seq_or {
-                        Either::Left((tm_or, error_tm_or)) => {
-                            let new_local = env.get_slice().iter().fold(local.reference(), |local0, val| local.with(val.reference()));
-                            
-                            let tm1: Either<core::Tm, StrVal<'p>> = match tm_or {
-                                Either::Left(tm) => {
-                                    let val = tm.eval2(global, &new_local)?;
-
-                                    if val.is_neutral() {
-                                        Ok(Either::Left(tm.clone()))
-                                    } else {
-                                        match val {
-                                            Val::Str { s } => Ok(Either::Right(s.concretise())),
-                                            _ => Err(EvalError::new(location, "term did not produce Str despite type checking?!"))
-                                        }
-                                    }
-                                },
-                                Either::Right(val) => Ok(Either::Right(val.concretise())),
-                            }?;
-
-                            let error_tm1: Either<core::Tm, f64> = match error_tm_or {
-                                Either::Left(tm) => {
-                                    let val = tm.eval2(global, &new_local)?;
-
-                                    if val.is_neutral() {
-                                        Ok(Either::Left(tm.clone()))
-                                    } else {
-                                        match val {
-                                            Val::Num { n } => Ok(Either::Right(n)),
-                                            _ => Err(EvalError::new(location, "term did not produce Str despite type checking?!"))
-                                        }
-                                    }
-                                },
-                                Either::Right(val) => Ok(Either::Right(*val)),
-                            }?;
-
-                            let a = match (&tm1, &error_tm1) {
-                                (Either::Right(val), Either::Right(error)) => (env.concretise(), Either::Right(Seq::new(val.get_reference(), *error))),
-                                _ => (env.concretise(), Either::Left((tm1.clone(), error_tm1.clone())))
-                            };
-                            
-                            new_b.push(a);
-                        },
-                        Either::Right(seq) => {
-                            new_b.push((env.concretise(), Either::Right(seq.clone())));
-                        },
-                    }
-                }
-
-                Ok(A2 { ctxs: Either::Right(new_b) })
-            },
-        }
-    }
-}
-
-impl<'p> A<'p> {
-    pub fn eval<'r: 'a, 'a>(
-        &self,
-        global: &'a env::Env<Val<'p>>,
-        local: &'a env::Env<Val<'r>>,
-        location: &Location,
-    ) -> Result<&Vec<(BindContext<'p>, Seq)>, EvalError> {
-        todo!()
-    }
-
-    pub fn partial_eval<'r, 'a>(
-        &self,
-        global: &'a env::Env<Val<'p>>,
-        local: &'a env::Env<Val<'r>>,
-        location: &Location,
-    ) -> Result<A<'r>, EvalError>
-    where
-        'p: 'r,
-        'r: 'a,
-    {
-        match self {
-            A::Unevaluated { params, tm, error } => {
-                let mut new_params: Vec<Either<&'p core::Tm, ListVal<'r>>> = vec![];
-                for param in params {
-                    match param {
-                        Either::Left(tm) => {
-                            let val: Val<'r> = tm.eval2(global, local)?;
-
-                            if val.is_neutral() {
-                                new_params.push(Either::Left(tm));
-                            } else {
-                                match val {
-                                    Val::List { v } => {
-                                        let lv: ListVal<'r> = v;
-                                        new_params.push(Either::Right(lv));
-                                    }
-                                    _ => {
-                                        return Err(EvalError::new(
-                                            location,
-                                            "match parameter was not a list value?!",
-                                        ))
-                                    }
-                                }
-                            }
-                        }
-                        Either::Right(list_val) => {
-                            new_params.push(Either::Right(list_val.concretise()))
-                        }
-                    }
-                }
-
-                if new_params.iter().all(|a| a.is_right()) {
-                    let mut list_vals = vec![];
-                    for param in new_params {
-                        if let Either::Right(list_val) = param {
-                            list_vals.push(list_val);
-                        } else {
-                            return Err(EvalError::new(location, "message"));
-                        }
-                    }
-
-                    let ctxs = core_read_params_to_ctxs(&list_vals);
-                    Ok(A::PartialParams { ctxs, tm, error })
-                } else {
-                    Ok(A::Unevaluated {
-                        params: new_params,
-                        tm,
-                        error,
-                    })
-                }
-            }
-            A::PartialParams { ctxs, tm, error } => {
-                let val = tm.eval2(global, local)?;
-                let error_val = tm.eval2(global, local)?;
-
-                match (val.is_neutral(), error_val.is_neutral()) {
-                    // can't do anything
-                    (true, true) => Ok(A::PartialParams {
-                        ctxs: ctxs.iter().map(|ctx| ctx.reference()).collect(),
-                        tm: tm.clone(),
-                        error: error.clone(),
-                    }),
-                    // simplify out the error
-                    (true, false) => {
-                        let new_ctxs = ctxs.iter().map(|ctx| {
-                            let error_val = 
-                            
-                            (ctx.reference(), )}).collect();
-
-                        Ok(A::PartialError {
-                            ctxs: new_ctxs,
-                            tm: tm.clone(),
-                        })
-                    }
-                    // simplify out the
-                    (false, true) => {
-                        let s = match val {
-                            Val::Str { s } => s,
-                            _ => return Err(EvalError::new(location, "term was not a Str?!")),
-                        };
-
-                        Ok(A::PartialTm {
-                            ctxs: ctxs.iter().map(|ctx| (ctx,)),
-                            error: (),
-                        })
-                    }
-                    (false, false) => todo!(),
-                }
-            }
-            A::PartialTm { ctxs, error } => todo!(),
-            A::PartialError { ctxs, tm } => todo!(),
-            A::Evaluated { ctxs } => todo!(),
-        }
-    }
-}
-
-pub fn core_read_params_to_ctxs<'p>(list_vals: &[ListVal<'p>]) -> Vec<env::Env<Val<'p>>> {
-    let mut ctxs = vec![env::Env::default()];
-    for list_val in list_vals {
-        let mut new_ctxs = vec![];
-        for ctx in &ctxs {
-            for val in list_val.get_reference() {
-                let new_ctx = ctx.with(val.reference());
-                new_ctxs.push(new_ctx);
-            }
-        }
-
-        ctxs = new_ctxs;
-    }
-
-    ctxs
-}
-
+//     ctxs
+// }
 
 pub mod match_context {
     use crate::core::{
@@ -529,10 +284,10 @@ pub mod match_context {
     pub mod bind_context {
         use itertools::Itertools;
 
-use crate::core::InternalError;
+        use crate::core::InternalError;
 
+        use crate::core::eval2::env;
         use crate::core::Val;
-use crate::core::eval2::env;
 
         use std::collections::HashMap;
 
@@ -573,8 +328,23 @@ use crate::core::eval2::env;
                 }
             }
 
+            pub fn concretise<'q>(&self) -> BindContext<'q> {
+                BindContext {
+                    map: self
+                        .map
+                        .iter()
+                        .map(|(id, val)| (*id, val.concretise()))
+                        .collect(),
+                }
+            }
+
             pub fn to_env(&self, env0: &env::Env<Val<'p>>) -> env::Env<Val<'p>> {
-                self.map.iter().sorted_by_key(|(index, _)| **index).fold(env0.reference(), |env0, (_, val)| env0.with(val.reference()))
+                self.map
+                    .iter()
+                    .sorted_by_key(|(index, _)| **index)
+                    .fold(env0.reference(), |env0, (_, val)| {
+                        env0.with_val(val.reference())
+                    })
             }
 
             pub fn iter(&self) -> std::collections::hash_map::Iter<'_, usize, Val<'_>> {
@@ -615,10 +385,10 @@ impl<'p> Op<'p> {
                 ran,
                 fixed,
                 save,
-                a,
+                data,
             } => {
                 // we must be able to concretise A at this point; otherwise, we're in trouble
-                let ctxs = a.eval(global, local, location)?;
+                let ctxs: Vec<(BindContext<'p>, Seq)> = data.eval(global, local, location)?;
 
                 let filtered = ctxs.iter().filter(|(bs, _)| {
                     bs.iter().all(|(id, val)| {
@@ -650,7 +420,8 @@ impl<'p> Op<'p> {
                                 binds: local_binds.iter().fold(
                                     c0.binds.reference(),
                                     |old_bind_ctx, (id, val)| {
-                                        old_bind_ctx.with(*id, val.reference())
+                                        // bit costly... can we do this differently?
+                                        old_bind_ctx.with(*id, val.concretise())
                                     },
                                 ),
                                 locs: c.iter().enumerate().fold(
@@ -682,7 +453,7 @@ impl<'p> Op<'p> {
                             location.clone(),
                         )),
                     }?;
-                    let accumulated_adjusted = accumulated
+                    let accumulated_adjusted: Vec<MatchContext<'p>> = accumulated
                         .iter()
                         .filter(|c| c.edit_dist == best_dist)
                         .map(|c| c.with_edit_dist(c.edit_dist + c0.edit_dist))
@@ -693,6 +464,151 @@ impl<'p> Op<'p> {
                     Ok(vec![])
                 }
             }
+        }
+    }
+}
+
+impl<'p> OpData<'p> {
+    fn eval<'r, 'a>(
+        &self,
+        global: &'a env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        location: &Location,
+    ) -> Result<Vec<(BindContext<'p>, Seq)>, EvalError>
+    where
+        'p: 'r,
+        'r: 'a,
+    {
+        match self {
+            OpData::Unevaluated {
+                params,
+                tm,
+                error_tm,
+            } => {
+                let mut a = vec![];
+                for param in params {
+                    match param {
+                        ParamData::Unevaluated { index, tm, ty } => {
+                            let val = tm.eval2(global, local)?;
+
+                            let list_val =
+                                match val {
+                                    Val::List { v } => a.push((*index, v)),
+                                    _ => return Err(EvalError::from_internal(
+                                        InternalError::new(
+                                            "could not evaluate parameter even in read context?!",
+                                        ),
+                                        location.clone(),
+                                    )),
+                                };
+                        }
+                        ParamData::Evaluated { index, vals, ty } => {
+                            a.push((*index, vals.reference()))
+                        }
+                    }
+                }
+
+                let binds = core_read_params_to_bind_ctxs(&a[..]);
+                let mut new_binds = vec![];
+
+                for bind in binds {
+                    let new_local = bind.to_env(local);
+
+                    let val = tm.eval2(global, &new_local)?;
+                    let error_val = error_tm.eval2(global, &new_local)?;
+
+                    match (val, error_val) {
+                        (Val::Str { s }, Val::Num { n }) => {
+                            new_binds.push((bind.concretise(), Seq::new(s.get_reference(), n)))
+                        }
+                        _ => return Err(EvalError::from_internal(
+                            InternalError::new(
+                                "pattern term or error term had wrong value despite typechecking?!",
+                            ),
+                            location.clone(),
+                        )),
+                    }
+                }
+
+                Ok(new_binds)
+            }
+            OpData::PartialA {
+                binds,
+                tm,
+                error_tm,
+            } => {
+                let mut new_binds = vec![];
+
+                for bind in binds {
+                    let new_local = bind.to_env(local);
+
+                    let val = tm.eval2(global, &new_local)?;
+                    let error_val = error_tm.eval2(global, &new_local)?;
+
+                    match (val, error_val) {
+                        (Val::Str { s }, Val::Num { n }) => {
+                            new_binds.push((bind.reference(), Seq::new(s.get_reference(), n)))
+                        }
+                        _ => return Err(EvalError::from_internal(
+                            InternalError::new(
+                                "pattern term or error term had wrong value despite typechecking?!",
+                            ),
+                            location.clone(),
+                        )),
+                    }
+                }
+
+                Ok(new_binds)
+            }
+            OpData::PartialB { binds, error_tm } => {
+                let mut new_binds = vec![];
+
+                for (bind, str_val) in binds {
+                    let new_local = bind.to_env(local);
+                    let val = error_tm.eval2(global, &new_local)?;
+
+                    match val {
+                        Val::Num { n } => {
+                            new_binds.push((bind.reference(), Seq::new(str_val.get_reference(), n)))
+                        }
+                        _ => {
+                            return Err(EvalError::from_internal(
+                                InternalError::new(
+                                    "pattern error term had wrong value despite typechecking?!",
+                                ),
+                                location.clone(),
+                            ))
+                        }
+                    }
+                }
+
+                Ok(new_binds)
+            }
+            OpData::PartialC { binds, tm } => {
+                let mut new_binds = vec![];
+
+                for (bind, error_val) in binds {
+                    let new_local = bind.to_env(local);
+
+                    let val = tm.eval2(global, &new_local)?;
+
+                    match val {
+                        Val::Str { s } => new_binds
+                            .push((bind.reference(), Seq::new(s.get_reference(), *error_val))),
+                        _ => {
+                            return Err(EvalError::from_internal(
+                                InternalError::new(
+                                    "pattern term had wrong value despite typechecking?!",
+                                ),
+                                location.clone(),
+                            ))
+                        }
+                    }
+                }
+
+                Ok(new_binds)
+            }
+            OpData::FullyEvaluated { binds } => Ok(binds.to_vec()),
         }
     }
 }

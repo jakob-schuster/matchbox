@@ -207,6 +207,13 @@ pub enum TmData {
     Error,
 }
 
+impl Tm {
+    /// Creates a new error term given a location
+    pub fn new_error(location: &Location) -> Tm {
+        Tm::new(location.clone(), TmData::Error)
+    }
+}
+
 /// A function signature, which contains a list of arguments,
 /// a list of named optional arguments with default values, and a return type.
 #[derive(Clone)]
@@ -351,7 +358,7 @@ pub enum Val<'r> {
     /// context and any arguments.
     FunTy {
         args: Vec<Val<'r>>,
-        opts: Vec<(&'r [u8], Val<'r>, Tm)>,
+        opts: Vec<(Vec<u8>, Val<'r>, Tm)>,
         body: Arc<Val<'r>>,
     },
     Fun {
@@ -602,7 +609,7 @@ impl<'a> Val<'a> {
                 with_names.clone().all(|name| names.clone().contains(name))
                     && fields
                         .iter()
-                        .all(|field| match get(with_fields, field.name.clone()) {
+                        .all(|field| match get(with_fields, &field.name) {
                             // if it contains it, they must be equiv
                             Some(ty) => field.data.equiv(&ty),
                             // if it doesn't contain it, that's fine
@@ -670,7 +677,7 @@ impl<'a> Val<'a> {
     }
 
     /// Given another type, return the most precise type of the two.
-    pub fn most_precise(&self, arena: &'a Arena, other: &Val<'a>) -> Val<'a> {
+    pub fn most_precise(&self, other: &Val<'a>) -> Val<'a> {
         // takes a field name, and looks it up in the list of fields,
         // returning the type if one is found
         let get = |fields: &[CoreRecField<Val<'a>>], name: &[u8]| -> Option<Val<'a>> {
@@ -698,7 +705,7 @@ impl<'a> Val<'a> {
                         .map(|name| match (get(fields1, name), get(fields2, name)) {
                             // when both Recs contain the field name, take the most precise definition
                             (Some(ty1), Some(ty2)) => {
-                                CoreRecField::new(name, ty1.most_precise(arena, &ty2))
+                                CoreRecField::new(name, ty1.most_precise(&ty2))
                             }
 
                             // this should never happen

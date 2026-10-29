@@ -1,6 +1,5 @@
 use bio::data_structures::qgram_index::Match;
 use itertools::Itertools;
-pub mod read_matcher;
 pub mod read_matcher2;
 
 use crate::{

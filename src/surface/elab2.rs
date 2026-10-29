@@ -10,8 +10,8 @@ use crate::surface::elab::ElabError;
 use crate::surface::elab2::context::Address;
 use crate::surface::{elab2::context::Context, Tm};
 use crate::surface::{
-    Branch, BranchData, MatchMode, Pattern, PatternBranch, PatternData, Stmt, StmtData,
-    StrLitRegion, StrLitRegionData, TmData,
+    BinOp, Branch, BranchData, MatchMode, Pattern, PatternBranch, PatternData, Stmt, StmtData,
+    StrLitRegion, StrLitRegionData, TmData, UnOp,
 };
 use crate::util::bytes_to_string;
 use crate::util::location::Location;
@@ -1059,8 +1059,8 @@ impl Tm {
                     ),
                 }
             }
-            TmData::BinOp { tm0, tm1, op } => todo!(),
-            TmData::UnOp { tm, op } => todo!(),
+            TmData::BinOp { tm0, tm1, op } => op.infer(c0, &self.location, tm0, tm1),
+            TmData::UnOp { tm, op } => op.infer(c0, &self.location, tm),
         }
     }
 
@@ -1156,6 +1156,192 @@ impl MatchMode {
             MatchMode::All => core::matcher::read_matcher2::MatchMode::All,
             MatchMode::AllBest => core::matcher::read_matcher2::MatchMode::One,
             MatchMode::OneBest => core::matcher::read_matcher2::MatchMode::Unique,
+        }
+    }
+}
+
+impl BinOp {
+    /// Takes a binary operator and the types of its arguments,
+    /// returns the function that it corresponds to and the return type.
+    /// Checks that the input types are appropriate.
+    fn infer<'p>(
+        &self,
+        c0: &Context<'p>,
+        location: &Location,
+        tm0: &Tm,
+        tm1: &Tm,
+    ) -> (core::Tm, core::Val<'p>, Context<'p>) {
+        let non_parametric_operator =
+            |ty0: &Val<'p>, ty1: &Val<'p>, name: &str| -> (core::Tm, Val<'p>, Context<'p>) {
+                let (ctm0, c1) = tm0.check(c0, ty0);
+                let (ctm1, c2) = tm1.check(&c1, ty1);
+
+                let (head_ctm, head_ty) = match c0.lookup(name) {
+                    Some((address, ty)) => (
+                        core::Tm::new(
+                            location.clone(),
+                            match address {
+                                Address::Global { index } => core::TmData::Global { index },
+                                Address::Local { index } => core::TmData::Local { index },
+                            },
+                        ),
+                        ty.concretise(),
+                    ),
+                    None => {
+                        return (
+                            core::Tm::new_error(&location),
+                            Val::ErrorTy,
+                            c2.report(ElabError::new_unbound_name(location, &name)),
+                        )
+                    }
+                };
+
+                match head_ty {
+                    Val::FunTy { args, body, opts } => (
+                        core::Tm::new(
+                            location.clone(),
+                            core::TmData::FunApp {
+                                head: Arc::new(head_ctm),
+                                args: vec![ctm0, ctm1],
+                            },
+                        ),
+                        (*body).concretise(),
+                        c2,
+                    ),
+
+                    _ => panic!("operator has non-function type?!"),
+                }
+            };
+
+        match self {
+            BinOp::Plus => {
+                non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_plus")
+            }
+            BinOp::Times => {
+                non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_times")
+            }
+            BinOp::Minus => {
+                non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_minus")
+            }
+            BinOp::And => {
+                non_parametric_operator(&core::Val::BoolTy, &core::Val::BoolTy, "binary_and")
+            }
+            BinOp::Or => {
+                non_parametric_operator(&core::Val::BoolTy, &core::Val::BoolTy, "binary_or")
+            }
+            BinOp::Equal => {
+                non_parametric_operator(&core::Val::AnyTy, &core::Val::AnyTy, "binary_equal")
+            }
+            BinOp::NotEqual => {
+                non_parametric_operator(&core::Val::AnyTy, &core::Val::AnyTy, "binary_not_equal")
+            }
+            BinOp::LessThan => {
+                non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_less_than")
+            }
+            BinOp::GreaterThan => {
+                non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_greater_than")
+            }
+            BinOp::LessThanOrEqual => non_parametric_operator(
+                &core::Val::NumTy,
+                &core::Val::NumTy,
+                "binary_less_than_or_equal",
+            ),
+            BinOp::GreaterThanOrEqual => non_parametric_operator(
+                &core::Val::NumTy,
+                &core::Val::NumTy,
+                "binary_greater_than_or_equal",
+            ),
+            BinOp::Division => {
+                non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_division")
+            }
+            BinOp::Modulo => {
+                non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_modulo")
+            }
+            BinOp::Exponent => {
+                non_parametric_operator(&core::Val::NumTy, &core::Val::NumTy, "binary_exponent")
+            }
+        }
+    }
+}
+
+impl UnOp {
+    fn infer<'p>(
+        &self,
+        c0: &Context<'p>,
+        location: &Location,
+        tm: &Tm,
+    ) -> (core::Tm, Val<'p>, Context<'p>) {
+        let parametric_operator =
+            |name: &str, ctm: core::Tm, cx: Context<'p>| -> (core::Tm, Val<'p>, Context<'p>) {
+                let (head_ctm, head_ty) = match c0.lookup(name) {
+                    Some((address, ty)) => (
+                        core::Tm::new(
+                            location.clone(),
+                            match address {
+                                Address::Global { index } => core::TmData::Global { index },
+                                Address::Local { index } => core::TmData::Local { index },
+                            },
+                        ),
+                        ty.concretise(),
+                    ),
+                    None => {
+                        return (
+                            core::Tm::new_error(&location),
+                            Val::ErrorTy,
+                            cx.report(ElabError::new_unbound_name(location, &name)),
+                        )
+                    }
+                };
+
+                match head_ty {
+                    Val::FunTy { args, body, opts } => (
+                        core::Tm::new(
+                            location.clone(),
+                            core::TmData::FunApp {
+                                head: Arc::new(head_ctm),
+                                args: vec![ctm],
+                            },
+                        ),
+                        (*body).concretise(),
+                        cx,
+                    ),
+
+                    _ => panic!("operator has non-function type?!"),
+                }
+            };
+
+        let non_parametric_operator =
+            |ty: &Val<'p>, name: &str| -> (core::Tm, Val<'p>, Context<'p>) {
+                let (ctm, c1) = tm.check(c0, ty);
+
+                parametric_operator(name, ctm, c1)
+            };
+
+        match self {
+            UnOp::Minus => {
+                let (ctm0, cty0, c1) = tm.infer(c0);
+
+                if cty0.equiv(&core::Val::NumTy) {
+                    parametric_operator("unary_minus", ctm0, c1)
+                } else if cty0.equiv(&core::Val::StrTy) {
+                    parametric_operator("unary_reverse_complement", ctm0, c1)
+                } else if cty0.equiv(&core::Val::RecWithTy {
+                    fields: vec![CoreRecField::new(b"seq", core::Val::StrTy)],
+                }) {
+                    parametric_operator("unary_read_reverse_complement", ctm0, c1)
+                } else {
+                    (
+                        core::Tm::new_error(location),
+                        Val::ErrorTy,
+                        c1.report(ElabError::new(
+                            &ctm0.location,
+                            &format!("mismatched types: expected Num or Str, got {}", cty0),
+                        )),
+                    )
+                }
+            }
+
+            UnOp::Not => non_parametric_operator(&core::Val::BoolTy, "unary_not"),
         }
     }
 }

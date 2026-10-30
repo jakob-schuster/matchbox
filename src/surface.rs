@@ -5,11 +5,7 @@ use std::{collections::HashMap, fmt::Display, io::Read, ops::Deref, rc::Rc, sync
 use itertools::Itertools;
 
 use crate::{
-    core::{
-        self, library,
-        matcher::read_matcher::{self, LocTm, OpTm},
-        EvalError, Val,
-    },
+    core::{self, library, EvalError, Val},
     input::{FileType, InputError, Reader},
     parse,
     util::{

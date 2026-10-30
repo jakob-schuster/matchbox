@@ -300,7 +300,7 @@ pub struct FunData<'r> {
 impl<'r> FunData<'r> {
     /// Applies a function to a list of arguments, returning the result.
     pub fn app<'p: 'r>(&'p self, args: Vec<Val<'r>>) -> Result<Val<'r>, EvalError> {
-        let mut new_local = self.local.clone();
+        let mut new_local = self.local.reference();
         for arg in args {
             new_local.push(arg);
         }
@@ -818,7 +818,7 @@ pub enum Neutral<'a> {
     //
     FunTy {
         args: Vec<Val<'a>>,
-        opts: Vec<(&'a [u8], Val<'a>, Tm<'a>)>,
+        opts: Vec<(Vec<u8>, Val<'a>, Tm)>,
         body: Arc<Val<'a>>,
     },
     FunLit {

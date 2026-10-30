@@ -18,18 +18,23 @@ use crate::util::location::Location;
 use crate::util::recfield::CoreRecField;
 
 pub mod context {
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
     use crate::{
-        core::{eval2::env::Env, Neutral, Val},
+        core::{eval2::env::Env, InternalError, Neutral, Val},
         surface::elab::ElabError,
     };
 
     #[derive(Clone)]
     pub struct Context<'p> {
-        local: Env<Val<'p>>,
+        global_names: HashMap<String, usize>,
+        local_names: HashMap<String, usize>,
 
-        global: Env<Val<'p>>,
+        local_tys: Env<Val<'p>>,
+        local_tms: Env<Val<'p>>,
+
+        global_tys: Env<Val<'p>>,
+        global_tms: Env<Val<'p>>,
 
         // errors reported during elaboration
         errors: Vec<ElabError>,
@@ -44,8 +49,12 @@ pub mod context {
         /// simply making references of any carried values
         pub fn reference(&self) -> Context<'p> {
             Context {
-                local: self.local.reference(),
-                global: self.global.reference(),
+                global_names: self.global_names.clone(),
+                local_names: self.local_names.clone(),
+                local_tys: self.local_tys.reference(),
+                local_tms: self.local_tms.reference(),
+                global_tys: self.global_tys.reference(),
+                global_tms: self.global_tms.reference(),
                 errors: self.errors.clone(),
             }
         }
@@ -59,25 +68,36 @@ pub mod context {
 
         pub fn get_local_env(&self) -> Env<Val<'p>> {
             // make a reference, for efficiency
-            self.local.reference()
+            self.local_tms.reference()
         }
 
         pub fn get_global_env(&self) -> Env<Val<'p>> {
             // make a reference, for efficiency
-            self.global.reference()
+            self.global_tms.reference()
         }
 
-        pub fn lookup(&self, name: &str) -> Option<(Address, &Val<'p>)> {
-            todo!()
-        }
-
-        fn size(&self) -> usize {
-            todo!()
+        pub fn lookup(&self, name: &str) -> Result<Option<(Address, &Val<'p>)>, InternalError> {
+            match self.global_names.get(name) {
+                Some(index) => Ok(Some((
+                    Address::Global { index: *index }.clone(),
+                    self.global_tys.get(*index)?,
+                ))),
+                None => match self.local_names.get(name) {
+                    Some(index) => Ok(Some((
+                        Address::Local { index: *index },
+                        self.local_tys.get(*index)?,
+                    ))),
+                    None => Ok(None),
+                },
+            }
         }
 
         fn next_neutral(&self) -> Val<'static> {
+            // the neutral pulls the size from local because it is always in local
             Val::Neutral {
-                neutral: Neutral::Var { level: self.size() },
+                neutral: Neutral::Var {
+                    level: self.local_tys.len(),
+                },
             }
         }
 
@@ -86,8 +106,22 @@ pub mod context {
             'p: 'a,
         {
             // and then add this to the locals and assign the address correctly
+            let mut new_local_tms = self.local_tms.concretise();
+            let mut new_local_tys = self.local_tys.concretise();
+            let mut new_local_names = self.local_names.clone();
+            new_local_tys.push(ty.concretise());
+            new_local_tms.push(tm.concretise());
+            new_local_names.insert(name.to_string(), self.local_tys.len());
 
-            todo!()
+            Context {
+                local_tys: new_local_tys,
+                local_tms: new_local_tms,
+                global_tys: self.global_tys.concretise(),
+                global_tms: self.global_tms.concretise(),
+                errors: self.errors.clone(),
+                global_names: self.global_names.clone(),
+                local_names: new_local_names,
+            }
         }
 
         fn bind_global<'a, 'b>(&self, name: &str, ty: Val<'a>, tm: Val<'b>) -> Context<'b>
@@ -95,14 +129,22 @@ pub mod context {
             'p: 'a,
             'p: 'b,
         {
-            let global1: Env<Val<'p>> = self.global.with(tm.concretise());
-
-            // and then add this to the global and assign the address correctly
+            // and then add this to the locals and assign the address correctly
+            let mut new_global_tms = self.global_tms.concretise();
+            let mut new_global_tys = self.global_tys.concretise();
+            let mut new_global_names = self.global_names.clone();
+            new_global_tys.push(ty.concretise());
+            new_global_tms.push(tm.concretise());
+            new_global_names.insert(name.to_string(), self.global_tys.len());
 
             Context {
-                local: self.local.reference(),
-                global: global1,
+                local_tys: self.local_tys.concretise(),
+                local_tms: self.local_tms.concretise(),
+                global_tys: new_global_tys,
+                global_tms: new_global_tms,
                 errors: self.errors.clone(),
+                global_names: new_global_names,
+                local_names: self.local_names.clone(),
             }
         }
 
@@ -124,13 +166,18 @@ pub mod context {
         /// Retain the local bindings, but carry the global bindings and errors from the new context
         pub fn with_global_from(&self, c1: Context<'p>) -> Context<'p> {
             Context {
-                local: self.local.reference(),
-                global: c1.global.reference(),
+                global_names: c1.global_names.clone(),
+                local_names: self.local_names.clone(),
+                local_tys: self.local_tys.concretise(),
+                local_tms: self.local_tms.concretise(),
+                global_tys: c1.global_tys,
+                global_tms: c1.global_tms,
                 errors: c1.errors.clone(),
             }
         }
     }
 
+    #[derive(Clone)]
     pub enum Address {
         Global { index: usize },
         Local { index: usize },
@@ -240,11 +287,37 @@ impl Stmt {
                 )
             }
             StmtData::If { branches } => {
-                for branch in branches {}
+                let (cbranches, c1) = {
+                    let mut cx = c0.reference();
+                    let mut cbranches = vec![];
+                    for branch in branches {
+                        let (cbranch, cy) = branch.elab(c0);
+                        cx = cy;
+                        cbranches.push(cbranch);
+                    }
 
-                todo!();
+                    (cbranches, cx)
+                };
 
-                todo!()
+                // elaborate the rest of the statements, using the new context
+                let (rest_cstmt, c2) = match &rest[..] {
+                    [] => (
+                        core::Stmt::new(self.location.clone(), core::StmtData::End),
+                        c1,
+                    ),
+                    [next, rest1 @ ..] => next.elab(&c1, rest1),
+                };
+
+                (
+                    core::Stmt::new(
+                        self.location.clone(),
+                        core::StmtData::If {
+                            branches: cbranches,
+                            next: Arc::new(rest_cstmt),
+                        },
+                    ),
+                    c2,
+                )
             }
         }
     }
@@ -449,10 +522,28 @@ impl Pattern {
 }
 
 impl Tm {
+    /// Elaborate a term to a core term while checking it has a particular type.
     pub fn check<'p>(&self, c0: &Context<'p>, expected: &Val<'p>) -> (core::Tm, Context<'p>) {
-        todo!()
+        match (&self.data, expected) {
+            (_, _) => {
+                let (tm1, ty1, c1) = self.infer(c0);
+
+                if !ty1.equiv(expected) {
+                    (
+                        core::Tm::new_error(&self.location),
+                        c1.report(ElabError::new(
+                            &self.location,
+                            &format!("mismatched types: expected {}, found {}", expected, ty1),
+                        )),
+                    )
+                } else {
+                    (tm1, c1)
+                }
+            }
+        }
     }
 
+    /// Elaborate a term to a core term and infer its type.
     pub fn infer<'p, 'q>(&self, c0: &Context<'q>) -> (core::Tm, Val<'p>, Context<'q>)
     where
         'q: 'p,
@@ -466,7 +557,7 @@ impl Tm {
             TmData::Name { name } => {
                 // first, look up the name and see what kind of thing this is
                 match c0.lookup(name) {
-                    Some((address, ty)) => (
+                    Ok(Some((address, ty))) => (
                         core::Tm::new(
                             self.location.clone(),
                             match address {
@@ -478,10 +569,15 @@ impl Tm {
                         c0.clone(),
                     ),
                     // looking up unbound names is reported as an error
-                    None => (
+                    Ok(None) => (
                         core::Tm::new_error(&self.location),
                         Val::ErrorTy,
                         c0.report(ElabError::new_unbound_name(&self.location, name)),
+                    ),
+                    Err(e) => (
+                        core::Tm::new_error(&self.location),
+                        Val::ErrorTy,
+                        c0.report(ElabError::from_internal_error(self.location.clone(), e)),
                     ),
                 }
             }
@@ -1064,28 +1160,104 @@ impl Tm {
         }
     }
 
+    /// Get the set of ids contained in a term.
     pub fn get_ids(&self) -> Vec<String> {
         match &self.data {
-            TmData::BoolLit { .. } | TmData::NumLit { .. } => vec![],
-            TmData::StrLit { regs } => todo!(),
-            TmData::RecTy { fields } => todo!(),
-            TmData::RecWithTy { fields } => todo!(),
-            TmData::RecLit { fields } => todo!(),
-            TmData::RecProj { tm, name } => todo!(),
-            TmData::ListTy { tm } => todo!(),
-            TmData::ListLit { tms } => todo!(),
-            TmData::FunTy { args, opts, body } => todo!(),
-            TmData::FunLit { args, opts, body } => todo!(),
+            TmData::BoolLit { b } => vec![],
+            TmData::NumLit { n } => vec![],
+            TmData::StrLit { regs } => regs
+                .iter()
+                .flat_map(|reg| match &reg.data {
+                    StrLitRegionData::Str { s } => vec![],
+                    StrLitRegionData::Tm { tm } => tm.get_ids(),
+                })
+                .collect(),
+            TmData::RecTy { fields } => fields
+                .iter()
+                .flat_map(|field| field.data.get_ids())
+                .collect(),
+            TmData::RecWithTy { fields } => fields
+                .iter()
+                .flat_map(|field| field.data.get_ids())
+                .collect(),
+            TmData::RecLit { fields } => fields
+                .iter()
+                .flat_map(|field| field.data.get_ids())
+                .collect(),
+            TmData::RecProj { tm, name } => tm.get_ids(),
+            TmData::FunTy { args, body, opts } => args
+                .iter()
+                .flat_map(Tm::get_ids)
+                .chain(
+                    opts.iter()
+                        .flat_map(|param| {
+                            param
+                                .ty
+                                .get_ids()
+                                .into_iter()
+                                .chain(param.tm.get_ids())
+                                .collect::<Vec<_>>()
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .chain(body.get_ids())
+                .collect(),
+            TmData::FunLit { args, opts, body } => args
+                .iter()
+                .flat_map(|arg| arg.ty.get_ids())
+                .chain(
+                    opts.into_iter()
+                        .flat_map(|param| {
+                            param
+                                .ty
+                                .get_ids()
+                                .into_iter()
+                                .chain(param.tm.get_ids())
+                                .collect::<Vec<_>>()
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .chain(body.get_ids())
+                .collect(),
             TmData::FunLitForeign {
                 args,
-                opts,
                 ty,
                 name,
-            } => todo!(),
-            TmData::FunApp { head, args, opts } => todo!(),
-            TmData::BinOp { tm0, tm1, op } => todo!(),
-            TmData::UnOp { tm, op } => todo!(),
+                opts,
+            } => args
+                .iter()
+                .flat_map(|arg| arg.ty.get_ids())
+                .chain(
+                    opts.into_iter()
+                        .flat_map(|param| {
+                            param
+                                .ty
+                                .get_ids()
+                                .into_iter()
+                                .chain(param.tm.get_ids())
+                                .collect::<Vec<_>>()
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .chain(ty.get_ids())
+                .collect(),
+            TmData::FunApp { head, args, opts } => head
+                .get_ids()
+                .into_iter()
+                .chain(args.iter().flat_map(Tm::get_ids).collect::<Vec<_>>())
+                .chain(
+                    opts.into_iter()
+                        .flat_map(|(_, val)| val.get_ids())
+                        .collect::<Vec<_>>(),
+                )
+                .collect(),
+            TmData::BinOp { tm0, tm1, op } => {
+                tm0.get_ids().into_iter().chain(tm1.get_ids()).collect()
+            }
+            TmData::UnOp { tm, op } => tm.get_ids(),
             TmData::Name { name } => vec![name.clone()],
+            TmData::ListTy { tm } => tm.get_ids(),
+            TmData::ListLit { tms } => tms.iter().flat_map(Tm::get_ids).collect(),
         }
     }
 }
@@ -1177,7 +1349,7 @@ impl BinOp {
                 let (ctm1, c2) = tm1.check(&c1, ty1);
 
                 let (head_ctm, head_ty) = match c0.lookup(name) {
-                    Some((address, ty)) => (
+                    Ok(Some((address, ty))) => (
                         core::Tm::new(
                             location.clone(),
                             match address {
@@ -1187,11 +1359,18 @@ impl BinOp {
                         ),
                         ty.concretise(),
                     ),
-                    None => {
+                    Ok(None) => {
                         return (
                             core::Tm::new_error(&location),
                             Val::ErrorTy,
                             c2.report(ElabError::new_unbound_name(location, &name)),
+                        )
+                    }
+                    Err(e) => {
+                        return (
+                            core::Tm::new_error(&location),
+                            Val::ErrorTy,
+                            c2.report(ElabError::from_internal_error(location.clone(), e)),
                         )
                     }
                 };
@@ -1274,7 +1453,7 @@ impl UnOp {
         let parametric_operator =
             |name: &str, ctm: core::Tm, cx: Context<'p>| -> (core::Tm, Val<'p>, Context<'p>) {
                 let (head_ctm, head_ty) = match c0.lookup(name) {
-                    Some((address, ty)) => (
+                    Ok(Some((address, ty))) => (
                         core::Tm::new(
                             location.clone(),
                             match address {
@@ -1284,11 +1463,18 @@ impl UnOp {
                         ),
                         ty.concretise(),
                     ),
-                    None => {
+                    Ok(None) => {
                         return (
                             core::Tm::new_error(&location),
                             Val::ErrorTy,
                             cx.report(ElabError::new_unbound_name(location, &name)),
+                        )
+                    }
+                    Err(e) => {
+                        return (
+                            core::Tm::new_error(&location),
+                            Val::ErrorTy,
+                            cx.report(ElabError::from_internal_error(location.clone(), e)),
                         )
                     }
                 };

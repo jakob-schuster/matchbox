@@ -19,6 +19,12 @@ pub mod env {
         pub(crate) vec: Vec<A>,
     }
 
+    impl<A> Env<A> {
+        pub fn len(&self) -> usize {
+            self.vec.len()
+        }
+    }
+
     impl<A: Clone + Display> Env<A> {
         /// Push an element to the top of the environment.
         /// Returns the index at which the value is found.
@@ -282,7 +288,9 @@ impl Tm {
                 // then, evaluate the opts
                 let opts = opts
                     .iter()
-                    .map(|(name, ty, val)| Ok((&name[..], ty.eval2(global, local)?, val.clone())))
+                    .map(|(name, ty, val)| {
+                        Ok((name.clone(), ty.eval2(global, local)?, val.clone()))
+                    })
                     .collect::<Result<Vec<_>, EvalError>>()?;
 
                 // then, evaluate the body
@@ -311,7 +319,7 @@ impl Tm {
                 data: FunData {
                     global: global.clone(),
                     local: local.clone(),
-                    body: *body.clone(),
+                    body: body.as_ref().clone(),
                 },
             }),
             TmData::FunForeignLit { body } => Ok(Val::FunForeign { body: body.clone() }),
@@ -331,15 +339,16 @@ impl Tm {
                     })
                 } else {
                     match head_val {
-                        Val::Fun { data } => data.app(args_vals),
+                        // WARN these concretises potentially VERY costly
+                        Val::Fun { data } => Ok(data.app(args_vals)?.concretise()),
                         Val::FunForeign { body } => body(&self.location, &args_vals),
-                        Val::FunReturnTyAwaiting { data } => data.app(args_vals),
+                        Val::FunReturnTyAwaiting { data } => Ok(data.app(args_vals)?.concretise()),
                         _ => Err(EvalError::from_internal(
                             InternalError::new(&format!(
                                 "trying to apply '{}' as a function?!",
                                 head_val
                             )),
-                            self.location,
+                            self.location.clone(),
                         )),
                     }
                 }

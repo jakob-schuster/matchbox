@@ -3,7 +3,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 
 use crate::{
-    core::{self, library, EvalError, Val},
+    core::{self, library, EvalError, InternalError, Val},
     surface::{
         elab::context::Context, BinOp, Branch, BranchData, MatchMode, Pattern, PatternBranch,
         PatternData, Prog, Stmt, StmtData, StrLitRegion, StrLitRegionData, Tm, TmData, UnOp,
@@ -61,6 +61,14 @@ impl ElabError {
         ElabError {
             location: eval_error.location,
             message: eval_error.message,
+        }
+    }
+
+    /// Convert an InternalError to an ElabError
+    pub fn from_internal_error(location: Location, internal_error: InternalError) -> ElabError {
+        ElabError {
+            location,
+            message: internal_error.message,
         }
     }
 }

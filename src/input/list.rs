@@ -4,7 +4,7 @@ use itertools::{Itertools, PeekingNext};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
-    core::{library::unary_read_reverse_complement, Effect, Val},
+    core::{eval2::env::Env, library::unary_read_reverse_complement, Effect, StrVal, Val},
     input::{ExecError, ProgressSummary, Reader},
     util::{location::Location, Arena},
 };
@@ -24,9 +24,8 @@ impl ListReader {
 impl Reader for ListReader {
     fn map<'p>(
         &mut self,
-        prog: &crate::core::Prog<'p>,
-        env: &crate::util::env::Env<crate::core::Val<'p>>,
-        cache: &crate::util::cache::Cache<crate::core::Val<'p>>,
+        prog: &'p crate::core::Prog<'p>,
+        global: &'p Env<crate::core::Val<'p>>,
         output_handler: &mut crate::output::OutputHandler,
         progress: &mut dyn super::Progress,
     ) -> Result<(), super::ExecError> {
@@ -40,11 +39,12 @@ impl Reader for ListReader {
                     .par_iter()
                     .map(|res| match res {
                         Ok(read) => {
-                            let arena = Arena::new();
+                            let val = Val::Str {
+                                s: StrVal::new_reference(read.as_bytes()),
+                            };
 
-                            let val = Val::Str { s: read.as_bytes() };
-
-                            prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
+                            prog.eval2(global, &Env::default(), val)
+                                .map_err(ExecError::Eval)
                         }
                         Err(_) => Err(ExecError::Input(crate::input::InputError::Read)),
                     })
@@ -70,7 +70,7 @@ impl Reader for ListReader {
         (&mut self.lines).count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a crate::util::Arena) -> crate::core::Val<'a> {
+    fn get_ty<'a>(&self) -> crate::core::Val<'a> {
         crate::core::Val::StrTy
     }
 }
@@ -90,9 +90,8 @@ impl RevCompListReader {
 impl Reader for RevCompListReader {
     fn map<'p>(
         &mut self,
-        prog: &crate::core::Prog<'p>,
-        env: &crate::util::env::Env<crate::core::Val<'p>>,
-        cache: &crate::util::cache::Cache<crate::core::Val<'p>>,
+        prog: &'p crate::core::Prog<'p>,
+        global: &'p Env<crate::core::Val<'p>>,
         output_handler: &mut crate::output::OutputHandler,
         progress: &mut dyn super::Progress,
     ) -> Result<(), super::ExecError> {
@@ -106,11 +105,10 @@ impl Reader for RevCompListReader {
                     .par_iter()
                     .map(|res| match res {
                         Ok(read) => {
-                            let arena = Arena::new();
-
-                            let val = Val::Str { s: read.as_bytes() };
+                            let val = Val::Str {
+                                s: StrVal::new_reference(read.as_bytes()),
+                            };
                             let reverse_complement_val = unary_read_reverse_complement(
-                                &arena,
                                 &Location::new(0, 0),
                                 &vec![val.clone()],
                             )
@@ -118,10 +116,10 @@ impl Reader for RevCompListReader {
                             .unwrap();
 
                             let effs_forward = prog
-                                .eval(&arena, env, cache, val)
+                                .eval2(global, &Env::default(), val)
                                 .map_err(ExecError::Eval)?;
                             let effs_reverse = prog
-                                .eval(&arena, env, cache, reverse_complement_val)
+                                .eval2(global, &Env::default(), reverse_complement_val)
                                 .map_err(ExecError::Eval)?;
 
                             Ok(effs_forward.into_iter().chain(effs_reverse).collect_vec())
@@ -150,7 +148,7 @@ impl Reader for RevCompListReader {
         (&mut self.lines).count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a crate::util::Arena) -> crate::core::Val<'a> {
+    fn get_ty<'a>(&self) -> crate::core::Val<'a> {
         crate::core::Val::StrTy
     }
 }

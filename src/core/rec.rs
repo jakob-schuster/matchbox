@@ -21,6 +21,7 @@ pub enum RecError {
 #[derive(Clone)]
 pub enum Rec2<'r> {
     Concrete { r: ConcreteRec<'r> },
+    FullyConcrete { r: FullyConcreteRec<'r> },
     FastaRead { r: FastaRead<'r> },
     FastqRead { r: FastqRead<'r> },
     SamRead { r: SamRead<'r> },

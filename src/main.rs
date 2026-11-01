@@ -40,7 +40,7 @@ use clap::{
 
 use crate::{
     input::{CLIFileType, ExecError},
-    surface::MatchMode,
+    surface::{elab2::elab_error::ElabError, MatchMode},
 };
 
 fn main() {
@@ -228,8 +228,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
 
     // establish a global-level arena and context,
     // for values allocated during elaboration
-    let arena = Arena::new();
-    let ctx = standard_library(&arena);
+    let c0 = standard_library();
 
     // parse the standard library
     let library_code = String::from_utf8(include_bytes!("standard_library.mb").to_vec()).unwrap();
@@ -239,19 +238,15 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .unwrap();
 
     // elaborate to generate the context
-    let ctx = elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog))
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-        // should never unwrap, because program terminates
-        .unwrap();
+    let (_, c1) = library_prog.elab(&c0);
 
     // parse the args program
     let args_prog = parse(&format!("args = {{{}}}", global_config.args), global_config)
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         .unwrap();
 
-    let ctx = elab_prog_for_ctx(&arena, &ctx, arena.alloc(args_prog))
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-        .unwrap();
+    // elaborate to cache the args value into the context
+    let (_, c2) = args_prog.elab(&c1);
 
     // parse the program
     let prog = parse(code, global_config)
@@ -265,28 +260,21 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .unwrap();
 
     // elaborate to a core program
-    let core_prog = elab_prog(
-        &arena,
-        &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena)),
-        arena.alloc(prog),
-    )
-    .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-    // should never unwrap, because program terminates
-    .unwrap();
-
-    // cache the values
-    let (core_prog, cache) = core_prog
-        .cache(
-            &arena,
-            &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena))
-                .tms,
-        )
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-        // should never unwrap, because program terminates
-        .unwrap();
+    let (core_prog, c3) = prog.elab(&c2);
 
     if global_config.input_reads.debug_compilation {
         eprintln!("{}", core_prog);
+    }
+
+    // at this point, check for elab errors
+    if !c3.get_errors().is_empty() {
+        for error in c3.get_errors() {
+            // WARN currently errors in standard library or arg struct will be printed wrong
+            GenericError::from(error).codespan_print(global_config);
+        }
+
+        // terminate execution
+        exit(1);
     }
 
     // create an output handler, to receive output effects
@@ -298,14 +286,13 @@ fn run(code: &str, global_config: &GlobalConfig) {
     // should never unwrap
     .unwrap();
     // create the standard library
-    let env = ctx.tms;
 
     // process the reads
-    reader_with_bar
-        .map(&core_prog, &env, &cache, &mut output_handler)
+    let a = reader_with_bar
+        .map(&core_prog, &c3.get_global_env(), &mut output_handler)
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap
-        .unwrap()
+        .unwrap();
 }
 
 /// Given the name of a matchbox script,
@@ -362,6 +349,12 @@ struct GenericError {
 impl GenericError {
     /// Pretty prints the error with codespan, and terminates execution
     fn codespan_print_and_exit(&self, global_config: &GlobalConfig) {
+        self.codespan_print(global_config);
+        exit(1)
+    }
+
+    /// Pretty prints the error with codespan
+    fn codespan_print(&self, global_config: &GlobalConfig) {
         let mut writer = StandardStream::stderr(term::termcolor::ColorChoice::Always);
         let config = codespan_reporting::term::Config::default();
 
@@ -379,7 +372,6 @@ impl GenericError {
         };
 
         term::emit_to_io_write(&mut writer, &config, &file, &diagnostic);
-        exit(1)
     }
 }
 

@@ -17,8 +17,10 @@ use crate::{
     },
     surface::{
         self,
-        elab::ElabError,
-        elab2::context::{Address, Context},
+        elab2::{
+            context::{Address, Context},
+            elab_error::ElabError,
+        },
         MatchMode, ReadParameter, Region, RegionData,
     },
     util::{location::Location, ran::Ran},

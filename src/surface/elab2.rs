@@ -5,24 +5,90 @@ use itertools::Itertools;
 use crate::core::eval2::env::Env;
 use crate::core::matcher::read_matcher2::ReadMatcher;
 use crate::core::matcher::Matcher;
-use crate::core::{self, library, EvalError, FunData, StrVal, Val};
-use crate::surface::elab::ElabError;
+use crate::core::{self, library, EvalError, FunData, InternalError, StrVal, Val};
 use crate::surface::elab2::context::Address;
 use crate::surface::{elab2::context::Context, Tm};
 use crate::surface::{
-    BinOp, Branch, BranchData, MatchMode, Pattern, PatternBranch, PatternData, Stmt, StmtData,
-    StrLitRegion, StrLitRegionData, TmData, UnOp,
+    BinOp, Branch, BranchData, MatchMode, Pattern, PatternBranch, PatternData, Prog, Stmt,
+    StmtData, StrLitRegion, StrLitRegionData, TmData, UnOp,
 };
 use crate::util::bytes_to_string;
 use crate::util::location::Location;
 use crate::util::recfield::CoreRecField;
+
+pub mod elab_error {
+    use crate::core::EvalError;
+    use crate::core::InternalError;
+
+    use crate::core::Val;
+
+    use crate::util::location::Location;
+
+    /// An error raised if there was a problem in the surface syntax,
+    /// usually as a result of type errors. This is normal, and should be rendered
+    /// nicely.
+    #[derive(Debug, Clone)]
+    pub struct ElabError {
+        pub location: Location,
+        pub message: String,
+    }
+
+    impl ElabError {
+        /// Given a location and a custom message, create a new ElabError.
+        pub fn new(location: &Location, message: &str) -> ElabError {
+            ElabError {
+                location: location.clone(),
+                message: message.to_string(),
+            }
+        }
+
+        /// Create a new ElabError resulting from an unbound name.
+        pub fn new_unbound_name(location: &Location, name: &str) -> ElabError {
+            ElabError {
+                location: location.clone(),
+                message: format!("unbound name '{}'", name),
+            }
+        }
+
+        /// Create a new ElabError resulting from accessing a non-existent record field.
+        pub fn new_non_existent_field_access<'a>(
+            location: &Location,
+            name: &str,
+            ty: &Val<'a>,
+        ) -> ElabError {
+            ElabError {
+                location: location.clone(),
+                message: format!(
+                    "trying to access non-existent field '{}' from a record with fields {}",
+                    name, ty,
+                ),
+            }
+        }
+
+        /// Convert an EvalError to an ElabError.
+        pub fn from_eval_error(eval_error: EvalError) -> ElabError {
+            ElabError {
+                location: eval_error.location,
+                message: eval_error.message,
+            }
+        }
+
+        /// Convert an InternalError to an ElabError
+        pub fn from_internal_error(location: Location, internal_error: InternalError) -> ElabError {
+            ElabError {
+                location,
+                message: internal_error.message,
+            }
+        }
+    }
+}
 
 pub mod context {
     use std::{collections::HashMap, sync::Arc};
 
     use crate::{
         core::{eval2::env::Env, InternalError, Neutral, Val},
-        surface::elab::ElabError,
+        surface::elab2::elab_error::ElabError,
     };
 
     #[derive(Clone)]
@@ -74,6 +140,10 @@ pub mod context {
         pub fn get_global_env(&self) -> Env<Val<'p>> {
             // make a reference, for efficiency
             self.global_tms.reference()
+        }
+
+        pub fn get_errors(&self) -> Vec<ElabError> {
+            self.errors.clone()
         }
 
         pub fn lookup(&self, name: &str) -> Result<Option<(Address, &Val<'p>)>, InternalError> {
@@ -184,6 +254,25 @@ pub mod context {
     }
 }
 
+impl Prog {
+    pub fn elab<'p>(&self, c0: &Context<'p>) -> (core::Prog<'p>, Context<'p>) {
+        let (cstmt, c1) = match &self.data.stmts[..] {
+            // elaborate all the statements in a program
+            [next, rest @ ..] => next.elab(c0, rest),
+            // handle the empty program
+            [] => (
+                core::Stmt::new(self.location.clone(), core::StmtData::End),
+                c0.reference(),
+            ),
+        };
+
+        (
+            core::Prog::new(self.location.clone(), core::ProgData { stmt: cstmt }),
+            c1,
+        )
+    }
+}
+
 impl Stmt {
     fn elab<'p>(&self, c0: &Context<'p>, rest: &[Stmt]) -> (core::Stmt<'p>, Context<'p>) {
         match &self.data {
@@ -227,7 +316,10 @@ impl Stmt {
                 let (val, c2): (Val<'p>, Context<'_>) =
                     match ctm.eval2(&c1.get_global_env(), &c1.get_local_env()) {
                         Ok(val) => (val.concretise(), c1),
-                        Err(e) => (Val::Error, c1.report(ElabError::from_eval_error(e))),
+                        Err(e) => (
+                            Val::Error,
+                            c1.report(elab_error::ElabError::from_eval_error(e)),
+                        ),
                     };
 
                 // update the context accordingly
@@ -354,7 +446,7 @@ impl Branch {
 
                     // check that we can equate the branches
                     cx = if !final_ty.equiv(&core_branch_ty) {
-                        cx.report(ElabError::new(
+                        cx.report(elab_error::ElabError::new(
                             &self.location,
                             &format!(
                                 "mismatched types: expected {}, found {}",
@@ -398,7 +490,7 @@ impl PatternBranch {
         let (matcher, ty1, bind_tys) = self.data.pat.infer(c0, ty);
 
         let c1 = if !ty1.equiv(ty) {
-            c0.report(ElabError::new(
+            c0.report(elab_error::ElabError::new(
                 &self.location,
                 &format!("mismatched types: expected {}, found {}", ty, ty1),
             ))
@@ -531,7 +623,7 @@ impl Tm {
                 if !ty1.equiv(expected) {
                     (
                         core::Tm::new_error(&self.location),
-                        c1.report(ElabError::new(
+                        c1.report(elab_error::ElabError::new(
                             &self.location,
                             &format!("mismatched types: expected {}, found {}", expected, ty1),
                         )),
@@ -572,12 +664,18 @@ impl Tm {
                     Ok(None) => (
                         core::Tm::new_error(&self.location),
                         Val::ErrorTy,
-                        c0.report(ElabError::new_unbound_name(&self.location, name)),
+                        c0.report(elab_error::ElabError::new_unbound_name(
+                            &self.location,
+                            name,
+                        )),
                     ),
                     Err(e) => (
                         core::Tm::new_error(&self.location),
                         Val::ErrorTy,
-                        c0.report(ElabError::from_internal_error(self.location.clone(), e)),
+                        c0.report(elab_error::ElabError::from_internal_error(
+                            self.location.clone(),
+                            e,
+                        )),
                     ),
                 }
             }
@@ -685,13 +783,13 @@ impl Tm {
                                 field.data.reference(),
                                 c1,
                             ),
-                            None => (core::Tm::new_error(&self.location), Val::ErrorTy, c1.report(ElabError::new(&self.location, "trying to access field of a value which doesn't have any fields"))),
+                            None => (core::Tm::new_error(&self.location), Val::ErrorTy, c1.report(elab_error::ElabError::new(&self.location, "trying to access field of a value which doesn't have any fields"))),
                         }
                     }
                     _ => (
                         core::Tm::new_error(&self.location),
                         Val::ErrorTy,
-                        c1.report(ElabError::new_non_existent_field_access(
+                        c1.report(elab_error::ElabError::new_non_existent_field_access(
                             &self.location,
                             name,
                             &ty,
@@ -723,7 +821,7 @@ impl Tm {
 
                     (cx, final_ty) = if !final_ty.equiv(&ty) {
                         (
-                            cx.report(ElabError::new(
+                            cx.report(elab_error::ElabError::new(
                                 &self.location,
                                 &format!("mismatched types: expected {}, found {}", final_ty, ty),
                             )),
@@ -766,7 +864,7 @@ impl Tm {
                                     return Err((
                                         core::Tm::new_error(&self.location),
                                         Val::ErrorTy,
-                                        c1.report(ElabError::from_eval_error(e)),
+                                        c1.report(elab_error::ElabError::from_eval_error(e)),
                                     ))
                                 }
                             };
@@ -811,7 +909,10 @@ impl Tm {
                         let (val, cy) =
                             match arg_ty_ctm.eval2(&c0.get_global_env(), &c0.get_local_env()) {
                                 Ok(val) => (val.concretise(), cx),
-                                Err(e) => (Val::Error, cx.report(ElabError::from_eval_error(e))),
+                                Err(e) => (
+                                    Val::Error,
+                                    cx.report(elab_error::ElabError::from_eval_error(e)),
+                                ),
                             };
                         cx = cy;
 
@@ -836,7 +937,7 @@ impl Tm {
                                     return (
                                         core::Tm::new_error(&self.location),
                                         Val::ErrorTy,
-                                        cx.report(ElabError::from_eval_error(e)),
+                                        cx.report(elab_error::ElabError::from_eval_error(e)),
                                     )
                                 }
                             };
@@ -902,7 +1003,10 @@ impl Tm {
                         let (val, cy) =
                             match arg_ty_ctm.eval2(&c0.get_global_env(), &c0.get_local_env()) {
                                 Ok(val) => (val.concretise(), cx),
-                                Err(e) => (Val::Error, cx.report(ElabError::from_eval_error(e))),
+                                Err(e) => (
+                                    Val::Error,
+                                    cx.report(elab_error::ElabError::from_eval_error(e)),
+                                ),
                             };
                         cx = cy;
 
@@ -927,7 +1031,7 @@ impl Tm {
                                     return (
                                         core::Tm::new_error(&self.location),
                                         Val::ErrorTy,
-                                        cx.report(ElabError::from_eval_error(e)),
+                                        cx.report(elab_error::ElabError::from_eval_error(e)),
                                     )
                                 }
                             };
@@ -958,7 +1062,10 @@ impl Tm {
                 let (cty_val, c4) =
                     match cty.eval2(&c_inner.get_global_env(), &c_inner.get_local_env()) {
                         Ok(val) => (val.concretise(), c3),
-                        Err(e) => (Val::Error, c3.report(ElabError::from_eval_error(e))),
+                        Err(e) => (
+                            Val::Error,
+                            c3.report(elab_error::ElabError::from_eval_error(e)),
+                        ),
                     };
 
                 let body_ty = if cty_val.is_neutral() {
@@ -981,7 +1088,7 @@ impl Tm {
                         return (
                             core::Tm::new_error(&self.location),
                             Val::ErrorTy,
-                            c4.report(ElabError::from_eval_error(e)),
+                            c4.report(elab_error::ElabError::from_eval_error(e)),
                         )
                     }
                 };
@@ -1015,7 +1122,7 @@ impl Tm {
                             return (
                                 core::Tm::new_error(&self.location),
                                 Val::ErrorTy,
-                                c1.report(ElabError::new(
+                                c1.report(elab_error::ElabError::new(
                                     &self.location,
                                     &format!(
                                         "function was given {} arguments, expected {}",
@@ -1034,7 +1141,7 @@ impl Tm {
                                 .contains(&name.as_bytes().to_vec())
                             {
                                 return (core::Tm::new_error(&self.location),Val::ErrorTy, c1.report(
-                                ElabError::new(&self.location, &format!("found optional argument named '{}'; only expected optional arguments {{ {} }}", name, opts_ty.iter().map(|(name, ty, _)| format!("{}: {}", bytes_to_string(name).unwrap(), ty)).join(", ")))
+                                elab_error::ElabError::new(&self.location, &format!("found optional argument named '{}'; only expected optional arguments {{ {} }}", name, opts_ty.iter().map(|(name, ty, _)| format!("{}: {}", bytes_to_string(name).unwrap(), ty)).join(", ")))
                                 ));
                             }
                         }
@@ -1092,7 +1199,9 @@ impl Tm {
                                                 return (
                                                     core::Tm::new_error(&self.location),
                                                     Val::ErrorTy,
-                                                    c3.report(ElabError::from_eval_error(e)),
+                                                    c3.report(
+                                                        elab_error::ElabError::from_eval_error(e),
+                                                    ),
                                                 )
                                             }
                                         };
@@ -1117,7 +1226,7 @@ impl Tm {
                                         return (
                                             core::Tm::new_error(&self.location),
                                             Val::ErrorTy,
-                                            c3.report(ElabError::from_eval_error(e)),
+                                            c3.report(elab_error::ElabError::from_eval_error(e)),
                                         )
                                     }
                                 };
@@ -1145,7 +1254,7 @@ impl Tm {
                     _ => (
                         core::Tm::new_error(&self.location),
                         Val::ErrorTy,
-                        c1.report(ElabError::new(
+                        c1.report(elab_error::ElabError::new(
                             &self.location,
                             &format!(
                                 "trying to apply something as a function when it's {}",
@@ -1363,14 +1472,17 @@ impl BinOp {
                         return (
                             core::Tm::new_error(&location),
                             Val::ErrorTy,
-                            c2.report(ElabError::new_unbound_name(location, &name)),
+                            c2.report(elab_error::ElabError::new_unbound_name(location, &name)),
                         )
                     }
                     Err(e) => {
                         return (
                             core::Tm::new_error(&location),
                             Val::ErrorTy,
-                            c2.report(ElabError::from_internal_error(location.clone(), e)),
+                            c2.report(elab_error::ElabError::from_internal_error(
+                                location.clone(),
+                                e,
+                            )),
                         )
                     }
                 };
@@ -1467,14 +1579,17 @@ impl UnOp {
                         return (
                             core::Tm::new_error(&location),
                             Val::ErrorTy,
-                            cx.report(ElabError::new_unbound_name(location, &name)),
+                            cx.report(elab_error::ElabError::new_unbound_name(location, &name)),
                         )
                     }
                     Err(e) => {
                         return (
                             core::Tm::new_error(&location),
                             Val::ErrorTy,
-                            cx.report(ElabError::from_internal_error(location.clone(), e)),
+                            cx.report(elab_error::ElabError::from_internal_error(
+                                location.clone(),
+                                e,
+                            )),
                         )
                     }
                 };
@@ -1519,7 +1634,7 @@ impl UnOp {
                     (
                         core::Tm::new_error(location),
                         Val::ErrorTy,
-                        c1.report(ElabError::new(
+                        c1.report(elab_error::ElabError::new(
                             &ctm0.location,
                             &format!("mismatched types: expected Num or Str, got {}", cty0),
                         )),

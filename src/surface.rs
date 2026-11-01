@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-pub mod elab;
+// pub mod elab;
 pub mod elab2;
 
 pub type Prog = Located<ProgData>;

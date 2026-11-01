@@ -4,7 +4,7 @@ use crate::{
     core,
     input::{get_filetype_and_buffer, FileType},
     myers::VarMyers,
-    surface::Context,
+    surface::{elab2::context::Context, Context},
     util::{
         self, bytes_to_string, cache::Cache, env::Env, get_bit, location::Location,
         recfield::CoreRecField, Arena,
@@ -18,33 +18,14 @@ use super::{
     Effect, EvalError, PortableVal, Val,
 };
 
-pub fn standard_library<'a>(arena: &'a Arena) -> Context<'a> {
-    let entries = vec![
-        ("Type", core::TmData::Univ, core::TmData::Univ),
-        ("Any", core::TmData::Univ, core::TmData::AnyTy),
-        ("Bool", core::TmData::Univ, core::TmData::BoolTy),
-        ("Num", core::TmData::Univ, core::TmData::NumTy),
-        ("Str", core::TmData::Univ, core::TmData::StrTy),
-        ("Effect", core::TmData::Univ, core::TmData::EffectTy),
-    ];
-
-    let ctx = entries
-        .iter()
-        .try_fold(Context::default(), |ctx, (name, ty, tm)| {
-            // WARN cache can be empty because this is pre-caching
-
-            let ty1 = arena
-                .alloc(core::Tm::new(Location::new(0, 0), ty.clone()))
-                .eval(arena, &ctx.tms, &Cache::default(), &Env::default())?;
-            let tm1 = arena
-                .alloc(core::Tm::new(Location::new(0, 0), tm.clone()))
-                .eval(arena, &ctx.tms, &Cache::default(), &Env::default())?;
-
-            Ok::<Context, EvalError>(ctx.bind_def(name.to_string(), ty1, tm1))
-        })
-        .expect("could not evaluate standard library!");
-
-    ctx
+pub fn standard_library<'a>() -> Context<'a> {
+    Context::new()
+        .bind("Type", Val::Univ, Val::Univ)
+        .bind("Any", Val::Univ, Val::AnyTy)
+        .bind("Bool", Val::Univ, Val::BoolTy)
+        .bind("Num", Val::Univ, Val::NumTy)
+        .bind("Str", Val::Univ, Val::StrTy)
+        .bind("Effect", Val::Univ, Val::EffectTy)
 }
 
 pub fn foreign<'a>(
@@ -382,7 +363,6 @@ pub fn unary_reverse_complement<'a>(
 }
 
 pub fn unary_read_reverse_complement<'a>(
-    arena: &'a Arena,
     location: &Location,
     vtms: &[Val<'a>],
 ) -> Result<Val<'a>, EvalError> {

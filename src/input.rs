@@ -13,7 +13,7 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 
 use crate::{
-    core::{self, EvalError, Val},
+    core::{self, eval2::env::Env, EvalError, Val},
     input::{
         bam::{BamReader, PairedBamReader, RevCompBamReader},
         dsv::DSVReader,
@@ -24,7 +24,7 @@ use crate::{
     },
     output::{OutputError, OutputHandler, OutputHandlerSummary},
     ui::Interface,
-    util::{cache::Cache, env::Env, Arena},
+    util::{cache::Cache, Arena},
     InputReads,
 };
 
@@ -407,17 +407,15 @@ impl ReaderWithBar {
 
     pub fn map<'p>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'p core::Prog<'p>,
+        global: &'p Env<Val<'p>>,
         output_handler: &mut OutputHandler,
     ) -> Result<(), ExecError> {
-        self.reader
-            .map(prog, env, cache, output_handler, &mut self.bar)
+        self.reader.map(prog, global, output_handler, &mut self.bar)
     }
 
-    pub fn get_ty<'a>(&mut self, arena: &'a Arena) -> Val<'a> {
-        self.reader.get_ty(arena)
+    pub fn get_ty<'a>(&mut self) -> Val<'a> {
+        self.reader.get_ty()
     }
 
     pub fn get_aux_data(&self) -> AuxiliaryInputData {
@@ -433,16 +431,15 @@ pub enum AuxiliaryInputData {
 pub trait Reader {
     fn map<'p>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'p core::Prog<'p>,
+        global: &'p Env<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError>;
 
     fn count(&mut self) -> usize;
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a>;
+    fn get_ty<'a>(&self) -> Val<'a>;
 
     fn get_aux_data(&self) -> AuxiliaryInputData {
         AuxiliaryInputData::None

@@ -8,12 +8,13 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{
         self,
-        rec::{self, FullyConcreteRec},
+        eval2::env::Env,
+        rec::{self, ConcreteRec, FastaRead, FullyConcreteRec},
         Effect, Val,
     },
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{cache::Cache, env::Env, location::Location, recfield::CoreRecField, Arena},
+    util::{cache::Cache, location::Location, recfield::CoreRecField, Arena},
 };
 
 pub struct FastaReader {
@@ -26,15 +27,15 @@ impl FastaReader {
         let ty = Val::RecTy {
             fields: vec![
                 CoreRecField {
-                    name: b"seq",
+                    name: b"seq".to_vec(),
                     data: Val::StrTy,
                 },
                 CoreRecField {
-                    name: b"id",
+                    name: b"id".to_vec(),
                     data: Val::StrTy,
                 },
                 CoreRecField {
-                    name: b"desc",
+                    name: b"desc".to_vec(),
                     data: Val::StrTy,
                 },
             ],
@@ -47,9 +48,8 @@ impl FastaReader {
 impl Reader for FastaReader {
     fn map<'p>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'p core::Prog<'p>,
+        global: &'p Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -66,11 +66,14 @@ impl Reader for FastaReader {
                     .par_iter()
                     .map(|record| match record {
                         Ok(read) => {
-                            let arena = Arena::new();
                             let val = core::Val::Rec {
-                                rec: Arc::new(rec::FastaRead { read }),
+                                rec: rec::Rec2::FastaRead {
+                                    r: rec::FastaRead { read },
+                                },
                             };
-                            prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
+
+                            prog.eval2(global, &Env::default(), val)
+                                .map_err(ExecError::Eval)
                         }
                         Err(_) => Err(ExecError::Input(InputError::Read)),
                     })
@@ -98,8 +101,8 @@ impl Reader for FastaReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
-        self.ty.coerce()
+    fn get_ty<'a>(&self) -> Val<'a> {
+        self.ty.reference()
     }
 }
 
@@ -114,38 +117,38 @@ impl PairedFastaReader {
         let ty = Val::RecTy {
             fields: vec![
                 CoreRecField {
-                    name: b"r1",
+                    name: b"r1".to_vec(),
                     data: Val::RecTy {
                         fields: vec![
                             CoreRecField {
-                                name: b"seq",
+                                name: b"seq".to_vec(),
                                 data: Val::StrTy,
                             },
                             CoreRecField {
-                                name: b"id",
+                                name: b"id".to_vec(),
                                 data: Val::StrTy,
                             },
                             CoreRecField {
-                                name: b"desc",
+                                name: b"desc".to_vec(),
                                 data: Val::StrTy,
                             },
                         ],
                     },
                 },
                 CoreRecField {
-                    name: b"r2",
+                    name: b"r2".to_vec(),
                     data: Val::RecTy {
                         fields: vec![
                             CoreRecField {
-                                name: b"seq",
+                                name: b"seq".to_vec(),
                                 data: Val::StrTy,
                             },
                             CoreRecField {
-                                name: b"id",
+                                name: b"id".to_vec(),
                                 data: Val::StrTy,
                             },
                             CoreRecField {
-                                name: b"desc",
+                                name: b"desc".to_vec(),
                                 data: Val::StrTy,
                             },
                         ],
@@ -165,9 +168,8 @@ impl PairedFastaReader {
 impl Reader for PairedFastaReader {
     fn map<'p>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'p core::Prog<'p>,
+        global: &'p Env<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -186,27 +188,33 @@ impl Reader for PairedFastaReader {
                     .par_iter()
                     .map(|(record, paired_record)| match (record, paired_record) {
                         (Ok(read), Ok(paired_read)) => {
-                            let arena = Arena::new();
                             let val = core::Val::Rec {
-                                rec: Arc::new(FullyConcreteRec {
-                                    map: HashMap::from([
-                                        (
-                                            b"r1".to_vec(),
-                                            core::Val::Rec {
-                                                rec: Arc::new(rec::FastaRead { read }),
-                                            },
-                                        ),
-                                        (
-                                            b"r2".to_vec(),
-                                            core::Val::Rec {
-                                                rec: Arc::new(rec::FastaRead { read: paired_read }),
-                                            },
-                                        ),
-                                    ]),
-                                }),
+                                rec: rec::Rec2::FullyConcrete {
+                                    r: FullyConcreteRec {
+                                        map: HashMap::from([
+                                            (
+                                                b"r1".to_vec(),
+                                                core::Val::Rec {
+                                                    rec: rec::Rec2::FastaRead {
+                                                        r: FastaRead { read },
+                                                    },
+                                                },
+                                            ),
+                                            (
+                                                b"r2".to_vec(),
+                                                core::Val::Rec {
+                                                    rec: rec::Rec2::FastaRead {
+                                                        r: FastaRead { read: paired_read },
+                                                    },
+                                                },
+                                            ),
+                                        ]),
+                                    },
+                                },
                             };
 
-                            prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
+                            prog.eval2(global, &Env::default(), val)
+                                .map_err(ExecError::Eval)
                         }
                         _ => Err(ExecError::Input(InputError::Read)),
                     })
@@ -234,8 +242,8 @@ impl Reader for PairedFastaReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
-        self.ty.coerce()
+    fn get_ty<'a>(&self) -> Val<'a> {
+        self.ty.reference()
     }
 }
 
@@ -249,15 +257,15 @@ impl RevCompFastaReader {
         let ty = Val::RecTy {
             fields: vec![
                 CoreRecField {
-                    name: b"seq",
+                    name: b"seq".to_vec(),
                     data: Val::StrTy,
                 },
                 CoreRecField {
-                    name: b"id",
+                    name: b"id".to_vec(),
                     data: Val::StrTy,
                 },
                 CoreRecField {
-                    name: b"desc",
+                    name: b"desc".to_vec(),
                     data: Val::StrTy,
                 },
             ],
@@ -270,9 +278,8 @@ impl RevCompFastaReader {
 impl Reader for RevCompFastaReader {
     fn map<'p>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'p core::Prog<'p>,
+        global: &'p Env<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -289,24 +296,24 @@ impl Reader for RevCompFastaReader {
                     .par_iter()
                     .map(|record| match record {
                         Ok(read) => {
-                            let arena = Arena::new();
                             let val = core::Val::Rec {
-                                rec: Arc::new(rec::FastaRead { read }),
+                                rec: rec::Rec2::FastaRead {
+                                    r: FastaRead { read },
+                                },
                             };
 
                             let reverse_complement_val =
                                 core::library::unary_read_reverse_complement(
-                                    &arena,
                                     &Location::new(0, 0),
                                     &vec![val.clone()],
                                 )
                                 // should never happen
                                 .unwrap();
                             let effs_forward = prog
-                                .eval(&arena, env, cache, val)
+                                .eval2(global, &Env::default(), val)
                                 .map_err(ExecError::Eval)?;
                             let effs_reverse = prog
-                                .eval(&arena, env, cache, reverse_complement_val)
+                                .eval2(global, &Env::default(), reverse_complement_val)
                                 .map_err(ExecError::Eval)?;
 
                             Ok(effs_forward.into_iter().chain(effs_reverse).collect_vec())
@@ -337,7 +344,7 @@ impl Reader for RevCompFastaReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
-        self.ty.coerce()
+    fn get_ty<'a>(&self) -> Val<'a> {
+        self.ty.reference()
     }
 }

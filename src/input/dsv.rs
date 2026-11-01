@@ -8,12 +8,13 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{
         self,
+        eval2::env::Env,
         rec::{self, CSVHeader, FullyConcreteRec},
         Effect, Val,
     },
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{cache::Cache, env::Env, recfield::CoreRecField, Arena},
+    util::{cache::Cache, recfield::CoreRecField, Arena},
 };
 
 pub struct DSVReader {
@@ -50,9 +51,8 @@ impl DSVReader {
 impl Reader for DSVReader {
     fn map<'p>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'p core::Prog<'p>,
+        global: &'p Env<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -73,12 +73,15 @@ impl Reader for DSVReader {
                             let arena = Arena::new();
 
                             let val = core::Val::Rec {
-                                rec: Arc::new(rec::CSVRead {
-                                    header: &header,
-                                    fields: read,
-                                }),
+                                rec: rec::Rec2::CSVRead {
+                                    r: rec::CSVRead {
+                                        header: &header,
+                                        fields: read,
+                                    },
+                                },
                             };
-                            prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
+                            prog.eval2(global, &Env::default(), val)
+                                .map_err(ExecError::Eval)
                         }
                         Err(_) => Err(ExecError::Input(InputError::Read)),
                     })
@@ -103,13 +106,11 @@ impl Reader for DSVReader {
         self.reader.records().count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
+    fn get_ty<'a>(&self) -> Val<'a> {
         let fields = self
             .field_names
             .iter()
-            .map(|field_name| {
-                CoreRecField::new(arena.alloc(field_name.as_bytes().to_vec()), Val::StrTy)
-            })
+            .map(|field_name| CoreRecField::new(field_name.as_bytes(), Val::StrTy))
             .collect();
 
         Val::RecTy { fields }

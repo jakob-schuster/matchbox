@@ -428,6 +428,16 @@ impl<'r> StrVal<'r> {
         }
     }
 
+    fn slice(&self, start: usize, end: usize) -> StrVal<'r> {
+        match self {
+            StrVal::Reference { s } => StrVal::Reference { s: &s[start..end] },
+            // WARN could be costly
+            StrVal::Concrete { s } => StrVal::Concrete {
+                s: (&s[start..end]).to_vec(),
+            },
+        }
+    }
+
     pub fn reference(&'r self) -> StrVal<'r> {
         match self {
             StrVal::Reference { s } => StrVal::Reference { s },

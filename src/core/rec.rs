@@ -5,7 +5,7 @@ use noodles::sam::{
 };
 
 use crate::{
-    core,
+    core::{self, StrVal},
     input::{Input, InputError},
     util::{self, bytes_to_string, location::Location, recfield::CoreRecField, Arena},
 };
@@ -18,7 +18,6 @@ pub enum RecError {
     BadIndex(String),
 }
 
-#[derive(Clone)]
 pub enum Rec2<'r> {
     Concrete { r: ConcreteRec<'r> },
     FullyConcrete { r: FullyConcreteRec<'r> },
@@ -38,6 +37,7 @@ impl<'r> Rec2<'r> {
             Rec2::SamRead { r } => r.get(key),
             Rec2::BamRead { r } => r.get(key),
             Rec2::CSVRead { r } => r.get(key),
+            Rec2::FullyConcrete { r } => r.get(key),
         }
     }
 
@@ -49,15 +49,32 @@ impl<'r> Rec2<'r> {
             Rec2::SamRead { r } => r.all(),
             Rec2::BamRead { r } => r.all(),
             Rec2::CSVRead { r } => r.all(),
+            Rec2::FullyConcrete { r } => r.all(),
         }
     }
 
     pub fn with(&self, key: &[u8], val: Val<'r>) -> Rec2<'r> {
-        todo!()
+        match self {
+            Rec2::Concrete { r } => r.with(key, val),
+            Rec2::FullyConcrete { r } => r.with(key, val),
+            Rec2::FastaRead { r } => r.with(key, val),
+            Rec2::FastqRead { r } => r.with(key, val),
+            Rec2::SamRead { r } => r.with(key, val),
+            Rec2::BamRead { r } => r.with(key, val),
+            Rec2::CSVRead { r } => r.with(key, val),
+        }
     }
 
     pub fn with_all(&self, entries: &[(&[u8], Val<'r>)]) -> Rec2<'r> {
-        todo!()
+        match self {
+            Rec2::Concrete { r } => r.with_all(entries),
+            Rec2::FullyConcrete { r } => r.with_all(entries),
+            Rec2::FastaRead { r } => r.with_all(entries),
+            Rec2::FastqRead { r } => r.with_all(entries),
+            Rec2::SamRead { r } => r.with_all(entries),
+            Rec2::BamRead { r } => r.with_all(entries),
+            Rec2::CSVRead { r } => r.with_all(entries),
+        }
     }
 
     pub fn slice(&self, start: usize, end: usize) -> Result<Val<'r>, InternalError> {
@@ -72,16 +89,18 @@ pub trait Rec<'p>: Display + Send + Sync {
     fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
     where
         'p: 'a;
-    fn with<'a>(&self, key: &[u8], val: Val<'a>) -> FullyConcreteRec<'a>
+    fn with<'a>(&self, key: &[u8], val: Val<'a>) -> Rec2<'a>
     where
         'p: 'a,
     {
         let mut map = self.all();
         map.insert(key.to_vec(), val);
 
-        FullyConcreteRec { map }
+        Rec2::FullyConcrete {
+            r: FullyConcreteRec { map },
+        }
     }
-    fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> FullyConcreteRec<'a>
+    fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> Rec2<'a>
     where
         'p: 'a,
     {
@@ -91,7 +110,9 @@ pub trait Rec<'p>: Display + Send + Sync {
             map.insert(key.to_vec(), val.clone());
         }
 
-        FullyConcreteRec { map }
+        Rec2::FullyConcrete {
+            r: FullyConcreteRec { map },
+        }
     }
 
     fn coerce<'a>(&self) -> Arc<dyn Rec<'a> + 'a>
@@ -113,41 +134,38 @@ pub trait Rec<'p>: Display + Send + Sync {
         'p: 'a,
     {
         // record must have a sequence to be sliced
-        if let Val::Str { s: seq } = self
+        match self
             .get(b"seq")
-            .map_err(|_| InternalError::new("trying to slice a non-read record?!"))?
-            as Val<'p>
+            .map_err(|_| InternalError::new("trying to slice a non-read record?!"))
         {
-            let s2 = seq.get_reference() as &'a [u8];
-
-            match self.get(b"qual") {
+            Ok(Val::Str { s: seq }) => match self.get(b"qual") {
                 Ok(Val::Str { s: qual }) => Ok(Val::Rec {
-                    rec: Arc::new(self.with_all(&[
+                    rec: self.with_all(&[
                         (
                             b"seq",
                             Val::Str {
-                                s: &seq[start..end] as &'a [u8],
+                                s: seq.slice(start, end),
                             },
                         ),
                         (
                             b"qual",
                             Val::Str {
-                                s: &qual[start..end] as &'a [u8],
+                                s: qual.slice(start, end),
                             },
                         ),
-                    ])),
+                    ]),
                 }),
                 _ => Ok(Val::Rec {
-                    rec: Arc::new(self.with(
+                    rec: self.with(
                         b"seq",
                         Val::Str {
-                            s: &seq[start..end],
+                            s: seq.slice(start, end),
                         },
-                    )),
+                    ),
                 }),
-            }
-        } else {
-            Err(InternalError::new("message"))
+            },
+            Ok(_) => Err(InternalError::new("trying to slice a non-read record?!")),
+            Err(e) => Err(e),
         }
     }
 }
@@ -470,8 +488,8 @@ impl<'p> Rec<'p> for SamRead<'p> {
 
             b"seq" => Ok(Val::Str {
                 s: match self.seq.as_ref() {
-                    b"" => b"*",
-                    r => r,
+                    b"" => StrVal::Concrete { s: b"*".to_vec() },
+                    r => StrVal::Reference { s: r },
                 },
             }),
 

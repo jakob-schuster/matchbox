@@ -1,10 +1,14 @@
 use itertools::Itertools;
 
 use crate::{
-    core::{self, StrVal},
+    core::{
+        self,
+        rec::{FullyConcreteRec, Rec2},
+        ListVal, StrVal,
+    },
     input::{get_filetype_and_buffer, FileType},
     myers::VarMyers,
-    surface::{elab2::context::Context, Context},
+    surface::elab2::context::Context,
     util::{
         self, bytes_to_string, cache::Cache, env::Env, get_bit, location::Location,
         recfield::CoreRecField, Arena,
@@ -13,7 +17,6 @@ use crate::{
 use std::{collections::HashMap, io::Read, path::Path, sync::Arc};
 
 use super::{
-    make_portable,
     rec::{self, ConcreteRec},
     Effect, EvalError, PortableVal, Val,
 };
@@ -300,7 +303,7 @@ pub fn unary_reverse_complement<'a>(
 ) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }] => Ok(Val::Str {
-            s: StrVal::new_concrete(util::rev_comp(s.get_reference())),
+            s: StrVal::new_concrete(util::rev_comp(s.as_bytes())),
         }),
 
         _ => Err(EvalError {
@@ -318,33 +321,33 @@ pub fn unary_read_reverse_complement<'a>(
         [Val::Rec { rec }] => {
             if let Ok(Val::Str { s: seq }) = rec.get(b"seq") {
                 if let Ok(Val::Str { s: qual }) = rec.get(b"qual") {
-                    let mut rev_qual = qual.get_reference().to_vec();
+                    let mut rev_qual = qual.as_bytes().to_vec();
                     rev_qual.reverse();
 
                     Ok(Val::Rec {
-                        rec: Arc::new(rec.with_all(&[
+                        rec: rec.with_all(&[
                             (
                                 b"seq",
                                 Val::Str {
-                                    s: arena.alloc(util::rev_comp(seq)),
+                                    s: StrVal::new_concrete(util::rev_comp(seq.as_bytes())),
                                 },
                             ),
                             (
                                 b"qual",
                                 Val::Str {
-                                    s: arena.alloc(rev_qual),
+                                    s: StrVal::new_concrete(rev_qual),
                                 },
                             ),
-                        ])),
+                        ]),
                     })
                 } else {
                     Ok(Val::Rec {
-                        rec: Arc::new(rec.with(
+                        rec: rec.with(
                             b"seq",
                             Val::Str {
-                                s: arena.alloc(util::rev_comp(seq)),
+                                s: StrVal::new_concrete(util::rev_comp(seq.as_bytes())),
                             },
-                        )),
+                        ),
                     })
                 }
             } else {
@@ -384,12 +387,12 @@ pub fn paired_read_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'
         [v1, v2] => Ok(Val::RecTy {
             fields: vec![
                 CoreRecField {
-                    name: b"r1",
-                    data: read_ty(arena, location, &[v1.clone()])?,
+                    name: b"r1".to_vec(),
+                    data: read_ty(location, &[v1.clone()])?,
                 },
                 CoreRecField {
-                    name: b"r2",
-                    data: read_ty(arena, location, &[v2.clone()])?,
+                    name: b"r2".to_vec(),
+                    data: read_ty(location, &[v2.clone()])?,
                 },
             ],
         }),
@@ -406,24 +409,25 @@ pub fn paired_read_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'
 pub fn read_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: filename }] => {
-            let (filetype, _) = get_filetype_and_buffer(
-                bytes_to_string(filename).unwrap().as_str(),
-            )
-            .map_err(|e| EvalError::new(location, "reads were of an unfamiliar file type!"))?;
+            let (filetype, _) =
+                get_filetype_and_buffer(bytes_to_string(filename.as_bytes()).unwrap().as_str())
+                    .map_err(|e| {
+                        EvalError::new(location, "reads were of an unfamiliar file type!")
+                    })?;
 
             match filetype {
                 FileType::Fasta => Ok(Val::RecTy {
                     fields: vec![
                         CoreRecField {
-                            name: b"seq",
+                            name: b"seq".to_vec(),
                             data: Val::StrTy,
                         },
                         CoreRecField {
-                            name: b"id",
+                            name: b"id".to_vec(),
                             data: Val::StrTy,
                         },
                         CoreRecField {
-                            name: b"desc",
+                            name: b"desc".to_vec(),
                             data: Val::StrTy,
                         },
                     ],
@@ -431,19 +435,19 @@ pub fn read_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eva
                 FileType::Fastq => Ok(Val::RecTy {
                     fields: vec![
                         CoreRecField {
-                            name: b"seq",
+                            name: b"seq".to_vec(),
                             data: Val::StrTy,
                         },
                         CoreRecField {
-                            name: b"id",
+                            name: b"id".to_vec(),
                             data: Val::StrTy,
                         },
                         CoreRecField {
-                            name: b"desc",
+                            name: b"desc".to_vec(),
                             data: Val::StrTy,
                         },
                         CoreRecField {
-                            name: b"qual",
+                            name: b"qual".to_vec(),
                             data: Val::StrTy,
                         },
                     ],
@@ -454,66 +458,66 @@ pub fn read_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eva
                     fields: vec![
                         // Query template name
                         CoreRecField {
-                            name: b"qname",
+                            name: b"qname".to_vec(),
                             data: Val::StrTy,
                         },
                         CoreRecField {
-                            name: b"id",
+                            name: b"id".to_vec(),
                             data: Val::StrTy,
                         },
                         // Bitwise flag
                         CoreRecField {
-                            name: b"flag",
+                            name: b"flag".to_vec(),
                             data: Val::NumTy,
                         },
                         // Reference sequence name
                         CoreRecField {
-                            name: b"rname",
+                            name: b"rname".to_vec(),
                             data: Val::StrTy,
                         },
                         // 1-based leftmost mapping position
                         CoreRecField {
-                            name: b"pos",
+                            name: b"pos".to_vec(),
                             data: Val::NumTy,
                         },
                         // Mapping quality
                         CoreRecField {
-                            name: b"mapq",
+                            name: b"mapq".to_vec(),
                             data: Val::NumTy,
                         },
                         // The CIGAR string
                         CoreRecField {
-                            name: b"cigar",
+                            name: b"cigar".to_vec(),
                             data: Val::StrTy,
                         },
                         // Reference name of the mate / next read
                         CoreRecField {
-                            name: b"rnext",
+                            name: b"rnext".to_vec(),
                             data: Val::StrTy,
                         },
                         // Position of the mate / next read
                         CoreRecField {
-                            name: b"pnext",
+                            name: b"pnext".to_vec(),
                             data: Val::NumTy,
                         },
                         // Observed template length
                         CoreRecField {
-                            name: b"tlen",
+                            name: b"tlen".to_vec(),
                             data: Val::NumTy,
                         },
                         // The actual sequence of the alignment
                         CoreRecField {
-                            name: b"seq",
+                            name: b"seq".to_vec(),
                             data: Val::StrTy,
                         },
                         // The quality string of the alignment
                         CoreRecField {
-                            name: b"qual",
+                            name: b"qual".to_vec(),
                             data: Val::StrTy,
                         },
                         // The optional tags associated with the alignment
                         CoreRecField {
-                            name: b"tags",
+                            name: b"tags".to_vec(),
                             data: Val::StrTy,
                             // data: Val::ListTy {
                             //     ty: Arc::new(Val::StrTy),
@@ -521,21 +525,21 @@ pub fn read_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eva
                         },
                         // The optional tags associated with the alignment
                         CoreRecField {
-                            name: b"desc",
+                            name: b"desc".to_vec(),
                             data: Val::StrTy,
                         },
                     ],
                 }),
 
                 // CSV and TSV types can be inferred too
-                FileType::CSV => csv_ty(arena, location, vtms),
-                FileType::TSV => tsv_ty(arena, location, vtms),
+                FileType::CSV => csv_ty(location, vtms),
+                FileType::TSV => tsv_ty(location, vtms),
 
                 _ => Err(EvalError::new(
                     &location,
                     &format!(
                         "unknown file type '{}'",
-                        String::from_utf8(filename.to_vec()).unwrap()
+                        String::from_utf8(filename.as_bytes().to_vec()).unwrap()
                     ),
                 )),
             }
@@ -552,7 +556,9 @@ pub fn read_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eva
 
 pub fn len<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
-        [Val::Str { s }] => Ok(Val::Num { n: s.len() as f64 }),
+        [Val::Str { s }] => Ok(Val::Num {
+            n: s.as_bytes().len() as f64,
+        }),
         _ => Err(EvalError::new(
             &location,
             "bad arguments given to function?!",
@@ -563,16 +569,16 @@ pub fn len<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
 pub fn slice<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }, Val::Num { n: start }, Val::Num { n: end }] => {
-            if start.round() >= 0.0 && (end.round() as usize) <= s.len() {
+            if start.round() >= 0.0 && (end.round() as usize) <= s.as_bytes().len() {
                 Ok(Val::Str {
-                    s: &s[start.round() as usize..end.round() as usize],
+                    s: s.slice(start.round() as usize, end.round() as usize),
                 })
             } else {
                 Err(EvalError::new(
                     location,
                     &format!(
                         "couldn't slice string '{}' from position {} to {}",
-                        bytes_to_string(s).unwrap(),
+                        bytes_to_string(s.as_bytes()).unwrap(),
                         start,
                         end
                     ),
@@ -595,18 +601,38 @@ pub fn tag<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
 
             match desc {
                 Val::Str { s: old_s } => {
-                    let new_desc = &arena
-                        .alloc(old_s.iter().chain(*prefix).chain(*s).cloned().collect_vec())[..];
+                    let new_desc = old_s
+                        .as_bytes()
+                        .iter()
+                        .chain(prefix.as_bytes())
+                        .chain(s.as_bytes())
+                        .cloned()
+                        .collect_vec();
 
                     Ok(Val::Rec {
-                        rec: Arc::new(if rec.get(b"tags").is_ok() {
+                        rec: if rec.get(b"tags").is_ok() {
                             rec.with_all(&[
-                                (b"desc", Val::Str { s: new_desc }),
-                                (b"tags", Val::Str { s: new_desc }),
+                                (
+                                    b"desc",
+                                    Val::Str {
+                                        s: StrVal::new_concrete(new_desc.clone()),
+                                    },
+                                ),
+                                (
+                                    b"tags",
+                                    Val::Str {
+                                        s: StrVal::new_concrete(new_desc.clone()),
+                                    },
+                                ),
                             ])
                         } else {
-                            rec.with(b"desc", Val::Str { s: new_desc })
-                        }),
+                            rec.with(
+                                b"desc",
+                                Val::Str {
+                                    s: StrVal::new_concrete(new_desc),
+                                },
+                            )
+                        },
                     })
                 }
                 _ => panic!("record desc was not string type?!"),
@@ -629,14 +655,29 @@ pub fn rename<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
 
             match id {
                 Val::Str { s: _ } => Ok(Val::Rec {
-                    rec: Arc::new(if rec.get(b"qname").is_ok() {
+                    rec: if rec.get(b"qname").is_ok() {
                         rec.with_all(&[
-                            (b"id", Val::Str { s: new_id }),
-                            (b"qname", Val::Str { s: new_id }),
+                            (
+                                b"id",
+                                Val::Str {
+                                    s: new_id.concretise(),
+                                },
+                            ),
+                            (
+                                b"qname",
+                                Val::Str {
+                                    s: new_id.concretise(),
+                                },
+                            ),
                         ])
                     } else {
-                        rec.with(b"id", Val::Str { s: new_id })
-                    }),
+                        rec.with(
+                            b"id",
+                            Val::Str {
+                                s: new_id.concretise(),
+                            },
+                        )
+                    },
                 }),
                 _ => panic!("record id was not string type?!"),
             }
@@ -655,9 +696,9 @@ pub fn translate<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, E
     match vtms {
         [Val::Str { s }, Val::Str { s: stop_codon_char }, Val::Str {
             s: illegal_codon_char,
-        }] => match (*stop_codon_char, illegal_codon_char) {
+        }] => match (stop_codon_char.as_bytes(), illegal_codon_char.as_bytes()) {
             ([c1], [c2]) => Ok(Val::Str {
-                s: arena.alloc(util::translate(s, c1, c2)).as_bytes(),
+                s: StrVal::new_concrete(util::translate(s.as_bytes(), c1, c2).as_bytes().to_vec()),
             }),
             _ => Err(EvalError::new(
                 location,
@@ -675,15 +716,10 @@ pub fn translate2<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, 
     match vtms {
         [Val::Str { s }, Val::Str { s: stop_codon_char }, Val::Str {
             s: illegal_codon_char,
-        }] => match (
-            stop_codon_char.get_reference(),
-            illegal_codon_char.get_reference(),
-        ) {
+        }] => match (stop_codon_char.as_bytes(), illegal_codon_char.as_bytes()) {
             ([c1], [c2]) => Ok(Val::Str {
                 s: core::StrVal::Concrete {
-                    s: util::translate(s.get_reference(), c1, c2)
-                        .as_bytes()
-                        .to_vec(),
+                    s: util::translate(s.as_bytes(), c1, c2).as_bytes().to_vec(),
                 },
             }),
             _ => Err(EvalError::new(
@@ -725,21 +761,34 @@ pub fn concat<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
 
             // Combine sequences
             let new_seq = Val::Str {
-                s: arena.alloc(seq0.iter().chain(seq1).cloned().collect::<Vec<_>>()),
+                s: StrVal::new_concrete(
+                    seq0.as_bytes()
+                        .iter()
+                        .chain(seq1.as_bytes())
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                ),
             };
 
             match (read0.get(b"qual"), read1.get(b"qual")) {
                 (Ok(Val::Str { s: qual0 }), Ok(Val::Str { s: qual1 })) => {
                     let new_qual = Val::Str {
-                        s: arena.alloc(qual0.iter().chain(qual1).cloned().collect::<Vec<_>>()),
+                        s: StrVal::new_concrete(
+                            qual0
+                                .as_bytes()
+                                .iter()
+                                .chain(qual1.as_bytes())
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                        ),
                     };
 
                     Ok(Val::Rec {
-                        rec: Arc::new(read1.with_all(&[(b"seq", new_seq), (b"qual", new_qual)])),
+                        rec: read1.with_all(&[(b"seq", new_seq), (b"qual", new_qual)]),
                     })
                 }
                 _ => Ok(Val::Rec {
-                    rec: Arc::new(read1.with(b"seq", new_seq)),
+                    rec: read1.with(b"seq", new_seq),
                 }),
             }
         }
@@ -753,7 +802,13 @@ pub fn concat<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
 pub fn str_concat<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: s0 }, Val::Str { s: s1 }] => Ok(Val::Str {
-            s: &arena.alloc((*s0).iter().chain(*s1).cloned().collect::<Vec<_>>())[..],
+            s: StrVal::new_concrete(
+                s0.as_bytes()
+                    .iter()
+                    .chain(s1.as_bytes())
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            ),
         }),
 
         _ => Err(EvalError::new(
@@ -767,13 +822,15 @@ pub fn csv_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
     match vtms {
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
-                .from_path(Path::new(&String::from_utf8(filename.to_vec()).unwrap()))
+                .from_path(Path::new(
+                    &String::from_utf8(filename.as_bytes().to_vec()).unwrap(),
+                ))
                 .map_err(|_| {
                     EvalError::new(
                         location,
                         &format!(
                             "couldn't open file '{}'",
-                            bytes_to_string(filename).unwrap()
+                            bytes_to_string(filename.as_bytes()).unwrap()
                         ),
                     )
                 })?;
@@ -781,16 +838,12 @@ pub fn csv_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
             let field_names = rdr
                 .headers()
                 .iter()
-                .flat_map(|a| {
-                    a.iter()
-                        .map(String::from)
-                        .map(|s| arena.alloc(s).as_bytes())
-                })
+                .flat_map(|a| a.iter().map(String::from))
                 .collect::<Vec<_>>();
 
             let fields = field_names
                 .iter()
-                .map(|name| CoreRecField::new(*name, Val::StrTy))
+                .map(|name| CoreRecField::new(name.as_bytes(), Val::StrTy))
                 .collect::<Vec<_>>();
 
             Ok(Val::RecTy { fields })
@@ -810,13 +863,15 @@ pub fn csv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
     match vtms {
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
-                .from_path(Path::new(&String::from_utf8(filename.to_vec()).unwrap()))
+                .from_path(Path::new(
+                    &String::from_utf8(filename.as_bytes().to_vec()).unwrap(),
+                ))
                 .map_err(|_| {
                     EvalError::new(
                         location,
                         &format!(
                             "couldn't open file '{}'",
-                            bytes_to_string(filename).unwrap()
+                            bytes_to_string(filename.as_bytes()).unwrap()
                         ),
                     )
                 })?;
@@ -824,11 +879,7 @@ pub fn csv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
             let field_names = rdr
                 .headers()
                 .iter()
-                .flat_map(|a| {
-                    a.iter()
-                        .map(String::from)
-                        .map(|s| arena.alloc(s).as_bytes())
-                })
+                .flat_map(|a| a.iter().map(String::from))
                 .collect::<Vec<_>>();
 
             let structs: Vec<_> = rdr
@@ -836,18 +887,26 @@ pub fn csv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
                 .map(|r| {
                     r.map(|sr| -> Val<'_> {
                         Val::Rec {
-                            rec: Arc::new(ConcreteRec {
-                                map: HashMap::from_iter(sr.into_iter().enumerate().map(
-                                    |(i, s)| {
-                                        let field: &[u8] = field_names.get(i).unwrap();
-                                        let val: Val = Val::Str {
-                                            s: arena.alloc(s.to_string()).as_bytes(),
-                                        };
+                            rec: Rec2::FullyConcrete {
+                                r: FullyConcreteRec {
+                                    map: HashMap::from_iter(sr.into_iter().enumerate().map(
+                                        |(i, s)| {
+                                            let field = match field_names.get(i) {
+                                                Some(a) => a.as_bytes().to_vec(),
+                                                None => todo!(),
+                                            };
 
-                                        (field, val)
-                                    },
-                                )),
-                            }),
+                                            let val: Val = Val::Str {
+                                                s: StrVal::new_concrete(
+                                                    s.to_string().as_bytes().to_vec(),
+                                                ),
+                                            };
+
+                                            (field, val)
+                                        },
+                                    )),
+                                },
+                            },
                         }
                     })
                 })
@@ -857,12 +916,14 @@ pub fn csv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
                         location,
                         &format!(
                             "couldn't open file '{}'",
-                            bytes_to_string(filename).unwrap()
+                            bytes_to_string(filename.as_bytes()).unwrap()
                         ),
                     )
                 })?;
 
-            Ok(Val::List { v: structs })
+            Ok(Val::List {
+                v: ListVal::new_concrete(structs),
+            })
         }
 
         _ => Err(EvalError::new(
@@ -877,13 +938,15 @@ pub fn tsv_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
                 .delimiter(b'\t')
-                .from_path(Path::new(&String::from_utf8(filename.to_vec()).unwrap()))
+                .from_path(Path::new(
+                    &String::from_utf8(filename.as_bytes().to_vec()).unwrap(),
+                ))
                 .map_err(|_| {
                     EvalError::new(
                         location,
                         &format!(
                             "couldn't open file '{}'",
-                            bytes_to_string(filename).unwrap()
+                            bytes_to_string(filename.as_bytes()).unwrap()
                         ),
                     )
                 })?;
@@ -891,16 +954,12 @@ pub fn tsv_ty<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
             let field_names = rdr
                 .headers()
                 .iter()
-                .flat_map(|a| {
-                    a.iter()
-                        .map(String::from)
-                        .map(|s| arena.alloc(s).as_bytes())
-                })
+                .flat_map(|a| a.iter().map(String::from))
                 .collect::<Vec<_>>();
 
             let fields = field_names
                 .iter()
-                .map(|name| CoreRecField::new(*name, Val::StrTy))
+                .map(|name| CoreRecField::new(name.as_bytes(), Val::StrTy))
                 .collect::<Vec<_>>();
 
             Ok(Val::RecTy { fields })
@@ -918,13 +977,15 @@ pub fn tsv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
         [Val::Str { s: filename }] => {
             let mut rdr = csv::ReaderBuilder::new()
                 .delimiter(b'\t')
-                .from_path(Path::new(&String::from_utf8(filename.to_vec()).unwrap()))
+                .from_path(Path::new(
+                    &String::from_utf8(filename.as_bytes().to_vec()).unwrap(),
+                ))
                 .map_err(|_| {
                     EvalError::new(
                         location,
                         &format!(
                             "couldn't open file '{}'",
-                            bytes_to_string(filename).unwrap()
+                            bytes_to_string(filename.as_bytes()).unwrap()
                         ),
                     )
                 })?;
@@ -932,11 +993,7 @@ pub fn tsv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
             let field_names = rdr
                 .headers()
                 .iter()
-                .flat_map(|a| {
-                    a.iter()
-                        .map(String::from)
-                        .map(|s| arena.alloc(s).as_bytes())
-                })
+                .flat_map(|a| a.iter().map(String::from))
                 .collect::<Vec<_>>();
 
             let structs: Vec<_> = rdr
@@ -944,18 +1001,26 @@ pub fn tsv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
                 .map(|r| {
                     r.map(|sr| -> Val<'_> {
                         Val::Rec {
-                            rec: Arc::new(ConcreteRec {
-                                map: HashMap::from_iter(sr.into_iter().enumerate().map(
-                                    |(i, s)| {
-                                        let field: &[u8] = field_names.get(i).unwrap();
-                                        let val: Val = Val::Str {
-                                            s: arena.alloc(s.to_string()).as_bytes(),
-                                        };
+                            rec: Rec2::FullyConcrete {
+                                r: FullyConcreteRec {
+                                    map: HashMap::from_iter(sr.into_iter().enumerate().map(
+                                        |(i, s)| {
+                                            let field = match field_names.get(i) {
+                                                Some(a) => a.as_bytes().to_vec(),
+                                                None => todo!(),
+                                            };
 
-                                        (field, val)
-                                    },
-                                )),
-                            }),
+                                            let val: Val = Val::Str {
+                                                s: StrVal::new_concrete(
+                                                    s.to_string().as_bytes().to_vec(),
+                                                ),
+                                            };
+
+                                            (field, val)
+                                        },
+                                    )),
+                                },
+                            },
                         }
                     })
                 })
@@ -965,12 +1030,14 @@ pub fn tsv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
                         location,
                         &format!(
                             "couldn't open file '{}'",
-                            bytes_to_string(filename).unwrap()
+                            bytes_to_string(filename.as_bytes()).unwrap()
                         ),
                     )
                 })?;
 
-            Ok(Val::List { v: structs })
+            Ok(Val::List {
+                v: ListVal::new_concrete(structs),
+            })
         }
 
         _ => Err(EvalError::new(
@@ -983,36 +1050,46 @@ pub fn tsv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
 pub fn fasta<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: filename }] => {
-            let f =
-                bio::io::fasta::Reader::from_file(String::from_utf8(filename.to_vec()).unwrap())
-                    .map_err(|_| {
-                        EvalError::new(
-                            location,
-                            &format!(
-                                "couldn't open file '{}'",
-                                bytes_to_string(filename).unwrap()
-                            ),
-                        )
-                    })?;
+            let f = bio::io::fasta::Reader::from_file(
+                String::from_utf8(filename.as_bytes().to_vec()).unwrap(),
+            )
+            .map_err(|_| {
+                EvalError::new(
+                    location,
+                    &format!(
+                        "couldn't open file '{}'",
+                        bytes_to_string(filename.as_bytes()).unwrap()
+                    ),
+                )
+            })?;
 
             let mut v = vec![];
-
-            let id_str = arena.alloc(b"id".to_vec());
-            let seq_str = arena.alloc(b"seq".to_vec());
 
             for rec in f.records() {
                 match rec {
                     Ok(read) => {
-                        let seq = arena.alloc(read.seq().to_vec());
-                        let name = arena.alloc(read.id().as_bytes().to_vec());
+                        let seq = read.seq().to_vec();
+                        let name = read.id().as_bytes().to_vec();
 
-                        let map: HashMap<&[u8], Val<'_>> = HashMap::from([
-                            (id_str as &[u8], Val::Str { s: name }),
-                            (seq_str as &[u8], Val::Str { s: seq }),
+                        let map: HashMap<Vec<u8>, Val<'_>> = HashMap::from([
+                            (
+                                b"id".to_vec(),
+                                Val::Str {
+                                    s: StrVal::new_concrete(name),
+                                },
+                            ),
+                            (
+                                b"seq".to_vec(),
+                                Val::Str {
+                                    s: StrVal::new_concrete(seq),
+                                },
+                            ),
                         ]);
 
                         v.push(Val::Rec {
-                            rec: Arc::new(ConcreteRec { map }),
+                            rec: Rec2::FullyConcrete {
+                                r: FullyConcreteRec { map },
+                            },
                         });
                     }
                     Err(_) => {
@@ -1020,14 +1097,16 @@ pub fn fasta<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalE
                             location,
                             &format!(
                                 "bad read in FASTA file '{}'",
-                                bytes_to_string(filename).unwrap()
+                                bytes_to_string(filename.as_bytes()).unwrap()
                             ),
                         ))
                     }
                 }
             }
 
-            Ok(Val::List { v })
+            Ok(Val::List {
+                v: ListVal::new_concrete(v),
+            })
         }
 
         _ => Err(EvalError::new(
@@ -1040,9 +1119,9 @@ pub fn fasta<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalE
 pub fn find_first<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: s1 }, Val::Str { s: s2 }] => Ok(Val::Num {
-            n: match String::from_utf8((*s1).to_vec())
+            n: match String::from_utf8(s1.as_bytes().to_vec())
                 .unwrap()
-                .find(&String::from_utf8((*s2).to_vec()).unwrap())
+                .find(&String::from_utf8(s2.as_bytes().to_vec()).unwrap())
             {
                 Some(i) => i as f64,
                 None => -1.0,
@@ -1059,9 +1138,9 @@ pub fn find_first<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, 
 pub fn find_last<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: s1 }, Val::Str { s: s2 }] => Ok(Val::Num {
-            n: match String::from_utf8((*s1).to_vec())
+            n: match String::from_utf8(s1.as_bytes().to_vec())
                 .unwrap()
-                .rfind(&String::from_utf8((*s2).to_vec()).unwrap())
+                .rfind(&String::from_utf8(s2.as_bytes().to_vec()).unwrap())
             {
                 Some(i) => i as f64,
                 None => -1.0,
@@ -1078,15 +1157,15 @@ pub fn find_last<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, E
 pub fn find_matches<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: s1 }, Val::Str { s: s2 }, Val::Num { n }] => {
-            let myers = VarMyers::new(s2);
-            let edit_dist = (s2.len() as f64 * n).floor() as usize;
+            let myers = VarMyers::new(s2.as_bytes());
+            let edit_dist = (s2.as_bytes().len() as f64 * n).floor() as usize;
 
-            myers.find_all_disjoint(s1, edit_dist);
+            myers.find_all_disjoint(s1.as_bytes(), edit_dist);
 
             Ok(Val::Num {
-                n: match String::from_utf8((*s1).to_vec())
+                n: match String::from_utf8(s1.as_bytes().to_vec())
                     .unwrap()
-                    .rfind(&String::from_utf8((*s2).to_vec()).unwrap())
+                    .rfind(&String::from_utf8(s2.as_bytes().to_vec()).unwrap())
                 {
                     Some(i) => i as f64,
                     None => -1.0,
@@ -1104,23 +1183,31 @@ pub fn find_matches<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>
 pub fn lookup<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }, Val::Str { s: key }, Val::Str { s: kv_sep }, Val::Str { s: sep }] => {
-            let s1 = String::from_utf8((*s).to_vec()).unwrap();
-            let key =
-                String::from_utf8((*key).iter().chain(*kv_sep).cloned().collect_vec()).unwrap();
-            let sep = String::from_utf8((*sep).to_vec()).unwrap();
+            let s1 = String::from_utf8(s.as_bytes().to_vec()).unwrap();
+            let key = String::from_utf8(
+                key.as_bytes()
+                    .iter()
+                    .chain(kv_sep.as_bytes())
+                    .cloned()
+                    .collect_vec(),
+            )
+            .unwrap();
+            let sep = String::from_utf8(sep.as_bytes().to_vec()).unwrap();
 
             if let Some(start) = s1.find(&key) {
                 if let Some(end) = s1[start + key.len()..].find(&sep) {
                     Ok(Val::Str {
-                        s: &s[start + key.len()..end - start + key.len()],
+                        s: s.slice(start + key.len(), end - start + key.len()),
                     })
                 } else {
                     Ok(Val::Str {
-                        s: &s[start + key.len()..],
+                        // WARN check this
+                        s: s.slice(start + key.len(), s.as_bytes().len()),
                     })
                 }
             } else {
-                Ok(Val::Str { s: &s[0..0] })
+                // WARN this looks like weird behaviour
+                Ok(Val::Str { s: s.slice(0, 0) })
             }
         }
 
@@ -1134,7 +1221,7 @@ pub fn lookup<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
 pub fn to_upper<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }] => Ok(Val::Str {
-            s: arena.alloc(s.to_ascii_uppercase().to_vec()),
+            s: StrVal::new_concrete(s.as_bytes().to_ascii_uppercase().to_vec()),
         }),
 
         _ => Err(EvalError::new(
@@ -1147,7 +1234,7 @@ pub fn to_upper<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Ev
 pub fn to_lower<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }] => Ok(Val::Str {
-            s: arena.alloc(s.to_ascii_lowercase().to_vec()),
+            s: StrVal::new_concrete(s.as_bytes().to_ascii_lowercase().to_vec()),
         }),
 
         _ => Err(EvalError::new(
@@ -1181,28 +1268,33 @@ pub fn describe<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Ev
                 }
 
                 // if necessary, add the reverse complements
-                let little_arena = Arena::new();
                 if *reverse_complement {
-                    let mut new_map = map.clone();
-                    for (id, seq) in &map {
-                        new_map.insert(
-                            format!("-{}", util::bytes_to_string(id).unwrap())
-                                .as_bytes()
-                                .to_vec(),
-                            little_arena.alloc(util::rev_comp(seq)),
-                        );
-                    }
-                    map = new_map;
+                    let map_reverse_complement = map
+                        .iter()
+                        .map(|(key, val)| {
+                            (
+                                format!("-{}", util::bytes_to_string(key).unwrap())
+                                    .as_bytes()
+                                    .to_vec(),
+                                StrVal::new_concrete(util::rev_comp(val.as_bytes())),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>();
+
+                    map = map
+                        .into_iter()
+                        .chain(map_reverse_complement)
+                        .collect::<HashMap<_, _>>();
                 }
 
                 // describe the read
                 let description = map
                     .iter()
                     .flat_map(|(id, seq)| {
-                        VarMyers::new(seq)
+                        VarMyers::new(seq.as_bytes())
                             .find_all_disjoint(
-                                read_seq,
-                                (error_rate * seq.len() as f64).round() as usize,
+                                read_seq.as_bytes(),
+                                (error_rate * seq.as_bytes().len() as f64).round() as usize,
                             )
                             .iter()
                             .map(|matches| (id, *matches))
@@ -1214,13 +1306,11 @@ pub fn describe<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Ev
 
                 // allocate the description
                 Ok(Val::Str {
-                    s: arena
-                        .alloc(if description.is_empty() {
-                            String::from("[ _ ]")
-                        } else {
-                            format!("[ _ {description} _ ]")
-                        })
-                        .as_bytes(),
+                    s: StrVal::new_concrete(if description.is_empty() {
+                        String::from("[ _ ]").as_bytes().to_vec()
+                    } else {
+                        format!("[ _ {description} _ ]").as_bytes().to_vec()
+                    }),
                 })
             } else {
                 Err(EvalError::new(
@@ -1244,8 +1334,11 @@ pub fn count_matches<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a
                 .get(b"seq")
                 .map_err(|e| EvalError::from_internal(e, location.clone()))?
             {
-                let matches = VarMyers::new(seq)
-                    .find_all_disjoint(read_seq, (error_rate * seq.len() as f64).round() as usize)
+                let matches = VarMyers::new(seq.as_bytes())
+                    .find_all_disjoint(
+                        read_seq.as_bytes(),
+                        (error_rate * seq.as_bytes().len() as f64).round() as usize,
+                    )
                     .len();
 
                 // allocate the description
@@ -1269,7 +1362,7 @@ pub fn contains<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Ev
     match vtms {
         [Val::List { v }, v0] => {
             // look for the query value in the list
-            for v1 in v {
+            for v1 in v.get_reference() {
                 if v1.eq(v0) {
                     // if you find it, return early
                     return Ok(Val::Bool { b: true });
@@ -1291,7 +1384,7 @@ pub fn contains<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Ev
 pub fn distance<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s: s0 }, Val::Str { s: s1 }] => {
-            let distance = bio::alignment::distance::levenshtein(s0, s1);
+            let distance = bio::alignment::distance::levenshtein(s0.as_bytes(), s1.as_bytes());
             Ok(Val::Num { n: distance as f64 })
         }
 
@@ -1308,7 +1401,7 @@ pub fn to_str<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
         [v @ Val::Str { .. }] => Ok(v.clone()),
         // all else is turned into a string and then allocated
         [v] => Ok(Val::Str {
-            s: arena.alloc(v.to_string()).as_bytes(),
+            s: StrVal::new_concrete(v.to_string().as_bytes().to_vec()),
         }),
 
         _ => Err(EvalError::new(
@@ -1321,7 +1414,7 @@ pub fn to_str<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
 pub fn to_num<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::Str { s }] => Ok(Val::Num {
-            n: String::from_utf8(s.to_vec())
+            n: String::from_utf8(s.as_bytes().to_vec())
                 .unwrap()
                 .parse::<f64>()
                 .map_err(|_| {
@@ -1329,7 +1422,7 @@ pub fn to_num<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eval
                         location,
                         &format!(
                             "couldn't convert string '{}' to a Num!",
-                            bytes_to_string(s).unwrap()
+                            bytes_to_string(s.as_bytes()).unwrap()
                         ),
                     )
                 })?,
@@ -1347,7 +1440,7 @@ pub fn stdout_eff<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, 
         // string types pass straight through to reduce allocations
         [v] => Ok(Val::Effect {
             effect: Effect::Stdout {
-                val: make_portable(arena, v),
+                val: v.to_portable(),
             },
         }),
 
@@ -1363,8 +1456,8 @@ pub fn count_eff<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, E
         // string types pass straight through to reduce allocations
         [v, Val::Str { s: name }] => Ok(Val::Effect {
             effect: Effect::Count {
-                val: make_portable(arena, v),
-                name: name.to_vec(),
+                val: v.to_portable(),
+                name: name.as_bytes().to_vec(),
             },
         }),
 
@@ -1379,8 +1472,8 @@ pub fn out_eff<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, Eva
     match vtms {
         [v, Val::Str { s: filename }] => Ok(Val::Effect {
             effect: Effect::Out {
-                val: make_portable(arena, v),
-                name: filename.to_vec(),
+                val: v.to_portable(),
+                name: filename.as_bytes().to_vec(),
             },
         }),
 
@@ -1396,7 +1489,7 @@ pub fn average_eff<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>,
         [Val::Num { n }, Val::Str { s: name }] => Ok(Val::Effect {
             effect: Effect::Mean {
                 num: *n,
-                name: name.to_vec(),
+                name: name.as_bytes().to_vec(),
             },
         }),
 
@@ -1426,7 +1519,7 @@ pub fn min<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
     match vtms {
         [Val::List { v }] => {
             let mut min = None;
-            for val in v {
+            for val in v.get_reference() {
                 match val {
                     Val::Num { n } => match min {
                         Some(m) => min = Some(f64::min(*n, m)),
@@ -1453,7 +1546,7 @@ pub fn max<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
     match vtms {
         [Val::List { v }] => {
             let mut max = None;
-            for val in v {
+            for val in v.get_reference() {
                 match val {
                     Val::Num { n } => match max {
                         Some(m) => max = Some(f64::max(*n, m)),
@@ -1480,7 +1573,7 @@ pub fn mean<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalEr
     match vtms {
         [Val::List { v }] => {
             let mut total = None;
-            for val in v {
+            for val in v.get_reference() {
                 match val {
                     Val::Num { n } => match total {
                         Some(t) => total = Some(t + *n),
@@ -1492,7 +1585,7 @@ pub fn mean<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalEr
 
             match total {
                 Some(t) => Ok(Val::Num {
-                    n: t / v.len() as f64,
+                    n: t / v.get_reference().len() as f64,
                 }),
                 None => Err(EvalError::new(location, "can't apply `min` to empty list")),
             }
@@ -1509,7 +1602,7 @@ pub fn to_qscores<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, 
     match vtms {
         [Val::Str { s }] => {
             let mut v = vec![];
-            for c in *s {
+            for c in s.as_bytes() {
                 // check that c is a valid Phred character
                 if *c < 33 {
                     return Err(EvalError::new(
@@ -1523,7 +1616,9 @@ pub fn to_qscores<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, 
                 v.push(Val::Num { n: qscore as f64 });
             }
 
-            Ok(Val::List { v })
+            Ok(Val::List {
+                v: ListVal::new_concrete(v),
+            })
         }
 
         _ => Err(EvalError::new(

@@ -437,7 +437,7 @@ impl<'p> ReadMatcher<'p> {
                                             .map(|((bind_ctx, str_val), error)| {
                                                 (
                                                     bind_ctx.reference(),
-                                                    Seq::new(str_val.get_reference(), error),
+                                                    Seq::new(str_val.as_bytes(), error),
                                                 )
                                             })
                                             .collect::<Vec<_>>()[..],

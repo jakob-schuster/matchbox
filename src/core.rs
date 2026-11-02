@@ -20,8 +20,8 @@ use crate::{
     },
 };
 
-pub mod cache;
-pub mod eval;
+// pub mod cache;
+// pub mod eval;
 pub mod eval2;
 pub mod library;
 pub mod matcher;
@@ -223,72 +223,6 @@ struct FunSig {
     body: Arc<Tm>,
 }
 
-impl Tm {
-    fn coerce(&self) -> Tm {
-        let tm_data = match &self.data {
-            TmData::Global { index } => TmData::Global { index: *index },
-            TmData::Local { index } => TmData::Local { index: *index },
-            TmData::Univ => TmData::Univ,
-            TmData::AnyTy => TmData::AnyTy,
-            TmData::BoolTy => TmData::BoolTy,
-            TmData::BoolLit { b } => TmData::BoolLit { b: *b },
-            TmData::NumTy => TmData::NumTy,
-            TmData::NumLit { n } => TmData::NumLit { n: *n },
-            TmData::StrTy => TmData::StrTy,
-            TmData::StrLit { s } => TmData::StrLit { s },
-            TmData::ListTy { ty } => TmData::ListTy {
-                ty: Arc::new(ty.coerce()),
-            },
-            TmData::ListLit { tms } => TmData::ListLit {
-                tms: tms.iter().map(|tm| tm.coerce()).collect(),
-            },
-            TmData::FunTy { args, opts, body } => TmData::FunTy {
-                args: args.iter().map(|tm| tm.coerce()).collect(),
-                opts: opts
-                    .iter()
-                    .map(|(name, ty, val)| (name.clone(), ty.coerce(), val.coerce()))
-                    .collect(),
-                body: Arc::new(body.coerce()),
-            },
-            TmData::FunLit { body } => TmData::FunLit {
-                body: Arc::new(body.coerce()),
-            },
-            TmData::FunForeignLit { body } => TmData::FunForeignLit { body: body.clone() },
-            TmData::FunApp { head, args } => TmData::FunApp {
-                head: Arc::new(head.coerce()),
-                args: args.iter().map(|arg| arg.coerce()).collect(),
-            },
-            TmData::RecTy { fields } => TmData::RecTy {
-                fields: fields
-                    .iter()
-                    .map(|field| CoreRecField::new(field.name.clone(), field.data.coerce()))
-                    .collect(),
-            },
-            TmData::RecWithTy { fields } => TmData::RecWithTy {
-                fields: fields
-                    .iter()
-                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
-                    .collect(),
-            },
-            TmData::RecLit { fields } => TmData::RecLit {
-                fields: fields
-                    .iter()
-                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
-                    .collect(),
-            },
-            TmData::RecProj { tm, name } => TmData::RecProj {
-                tm: Arc::new(tm.coerce()),
-                name,
-            },
-            TmData::EffectTy => TmData::EffectTy,
-            TmData::ErrorTy => todo!(),
-            TmData::Error => todo!(),
-        };
-
-        Tm::new(self.location.clone(), tm_data)
-    }
-}
-
 /// Function that explicitly captures its environment.
 #[derive(Clone)]
 pub struct FunData<'r> {
@@ -299,7 +233,7 @@ pub struct FunData<'r> {
 
 impl<'r> FunData<'r> {
     /// Applies a function to a list of arguments, returning the result.
-    pub fn app<'p: 'r>(&'p self, args: Vec<Val<'r>>) -> Result<Val<'r>, EvalError> {
+    pub fn app<'q: 'r>(&'q self, args: Vec<Val<'r>>) -> Result<Val<'r>, EvalError> {
         let mut new_local = self.local.reference();
         for arg in args {
             new_local.push(arg);
@@ -398,10 +332,6 @@ impl<'r> Val<'r> {
     pub fn concretise<'p>(&self) -> Val<'p> {
         todo!()
     }
-
-    pub fn to_portable(&self) -> PortableVal {
-        todo!()
-    }
 }
 
 /// A string value, either a concrete u8 vector or a slice elsewhere (presumably in the global or local env)
@@ -421,7 +351,7 @@ impl<'r> StrVal<'r> {
     }
 
     /// Get the slice
-    pub fn get_reference(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         match self {
             StrVal::Reference { s } => s,
             StrVal::Concrete { s } => s,
@@ -505,13 +435,13 @@ pub enum Effect {
     Mean { num: f64, name: Vec<u8> },
 }
 
-impl<'a> Val<'a> {
+impl<'r> Val<'r> {
     /// Checks whether two types are equivalent.
     /// When one type is a more general or equally general representation of another, they are equivalent.
-    pub fn equiv(&self, other: &Val<'a>) -> bool {
+    pub fn equiv(&self, other: &Val<'r>) -> bool {
         // takes a field name, and looks it up in the list of fields,
         // returning the type if one is found
-        let get = |fields: &[CoreRecField<Val<'a>>], name: &[u8]| -> Option<Val<'a>> {
+        let get = |fields: &[CoreRecField<Val<'r>>], name: &[u8]| -> Option<Val<'r>> {
             let mut out = None;
             for field in fields {
                 if field.name.eq(name) {
@@ -520,7 +450,7 @@ impl<'a> Val<'a> {
             }
             out
         };
-        let get_opt = |fields: &[(&[u8], Val<'a>, Tm)], name: &[u8]| -> Option<(Val<'a>, Tm)> {
+        let get_opt = |fields: &[(Vec<u8>, Val<'r>, Tm)], name: &[u8]| -> Option<(Val<'r>, Tm)> {
             let mut out = None;
             for (field_name, ty, val) in fields {
                 if field_name.eq(&name) {
@@ -544,13 +474,14 @@ impl<'a> Val<'a> {
             | (Val::BoolTy, Val::BoolTy)
             | (Val::NumTy, Val::NumTy)
             | (Val::StrTy, Val::StrTy)
-            | (Val::EffectTy, Val::EffectTy) => true,
+            | (Val::EffectTy, Val::EffectTy)
+            | (Val::ErrorTy, Val::ErrorTy) => true,
 
             // list types must have equivalent inner types
             (Val::ListTy { ty: ty1 }, Val::ListTy { ty: ty2 }) => ty1.equiv(ty2),
 
-            // equivalent if argument types are the same
-            // and return types are the same
+            // equivalent if argument types are equivalent
+            // and return types are equivalent
             (
                 Val::FunTy {
                     args: args1,
@@ -571,13 +502,15 @@ impl<'a> Val<'a> {
 
                 args1.len().eq(&args2.len())
                     && args1.iter().zip(args2).all(|(arg1, arg2)| arg1.equiv(arg2))
-                    && names.all(|name| match (get_opt(opts1, name), get_opt(opts2, name)) {
-                        // WARN for now do not verify that the values themselves are the same
-                        // just check the types and the names of all the fields
-                        (Some((ty1, val1)), Some((ty2, val2))) => ty1.equiv(&ty2),
-                        // any optional arguments missing is a type error
-                        _ => false,
-                    })
+                    && names.all(
+                        |name| match (get_opt(opts1, &name), get_opt(opts2, &name)) {
+                            // WARN for now do not verify that the values themselves are the same
+                            // just check the types and the names of all the fields
+                            (Some((ty1, val1)), Some((ty2, val2))) => ty1.equiv(&ty2),
+                            // any optional arguments missing is a type error
+                            _ => false,
+                        },
+                    )
                     && body1.equiv(body2)
             }
 
@@ -651,18 +584,20 @@ impl<'a> Val<'a> {
     }
 
     /// Checks whether two values are equal.
-    pub fn eq<'b, 'c>(&self, other: &Val<'c>) -> bool {
+    pub fn eq<'b>(&self, other: &Val<'b>) -> bool {
         match (self, other) {
             (Val::Univ, Val::Univ)
             | (Val::AnyTy, Val::AnyTy)
             | (Val::BoolTy, Val::BoolTy)
             | (Val::NumTy, Val::NumTy)
             | (Val::StrTy, Val::StrTy)
-            | (Val::EffectTy, Val::EffectTy) => true,
+            | (Val::EffectTy, Val::EffectTy)
+            | (Val::Error, Val::Error)
+            | (Val::ErrorTy, Val::ErrorTy) => true,
 
             (Val::Bool { b: b1 }, Val::Bool { b: b2 }) => b1.eq(b2),
             (Val::Num { n: n1 }, Val::Num { n: n2 }) => n1.eq(n2),
-            (Val::Str { s: s1 }, Val::Str { s: s2 }) => s1.eq(s2),
+            (Val::Str { s: s1 }, Val::Str { s: s2 }) => s1.as_bytes().eq(s2.as_bytes()),
 
             // check that all the fields of r1 and all the fields of r2 are the same
             (Val::Rec { rec: r1 }, Val::Rec { rec: r2 }) => {
@@ -687,10 +622,10 @@ impl<'a> Val<'a> {
     }
 
     /// Given another type, return the most precise type of the two.
-    pub fn most_precise(&self, other: &Val<'a>) -> Val<'a> {
+    pub fn most_precise(&self, other: &Val<'r>) -> Val<'r> {
         // takes a field name, and looks it up in the list of fields,
         // returning the type if one is found
-        let get = |fields: &[CoreRecField<Val<'a>>], name: &[u8]| -> Option<Val<'a>> {
+        let get = |fields: &[CoreRecField<Val<'r>>], name: &[u8]| -> Option<Val<'r>> {
             let mut out = None;
             for field in fields {
                 if field.name.eq(name) {
@@ -732,74 +667,13 @@ impl<'a> Val<'a> {
         }
     }
 
-    /// Clumsily move a value from one arena to another,
-    /// necessitated by ConcreteRec, which has its values from a static arena and then needs to produce values in the dynamic arena.
-    /// Probably shockingly inefficient and could be removed with better design.
-    pub fn coerce<'b>(&self) -> Val<'b>
-    where
-        'a: 'b,
-    {
-        match self {
-            Val::Univ => Val::Univ,
-            Val::AnyTy => Val::AnyTy,
-            Val::BoolTy => Val::BoolTy,
-            Val::Bool { b } => Val::Bool { b: *b },
-            Val::NumTy => Val::NumTy,
-            Val::Num { n } => Val::Num { n: *n },
-            Val::StrTy => Val::StrTy,
-            Val::Str { s } => Val::Str { s: s as &'b [u8] },
-            Val::ListTy { ty } => Val::ListTy {
-                ty: Arc::new(ty.coerce()),
-            },
-            Val::List { v } => Val::List {
-                v: v.iter().map(|v| v.coerce() as Val<'b>).collect::<Vec<_>>(),
-            },
-            Val::RecTy { fields } => Val::RecTy {
-                fields: fields
-                    .iter()
-                    .map(|a| CoreRecField::new(a.name, a.data.coerce() as Val<'b>))
-                    .collect(),
-            },
-            Val::RecWithTy { fields } => Val::RecWithTy {
-                fields: fields
-                    .iter()
-                    .map(|a| CoreRecField::new(a.name, a.data.coerce() as Val<'b>))
-                    .collect(),
-            },
-            Val::Rec { rec } => Val::Rec { rec: rec.coerce() },
-            Val::FunTy { args, opts, body } => Val::FunTy {
-                args: args.iter().map(|arg| arg.coerce() as Val<'b>).collect(),
-                body: Arc::new(body.coerce()),
-                opts: opts
-                    .iter()
-                    .map(|(a, b, c)| (a as &'a [u8], b.coerce(), c.coerce()))
-                    .collect(),
-            },
-            Val::Fun { data } => Val::Fun {
-                data: FunData {
-                    global: Env::from_vec(data.global.iter().map(|val| val.coerce()).collect_vec()),
-                    body: data.body.coerce(),
-                },
-            },
-            Val::FunForeign { body: f } => Val::FunForeign { body: f.clone() },
-            Val::FunReturnTyAwaiting { data } => todo!(),
-            Val::Neutral { neutral } => Val::Neutral {
-                neutral: neutral.coerce(),
-            },
-            Val::EffectTy => Val::EffectTy,
-            Val::Effect { effect } => Val::Effect {
-                effect: effect.clone(),
-            },
-        }
-    }
-
     /// Checks if a value is neutral.
     pub fn is_neutral(&self) -> bool {
         match self {
             Val::Neutral { neutral } => true,
 
             Val::ListTy { ty } => ty.is_neutral(),
-            Val::List { v } => v.iter().any(|val| val.is_neutral()),
+            Val::List { v } => v.get_reference().iter().any(|val| val.is_neutral()),
             Val::RecTy { fields } => fields.iter().any(|field| field.data.is_neutral()),
             Val::RecWithTy { fields } => fields.iter().any(|field| field.data.is_neutral()),
             Val::Rec { rec } => rec.is_neutral(),
@@ -808,6 +682,79 @@ impl<'a> Val<'a> {
             }
 
             _ => false,
+        }
+    }
+
+    /// Convert a value to a portable value, so it owns its data and can be shared.
+    pub fn to_portable(&self) -> PortableVal {
+        match self {
+            Val::Univ => PortableVal::Univ,
+
+            Val::BoolTy => PortableVal::BoolTy,
+            Val::Bool { b } => PortableVal::Bool { b: *b },
+
+            Val::NumTy => PortableVal::NumTy,
+            Val::Num { n } => PortableVal::Num { n: n.clone() },
+
+            Val::StrTy => PortableVal::StrTy,
+            Val::Str { s } => PortableVal::Str {
+                s: s.as_bytes().to_vec(),
+            },
+
+            Val::ListTy { ty } => PortableVal::ListTy {
+                ty: Arc::new(ty.to_portable()),
+            },
+            Val::List { v } => PortableVal::List {
+                v: v.get_reference().iter().map(Val::to_portable).collect(),
+            },
+
+            Val::RecTy { fields } => PortableVal::RecTy {
+                fields: fields
+                    .iter()
+                    .map(|field| (field.name.to_vec(), field.data.to_portable()))
+                    .collect(),
+            },
+            Val::RecWithTy { fields } => PortableVal::RecWithTy {
+                fields: fields
+                    .iter()
+                    .map(|field| (field.name.to_vec(), field.data.to_portable()))
+                    .collect(),
+            },
+            Val::Rec { rec } => PortableVal::Rec {
+                fields: rec
+                    .all()
+                    .iter()
+                    .map(|(name, val)| (name.to_vec(), val.to_portable()))
+                    .collect(),
+            },
+
+            Val::FunTy { args, opts, body } => PortableVal::FunTy {
+                args: args.iter().map(Val::to_portable).collect(),
+                opts: opts
+                    .iter()
+                    // WARN to make tms portable, for now just ignore them
+                    .map(|(name, ty, tm)| (name.to_vec(), ty.to_portable(), tm.to_string()))
+                    .collect(),
+                body: Arc::new(body.to_portable()),
+            },
+            Val::Fun { .. } => PortableVal::Fun {
+                s: "#fun".to_string(),
+            },
+            Val::FunForeign { body: f, .. } => PortableVal::Fun {
+                s: "#fun-foreign".to_string(),
+            },
+
+            // not sure what to do with this.. just spit out a string?
+            Val::FunReturnTyAwaiting { .. } => todo!(),
+            Val::Neutral { .. } => todo!(),
+            Val::AnyTy => todo!(),
+
+            Val::EffectTy => PortableVal::EffectTy,
+            Val::Effect { effect } => PortableVal::Effect {
+                effect: Arc::new(effect.clone()),
+            },
+            Val::ErrorTy => PortableVal::ErrorTy,
+            Val::Error => PortableVal::Error,
         }
     }
 }
@@ -859,170 +806,6 @@ pub enum Neutral<'a> {
         tm: Arc<Val<'a>>,
         name: &'a [u8],
     },
-}
-
-impl<'a> Neutral<'a> {
-    fn coerce<'b>(&self) -> Neutral<'b>
-    where
-        'a: 'b,
-    {
-        match self {
-            Neutral::Var { level } => Neutral::Var { level: *level },
-            Neutral::FunApp { head, args } => Neutral::FunApp {
-                head: Arc::new(head.coerce()),
-                args: args.iter().map(|arg| arg.coerce()).collect(),
-            },
-            Neutral::RecProj { tm, name } => Neutral::RecProj {
-                tm: Arc::new(tm.coerce()),
-                name: name.clone(),
-            },
-            Neutral::ListTy { ty } => Neutral::ListTy {
-                ty: Arc::new(ty.coerce()),
-            },
-            Neutral::ListLit { tms } => Neutral::ListLit {
-                tms: tms.iter().map(|tm| tm.coerce()).collect(),
-            },
-            Neutral::FunTy { args, opts, body } => Neutral::FunTy {
-                args: args.iter().map(|arg| arg.coerce()).collect(),
-                opts: opts
-                    .iter()
-                    .map(|(a, b, c)| (a as &'a [u8], b.coerce(), c.coerce()))
-                    .collect(),
-                body: Arc::new(body.coerce()),
-            },
-            Neutral::FunLit { body } => Neutral::FunLit {
-                body: Arc::new(body.coerce()),
-            },
-            Neutral::FunForeignLit { body } => Neutral::FunForeignLit { body: body.clone() },
-            Neutral::RecTy { fields } => Neutral::RecTy {
-                fields: fields
-                    .iter()
-                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
-                    .collect(),
-            },
-            Neutral::RecWithTy { fields } => Neutral::RecWithTy {
-                fields: fields
-                    .iter()
-                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
-                    .collect(),
-            },
-            Neutral::RecLit { fields } => Neutral::RecLit {
-                fields: fields
-                    .iter()
-                    .map(|field| CoreRecField::new(field.name, field.data.coerce()))
-                    .collect(),
-            },
-        }
-    }
-}
-
-/// Applies a head value (expected to be a function) to a list of arguments,
-/// returning the resulting value.
-pub fn app<'a>(
-    arena: &'a Arena,
-    location: &Location,
-    head: Val<'a>,
-    args: Vec<Val<'a>>,
-) -> Result<Val<'a>, EvalError> {
-    // catch if anything's neutral
-    if head.is_neutral() || args.iter().any(|arg| arg.is_neutral()) {
-        Ok(Val::Neutral {
-            neutral: Neutral::FunApp {
-                head: Arc::new(head.clone()),
-                args,
-            },
-        } as Val<'a>)
-    } else {
-        match head {
-            Val::Fun { data } => {
-                data.app(args)
-
-                // eval(
-                //     arena,
-                //     // expensive?
-                //     &args.iter().fold(env.clone(), |env0, arg| env0.with(arg)),
-                //     body,
-                // )
-            }
-            Val::FunForeign { body: f, .. } => f(arena, location, &args),
-            Val::FunReturnTyAwaiting { data } => data.app(arena, args),
-            _ => Err(EvalError::from_internal(
-                InternalError {
-                    message: format!("trying to apply '{}' as a function?!", head),
-                },
-                location.clone(),
-            )),
-        }
-    }
-}
-
-/// Convert a value to a portable value, so it owns its data and can be shared.
-pub fn make_portable<'a>(arena: &'a Arena, val: &Val<'a>) -> PortableVal {
-    match val {
-        Val::Univ => PortableVal::Univ,
-
-        Val::BoolTy => PortableVal::BoolTy,
-        Val::Bool { b } => PortableVal::Bool { b: *b },
-
-        Val::NumTy => PortableVal::NumTy,
-        Val::Num { n } => PortableVal::Num { n: n.clone() },
-
-        Val::StrTy => PortableVal::StrTy,
-        Val::Str { s } => PortableVal::Str { s: s.to_vec() },
-
-        Val::ListTy { ty } => PortableVal::ListTy {
-            ty: Arc::new(make_portable(arena, ty)),
-        },
-        Val::List { v } => PortableVal::List {
-            v: v.iter().map(|val| make_portable(arena, val)).collect(),
-        },
-
-        Val::RecTy { fields } => PortableVal::RecTy {
-            fields: fields
-                .iter()
-                .map(|field| (field.name.to_vec(), make_portable(arena, &field.data)))
-                .collect(),
-        },
-        Val::RecWithTy { fields } => PortableVal::RecWithTy {
-            fields: fields
-                .iter()
-                .map(|field| (field.name.to_vec(), make_portable(arena, &field.data)))
-                .collect(),
-        },
-        Val::Rec { rec } => PortableVal::Rec {
-            fields: rec
-                .all()
-                .iter()
-                .map(|(name, val)| (name.to_vec(), make_portable(arena, val)))
-                .collect(),
-        },
-
-        Val::FunTy { args, opts, body } => PortableVal::FunTy {
-            args: args.iter().map(|arg| make_portable(arena, arg)).collect(),
-            opts: opts
-                .iter()
-                // WARN to make tms portable, for now just serialise them as strings
-                .map(|(name, ty, tm)| (name.to_vec(), make_portable(arena, ty), tm.to_string()))
-                .collect(),
-            body: Arc::new(make_portable(arena, body)),
-        },
-        Val::Fun { .. } => PortableVal::Fun {
-            s: "#fun".to_string(),
-        },
-        Val::FunForeign { body: f, .. } => PortableVal::Fun {
-            s: "#fun-foreign".to_string(),
-        },
-
-        // not sure what to do with this.. just spit out a string?
-        Val::FunReturnTyAwaiting { .. } => todo!(),
-        Val::Neutral { .. } => todo!(),
-        Val::AnyTy => todo!(),
-
-        Val::EffectTy => PortableVal::EffectTy,
-        Val::Effect { effect } => PortableVal::Effect {
-            effect: Arc::new(effect.clone()),
-        },
-    }
 }
 
 /// Represents an error INTERNAL to matchbox; expected to never appear to the user.
@@ -1094,6 +877,9 @@ pub enum PortableVal {
     Effect {
         effect: Arc<Effect>,
     },
+
+    ErrorTy,
+    Error,
 }
 
 impl<'a> Display for Prog<'a> {
@@ -1138,7 +924,7 @@ impl<'a> Display for PatternBranchData<'a> {
     }
 }
 
-impl<'a> Display for TmData<'a> {
+impl Display for TmData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TmData::Global { index } => format!("#cached[{}]", index).fmt(f),
@@ -1210,6 +996,8 @@ impl<'a> Display for TmData<'a> {
                 format!("{}.{}", tm, util::bytes_to_string(name).unwrap()).fmt(f)
             }
             TmData::EffectTy => "Effect".fmt(f),
+            TmData::ErrorTy => "Error".fmt(f),
+            TmData::Error => "#error".fmt(f),
         }
     }
 }
@@ -1230,14 +1018,14 @@ impl<'a> Display for Val<'a> {
             Val::NumTy => "Num".fmt(f),
             Val::Num { n } => n.fmt(f),
             Val::StrTy => "Str".fmt(f),
-            Val::Str { s } => util::bytes_to_string(s).unwrap().fmt(f),
+            Val::Str { s } => util::bytes_to_string(s.as_bytes()).unwrap().fmt(f),
             Val::ListTy { ty } => format!("[{}]", ty).fmt(f),
-            Val::List { v } => format!("[{}]", v.into_iter().join(", ")).fmt(f),
+            Val::List { v } => format!("[{}]", v.get_reference().into_iter().join(", ")).fmt(f),
             Val::RecTy { fields } => format!(
                 "{{ {} }}",
                 fields
                     .iter()
-                    .sorted_by_key(|field| field.name)
+                    .sorted_by_key(|field| &field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1247,7 +1035,7 @@ impl<'a> Display for Val<'a> {
                 "{{ {} .. }}",
                 fields
                     .iter()
-                    .sorted_by_key(|field| field.name)
+                    .sorted_by_key(|field| &field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1303,7 +1091,7 @@ impl<'a> Display for Neutral<'a> {
                 "{{ {} }}",
                 fields
                     .iter()
-                    .sorted_by_key(|field| field.name)
+                    .sorted_by_key(|field| &field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1313,7 +1101,7 @@ impl<'a> Display for Neutral<'a> {
                 "{{ {} .. }}",
                 fields
                     .iter()
-                    .sorted_by_key(|field| field.name)
+                    .sorted_by_key(|field| &field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1323,7 +1111,7 @@ impl<'a> Display for Neutral<'a> {
                 "{{ {} }}",
                 fields
                     .iter()
-                    .sorted_by_key(|field| field.name)
+                    .sorted_by_key(|field| &field.name)
                     .map(|a| a.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1447,6 +1235,8 @@ impl<'a> Display for PortableVal {
             PortableVal::Fun { s } => format!("#func({})", s).fmt(f),
             PortableVal::EffectTy => "Effect".fmt(f),
             PortableVal::Effect { effect } => format!("#effect({})", effect).fmt(f),
+            PortableVal::ErrorTy => "Error".fmt(f),
+            PortableVal::Error => "#error".fmt(f),
         }
     }
 }

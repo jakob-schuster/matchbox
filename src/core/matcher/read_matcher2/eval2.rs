@@ -7,18 +7,6 @@ use crate::core::EvalError;
 use crate::core::matcher::{read_matcher2::*, Matcher};
 
 impl<'p> Matcher<'p> for ReadMatcher<'p> {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a crate::util::Arena,
-        env: &crate::util::env::Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
-    where
-        'p: 'a,
-    {
-        todo!()
-    }
-
     fn eval2<'q, 'r, 'a>(
         &'q self,
         global: &'q env::Env<Val<'p>>,
@@ -37,7 +25,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
             {
                 let ctx = MatchContext::default()
                     .with_loc(0, 0)
-                    .with_loc(self.end, seq.get_reference().len() as i32);
+                    .with_loc(self.end, seq.as_bytes().len() as i32);
 
                 let worlds: Vec<MatchContext<'r>> =
                     self.ops.iter().fold(vec![ctx], |worlds, op| {
@@ -47,7 +35,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                                 op.exec(
                                     global,
                                     local,
-                                    seq.get_reference(),
+                                    seq.as_bytes(),
                                     &match_context,
                                     &self.location,
                                 )
@@ -520,7 +508,7 @@ impl<'p> OpData<'p> {
 
                     match (val, error_val) {
                         (Val::Str { s }, Val::Num { n }) => {
-                            new_binds.push((bind.concretise(), Seq::new(s.get_reference(), n)))
+                            new_binds.push((bind.concretise(), Seq::new(s.as_bytes(), n)))
                         }
                         _ => return Err(EvalError::from_internal(
                             InternalError::new(
@@ -548,7 +536,7 @@ impl<'p> OpData<'p> {
 
                     match (val, error_val) {
                         (Val::Str { s }, Val::Num { n }) => {
-                            new_binds.push((bind.reference(), Seq::new(s.get_reference(), n)))
+                            new_binds.push((bind.reference(), Seq::new(s.as_bytes(), n)))
                         }
                         _ => return Err(EvalError::from_internal(
                             InternalError::new(
@@ -570,7 +558,7 @@ impl<'p> OpData<'p> {
 
                     match val {
                         Val::Num { n } => {
-                            new_binds.push((bind.reference(), Seq::new(str_val.get_reference(), n)))
+                            new_binds.push((bind.reference(), Seq::new(str_val.as_bytes(), n)))
                         }
                         _ => {
                             return Err(EvalError::from_internal(
@@ -594,8 +582,9 @@ impl<'p> OpData<'p> {
                     let val = tm.eval2(global, &new_local)?;
 
                     match val {
-                        Val::Str { s } => new_binds
-                            .push((bind.reference(), Seq::new(s.get_reference(), *error_val))),
+                        Val::Str { s } => {
+                            new_binds.push((bind.reference(), Seq::new(s.as_bytes(), *error_val)))
+                        }
                         _ => {
                             return Err(EvalError::from_internal(
                                 InternalError::new(

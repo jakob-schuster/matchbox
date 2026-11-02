@@ -18,6 +18,7 @@ pub enum RecError {
     BadIndex(String),
 }
 
+#[derive(Clone)]
 pub enum Rec2<'r> {
     Concrete { r: ConcreteRec<'r> },
     FullyConcrete { r: FullyConcreteRec<'r> },
@@ -79,6 +80,32 @@ impl<'r> Rec2<'r> {
 
     pub fn slice(&self, start: usize, end: usize) -> Result<Val<'r>, InternalError> {
         todo!()
+    }
+
+    pub fn is_neutral(&self) -> bool {
+        match self {
+            Rec2::Concrete { r } => r.is_neutral(),
+            Rec2::FullyConcrete { r } => r.is_neutral(),
+            Rec2::FastaRead { r } => r.is_neutral(),
+            Rec2::FastqRead { r } => r.is_neutral(),
+            Rec2::SamRead { r } => r.is_neutral(),
+            Rec2::BamRead { r } => r.is_neutral(),
+            Rec2::CSVRead { r } => r.is_neutral(),
+        }
+    }
+}
+
+impl<'r> Display for Rec2<'r> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Rec2::Concrete { r } => r.fmt(f),
+            Rec2::FullyConcrete { r } => r.fmt(f),
+            Rec2::FastaRead { r } => r.fmt(f),
+            Rec2::FastqRead { r } => r.fmt(f),
+            Rec2::SamRead { r } => r.fmt(f),
+            Rec2::BamRead { r } => r.fmt(f),
+            Rec2::CSVRead { r } => r.fmt(f),
+        }
     }
 }
 
@@ -170,6 +197,7 @@ pub trait Rec<'p>: Display + Send + Sync {
     }
 }
 
+#[derive(Clone)]
 pub struct ConcreteRec<'p> {
     pub map: HashMap<&'p [u8], Val<'p>>,
 }
@@ -197,12 +225,8 @@ impl<'p> Rec<'p> for ConcreteRec<'p> {
     {
         self.map
             .iter()
-            .map(|(a, b)| (a.to_vec(), b.coerce()))
+            .map(|(a, b)| (a.to_vec(), b.reference()))
             .collect()
-        // self.map
-        //     .iter()
-        //     .map(|(a, b)| (a as &'a [u8], b.coerce(arena) as Val<'a>))
-        //     .collect()
     }
 }
 
@@ -220,6 +244,7 @@ impl<'a> Display for ConcreteRec<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct FullyConcreteRec<'p> {
     pub map: HashMap<Vec<u8>, Val<'p>>,
 }
@@ -230,7 +255,7 @@ impl<'p> Rec<'p> for FullyConcreteRec<'p> {
         'p: 'a,
     {
         match self.map.get(key) {
-            Some(val) => Ok(val.coerce()),
+            Some(val) => Ok(val.reference()),
             None => Err(InternalError {
                 message: format!(
                     "could not find field '{}'",
@@ -246,7 +271,7 @@ impl<'p> Rec<'p> for FullyConcreteRec<'p> {
     {
         self.map
             .iter()
-            .map(|(a, b)| (a.clone(), b.coerce() as Val<'a>))
+            .map(|(a, b)| (a.clone(), b.reference()))
             .collect()
     }
 }
@@ -265,6 +290,7 @@ impl<'a> Display for FullyConcreteRec<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct FastaRead<'a> {
     pub read: &'a bio::io::fasta::Record,
 }
@@ -321,6 +347,7 @@ impl<'a> Display for FastaRead<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct FastqRead<'a> {
     pub read: &'a bio::io::fastq::Record,
 }
@@ -388,6 +415,7 @@ impl<'a> Display for FastqRead<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct SamRead<'a> {
     pub read: &'a noodles::sam::Record,
 
@@ -551,6 +579,7 @@ impl<'p> Display for SamRead<'p> {
     }
 }
 
+#[derive(Clone)]
 pub struct BamRead<'a> {
     pub read: &'a noodles::bam::Record,
     pub rname: &'a [u8],
@@ -768,6 +797,7 @@ impl CSVHeader {
     }
 }
 
+#[derive(Clone)]
 pub struct CSVRead<'a> {
     pub header: &'a CSVHeader,
     pub fields: &'a csv::ByteRecord,

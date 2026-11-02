@@ -91,7 +91,7 @@ pub mod context {
         surface::elab2::elab_error::ElabError,
     };
 
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     pub struct Context<'p> {
         global_names: HashMap<String, usize>,
         local_names: HashMap<String, usize>,
@@ -108,7 +108,7 @@ pub mod context {
 
     impl<'p> Context<'p> {
         pub fn new() -> Context<'p> {
-            todo!()
+            Context::default()
         }
 
         /// Create a new reference,
@@ -129,7 +129,15 @@ pub mod context {
             let mut errors = self.errors.clone();
             errors.push(error);
 
-            todo!()
+            Context {
+                global_names: self.global_names.clone(),
+                local_names: self.local_names.clone(),
+                local_tys: self.local_tys.reference(),
+                local_tms: self.local_tms.reference(),
+                global_tys: self.global_tys.reference(),
+                global_tms: self.global_tms.reference(),
+                errors,
+            }
         }
 
         pub fn get_local_env(&self) -> Env<Val<'p>> {
@@ -244,6 +252,13 @@ pub mod context {
                 global_tms: c1.global_tms,
                 errors: c1.errors.clone(),
             }
+        }
+
+        pub fn bind_read_from_reader<'a>(&self, ty: Val<'a>) -> Context<'a>
+        where
+            'p: 'a,
+        {
+            self.bind_param("read", &ty)
         }
     }
 

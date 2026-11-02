@@ -3,24 +3,32 @@ use itertools::Itertools;
 pub mod read_matcher2;
 
 use crate::{
-    core::eval2::env,
+    core::eval2::env::{self, Env},
     myers::VarMyers,
-    util::{env::Env, location::Location, ran::Ran, Arena},
+    util::{location::Location, ran::Ran, Arena},
 };
 
 use super::{EvalError, Val};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub trait Matcher<'p>: Send + Sync + Display {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a;
+        'q: 'r,
+        'p: 'r,
+        'r: 'a;
+}
 
+pub struct Chain<'p> {
+    pub m1: Arc<dyn Matcher<'p> + 'p>,
+    pub m2: Arc<dyn Matcher<'p> + 'p>,
+}
+impl<'p> Matcher<'p> for Chain<'p> {
     fn eval2<'q, 'r, 'a>(
         &'q self,
         global: &'q env::Env<Val<'p>>,
@@ -32,29 +40,10 @@ pub trait Matcher<'p>: Send + Sync + Display {
         'p: 'r,
         'r: 'a,
     {
-        todo!()
-    }
-}
+        let r1 = self.m1.eval2(global, local, val)?;
+        let r2 = self.m2.eval2(global, local, val)?;
 
-pub struct Chain<'p> {
-    pub m1: Arc<dyn Matcher<'p> + 'p>,
-    pub m2: Arc<dyn Matcher<'p> + 'p>,
-}
-impl<'p> Matcher<'p> for Chain<'p> {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
-    where
-        'p: 'a,
-    {
-        let r1 = self.m1.evaluate(arena, env, val)?;
-        let r2 = self.m2.evaluate(arena, env, val)?;
-
-        todo!()
-        // Ok(r1.into_iter().chain(r2).collect::<Vec<_>>())
+        Ok(r1.into_iter().chain(r2).collect::<Vec<_>>())
     }
 }
 
@@ -69,18 +58,20 @@ pub struct FieldAccess<'p> {
     pub inner: Arc<dyn Matcher<'p> + 'p>,
 }
 impl<'p> Matcher<'p> for FieldAccess<'p> {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
         match val {
             Val::Rec { rec } => match rec.get(self.name.as_bytes()) {
-                Ok(field) => self.inner.evaluate(arena, env, &field),
+                Ok(field) => self.inner.eval2(global, local, &field),
                 // such errors are actually OK when pattern matching,
                 // just means the pattern didn't match!
                 Err(_) => Ok(vec![]),
@@ -97,17 +88,18 @@ impl<'p> Display for FieldAccess<'p> {
 
 pub struct Succeed {}
 impl<'p> Matcher<'p> for Succeed {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
-        // one world, with no binds
-        Ok(vec![vec![]])
+        Ok(vec![Env::default()])
     }
 }
 
@@ -119,16 +111,18 @@ impl Display for Succeed {
 
 pub struct Bind {}
 impl<'p> Matcher<'p> for Bind {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
-        Ok(vec![vec![val.clone()]])
+        Ok(vec![Env::default().with_val(val.reference())])
     }
 }
 
@@ -151,19 +145,22 @@ impl<'p> Equal<'p> {
 }
 
 impl<'p> Matcher<'p> for Equal<'p> {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
         if val.eq(&self.val) {
             // one world, with no binds
-            Ok(vec![vec![]])
+            Ok(vec![Env::default()])
         } else {
+            // no worlds
             Ok(vec![])
         }
     }
@@ -175,7 +172,7 @@ impl<'p> Display for Equal<'p> {
     }
 }
 
-struct ErrorMatcher {
+pub struct ErrorMatcher {
     location: Location,
 }
 
@@ -194,18 +191,6 @@ impl Display for ErrorMatcher {
 }
 
 impl<'p> Matcher<'p> for ErrorMatcher {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
-    where
-        'p: 'a,
-    {
-        todo!()
-    }
-
     fn eval2<'q, 'r, 'a>(
         &'q self,
         global: &'q env::Env<Val<'p>>,

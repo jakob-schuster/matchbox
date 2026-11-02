@@ -112,10 +112,10 @@ impl BamReader {
 }
 
 impl Reader for BamReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -420,10 +420,10 @@ impl PairedBamReader {
 }
 
 impl Reader for PairedBamReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -842,10 +842,10 @@ impl RevCompBamReader {
 }
 
 impl Reader for RevCompBamReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {

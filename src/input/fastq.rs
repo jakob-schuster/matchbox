@@ -50,10 +50,10 @@ impl FastqReader {
 }
 
 impl Reader for FastqReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -177,10 +177,10 @@ impl PairedFastqReader {
 }
 
 impl Reader for PairedFastqReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -292,10 +292,10 @@ impl RevCompFastqReader {
 }
 
 impl Reader for RevCompFastqReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -398,10 +398,10 @@ impl FastqDebugReader {
 }
 
 impl Reader for FastqDebugReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {

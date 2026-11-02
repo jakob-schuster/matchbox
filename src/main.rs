@@ -262,6 +262,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
     // elaborate to a core program
     let (core_prog, c3) = prog.elab(&c2);
 
+    // if we are printing compilation debug info, print it now
     if global_config.input_reads.debug_compilation {
         eprintln!("{}", core_prog);
     }
@@ -285,14 +286,17 @@ fn run(code: &str, global_config: &GlobalConfig) {
     .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
     // should never unwrap
     .unwrap();
-    // create the standard library
+
+    let global = c3.get_global_env();
 
     // process the reads
     let a = reader_with_bar
-        .map(&core_prog, &c3.get_global_env(), &mut output_handler)
+        .map(&core_prog, &global, &mut output_handler)
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap
         .unwrap();
+
+    let b = 1;
 }
 
 /// Given the name of a matchbox script,

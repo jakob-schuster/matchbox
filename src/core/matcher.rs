@@ -21,13 +21,14 @@ pub trait Matcher<'p>: Send + Sync + Display {
     where
         'p: 'a;
 
-    fn eval2<'r, 'a>(
-        &'p self,
-        global: &'p env::Env<Val<'p>>,
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
         val: &Val<'r>,
     ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
+        'q: 'r,
         'p: 'r,
         'r: 'a,
     {
@@ -205,13 +206,14 @@ impl<'p> Matcher<'p> for ErrorMatcher {
         todo!()
     }
 
-    fn eval2<'r, 'a>(
-        &'p self,
-        global: &'p env::Env<Val<'p>>,
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
         val: &Val<'r>,
     ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
+        'q: 'r,
         'p: 'r,
         'r: 'a,
     {

@@ -405,10 +405,10 @@ impl ReaderWithBar {
         }
     }
 
-    pub fn map<'p>(
+    pub fn map<'p, 'a>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'a core::Prog<'p>,
+        global: &'a Env<Val<'p>>,
         output_handler: &mut OutputHandler,
     ) -> Result<(), ExecError> {
         self.reader.map(prog, global, output_handler, &mut self.bar)
@@ -429,10 +429,10 @@ pub enum AuxiliaryInputData {
 }
 
 pub trait Reader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError>;

@@ -99,13 +99,14 @@ pub mod env {
 }
 
 impl<'p> Prog<'p> {
-    pub fn eval2<'r, 'a>(
-        &'p self,
-        global: &'p env::Env<Val<'p>>,
+    pub fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
         read: Val<'a>,
     ) -> Result<Vec<Effect>, EvalError>
     where
+        'q: 'r,
         'p: 'r,
         'r: 'a,
     {
@@ -118,12 +119,13 @@ impl<'p> Prog<'p> {
 }
 
 impl<'p> Stmt<'p> {
-    pub fn eval2<'r, 'a>(
-        &'p self,
-        global: &'p env::Env<Val<'p>>,
+    pub fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
     ) -> Result<Vec<Effect>, EvalError>
     where
+        'q: 'r,
         'p: 'r,
         'r: 'a,
     {
@@ -175,12 +177,13 @@ impl<'p> Stmt<'p> {
 }
 
 impl<'p> Branch<'p> {
-    pub fn eval2<'r, 'a>(
-        &'p self,
-        global: &'p env::Env<Val<'p>>,
+    pub fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
     ) -> Result<Option<Vec<Effect>>, EvalError>
     where
+        'q: 'r,
         'p: 'r,
         'r: 'a,
     {
@@ -217,13 +220,14 @@ impl<'p> Branch<'p> {
 }
 
 impl<'p> PatternBranch<'p> {
-    pub fn eval2<'r, 'a>(
-        &'p self,
-        global: &'p env::Env<Val<'p>>,
+    pub fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
         val: &Val<'r>,
     ) -> Result<Option<Vec<Effect>>, EvalError>
     where
+        'q: 'r,
         'p: 'r,
         'r: 'a,
     {
@@ -243,8 +247,8 @@ impl<'p> PatternBranch<'p> {
 }
 
 impl Tm {
-    pub fn eval2<'p: 'r, 'r: 'a, 'a>(
-        &'p self,
+    pub fn eval2<'q: 'r, 'p: 'r, 'r: 'a, 'a>(
+        &'q self,
         global: &'a env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
     ) -> Result<Val<'r>, EvalError> {

@@ -4,6 +4,7 @@ use itertools::{Itertools, PeekingNext};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
+    core,
     core::{eval2::env::Env, library::unary_read_reverse_complement, Effect, StrVal, Val},
     input::{ExecError, ProgressSummary, Reader},
     util::{location::Location, Arena},
@@ -22,10 +23,10 @@ impl ListReader {
 }
 
 impl Reader for ListReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p crate::core::Prog<'p>,
-        global: &'p Env<crate::core::Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut crate::output::OutputHandler,
         progress: &mut dyn super::Progress,
     ) -> Result<(), super::ExecError> {
@@ -88,10 +89,10 @@ impl RevCompListReader {
 }
 
 impl Reader for RevCompListReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p crate::core::Prog<'p>,
-        global: &'p Env<crate::core::Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<Val<'p>>,
         output_handler: &mut crate::output::OutputHandler,
         progress: &mut dyn super::Progress,
     ) -> Result<(), super::ExecError> {

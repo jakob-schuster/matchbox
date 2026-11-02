@@ -46,10 +46,10 @@ impl FastaReader {
 }
 
 impl Reader for FastaReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<core::Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -166,10 +166,10 @@ impl PairedFastaReader {
 }
 
 impl Reader for PairedFastaReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -276,10 +276,10 @@ impl RevCompFastaReader {
 }
 
 impl Reader for RevCompFastaReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &'p core::Prog<'p>,
-        global: &'p Env<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {

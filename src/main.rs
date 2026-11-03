@@ -100,7 +100,7 @@ struct InputReads {
     stdin_format: Option<CLIFileType>,
 
     /// A read file to process.
-    #[arg(conflicts_with_all(["stdin_format", "debug"]), required_unless_present_any(["stdin_format", "debug"]))]
+    #[arg(conflicts_with_all(["stdin_format"]), required_unless_present_any(["stdin_format", "debug"]))]
     reads: Option<String>,
 
     /// Paired reads. Accepts FASTA/FASTQ/SAM/BAM files. File type must match primary read file.
@@ -112,7 +112,7 @@ struct InputReads {
     with_reverse_complement: bool,
 
     /// Compile the script and output debug information
-    #[arg(long, requires("stdin_format"), conflicts_with_all(["reads"]))]
+    #[arg(long)]
     debug_compilation: bool,
 
     /// Run in a single-threaded mode, for easier profiling with flamegraph / samply
@@ -260,7 +260,12 @@ fn run(code: &str, global_config: &GlobalConfig) {
         .unwrap();
 
     // elaborate to a core program
-    let (core_prog, c3) = prog.elab(&c2);
+    let (core_prog, c3) =
+        prog.elab(&c2.bind_read_from_reader(reader_with_bar.get_ty().concretise()));
+
+    eprintln!("{}", c3);
+
+    let c4 = c2.with_global_from(c3);
 
     // if we are printing compilation debug info, print it now
     if global_config.input_reads.debug_compilation {
@@ -268,8 +273,8 @@ fn run(code: &str, global_config: &GlobalConfig) {
     }
 
     // at this point, check for elab errors
-    if !c3.get_errors().is_empty() {
-        for error in c3.get_errors() {
+    if !c4.get_errors().is_empty() {
+        for error in c4.get_errors() {
             // WARN currently errors in standard library or arg struct will be printed wrong
             GenericError::from(error).codespan_print(global_config);
         }
@@ -287,7 +292,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
     // should never unwrap
     .unwrap();
 
-    let global = c3.get_global_env();
+    let global = c4.get_global_env();
 
     // process the reads
     let a = reader_with_bar

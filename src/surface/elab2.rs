@@ -84,7 +84,11 @@ pub mod elab_error {
 }
 
 pub mod context {
-    use std::{collections::HashMap, sync::Arc};
+    use std::{
+        collections::HashMap,
+        fmt::{Display, Pointer},
+        sync::Arc,
+    };
 
     use crate::{
         core::{eval2::env::Env, InternalError, Neutral, Val},
@@ -113,7 +117,7 @@ pub mod context {
 
         /// Create a new reference,
         /// simply making references of any carried values
-        pub fn reference(&self) -> Context<'p> {
+        pub fn reference<'a>(&'a self) -> Context<'a> {
             Context {
                 global_names: self.global_names.clone(),
                 local_names: self.local_names.clone(),
@@ -125,6 +129,18 @@ pub mod context {
             }
         }
 
+        pub fn concretise<'q>(&self) -> Context<'q> {
+            Context {
+                global_names: self.global_names.clone(),
+                local_names: self.local_names.clone(),
+                local_tys: self.local_tys.concretise(),
+                local_tms: self.local_tms.concretise(),
+                global_tys: self.global_tys.concretise(),
+                global_tms: self.global_tms.concretise(),
+                errors: self.errors.clone(),
+            }
+        }
+
         pub fn report(&self, error: ElabError) -> Context<'p> {
             let mut errors = self.errors.clone();
             errors.push(error);
@@ -132,21 +148,26 @@ pub mod context {
             Context {
                 global_names: self.global_names.clone(),
                 local_names: self.local_names.clone(),
-                local_tys: self.local_tys.reference(),
-                local_tms: self.local_tms.reference(),
-                global_tys: self.global_tys.reference(),
-                global_tms: self.global_tms.reference(),
+                local_tys: self.local_tys.clone(),
+                local_tms: self.local_tms.clone(),
+                global_tys: self.global_tys.clone(),
+                global_tms: self.global_tms.clone(),
                 errors,
             }
         }
 
         pub fn get_local_env(&self) -> Env<Val<'p>> {
-            // make a reference, for efficiency
-            self.local_tms.reference()
+            self.local_tms.clone()
         }
 
         pub fn get_global_env(&self) -> Env<Val<'p>> {
-            // make a reference, for efficiency
+            self.global_tms.clone()
+        }
+
+        pub fn get_global_env_reference<'a>(&'a self) -> Env<Val<'a>>
+        where
+            'p: 'a,
+        {
             self.global_tms.reference()
         }
 
@@ -184,8 +205,8 @@ pub mod context {
             'p: 'a,
         {
             // and then add this to the locals and assign the address correctly
-            let mut new_local_tms = self.local_tms.concretise();
-            let mut new_local_tys = self.local_tys.concretise();
+            let mut new_local_tms = self.local_tms.clone();
+            let mut new_local_tys = self.local_tys.clone();
             let mut new_local_names = self.local_names.clone();
             new_local_tys.push(ty.concretise());
             new_local_tms.push(tm.concretise());
@@ -194,8 +215,8 @@ pub mod context {
             Context {
                 local_tys: new_local_tys,
                 local_tms: new_local_tms,
-                global_tys: self.global_tys.concretise(),
-                global_tms: self.global_tms.concretise(),
+                global_tys: self.global_tys.clone(),
+                global_tms: self.global_tms.clone(),
                 errors: self.errors.clone(),
                 global_names: self.global_names.clone(),
                 local_names: new_local_names,
@@ -208,16 +229,16 @@ pub mod context {
             'p: 'b,
         {
             // and then add this to the locals and assign the address correctly
-            let mut new_global_tms = self.global_tms.concretise();
-            let mut new_global_tys = self.global_tys.concretise();
+            let mut new_global_tms = self.global_tms.clone();
+            let mut new_global_tys = self.global_tys.clone();
             let mut new_global_names = self.global_names.clone();
             new_global_tys.push(ty.concretise());
             new_global_tms.push(tm.concretise());
             new_global_names.insert(name.to_string(), self.global_tys.len());
 
             Context {
-                local_tys: self.local_tys.concretise(),
-                local_tms: self.local_tms.concretise(),
+                local_tys: self.local_tys.clone(),
+                local_tms: self.local_tms.clone(),
                 global_tys: new_global_tys,
                 global_tms: new_global_tms,
                 errors: self.errors.clone(),
@@ -238,7 +259,7 @@ pub mod context {
         where
             'p: 'a,
         {
-            self.bind_local(name, ty.concretise(), self.next_neutral())
+            self.bind_local(name, ty.clone(), self.next_neutral())
         }
 
         /// Retain the local bindings, but carry the global bindings and errors from the new context
@@ -246,8 +267,8 @@ pub mod context {
             Context {
                 global_names: c1.global_names.clone(),
                 local_names: self.local_names.clone(),
-                local_tys: self.local_tys.concretise(),
-                local_tms: self.local_tms.concretise(),
+                local_tys: self.local_tys.clone(),
+                local_tms: self.local_tms.clone(),
                 global_tys: c1.global_tys,
                 global_tms: c1.global_tms,
                 errors: c1.errors.clone(),
@@ -262,10 +283,30 @@ pub mod context {
         }
     }
 
+    impl<'p> Display for Context<'p> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.local_names
+                .iter()
+                .map(|(key, val)| format!("{}: {}", key, val))
+                .collect::<Vec<_>>()
+                .join(", ")
+                .fmt(f)
+        }
+    }
+
     #[derive(Clone)]
     pub enum Address {
         Global { index: usize },
         Local { index: usize },
+    }
+
+    impl Display for Address {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Address::Global { index } => format!("global[{}]", index).fmt(f),
+                Address::Local { index } => format!("local[{}]", index).fmt(f),
+            }
+        }
     }
 }
 
@@ -277,7 +318,7 @@ impl Prog {
             // handle the empty program
             [] => (
                 core::Stmt::new(self.location.clone(), core::StmtData::End),
-                c0.reference(),
+                c0.clone(),
             ),
         };
 
@@ -299,7 +340,7 @@ impl Stmt {
                 let (cstmt, c1) = match &stmts[..] {
                     [] => (
                         core::Stmt::new(self.location.clone(), core::StmtData::End),
-                        c0.reference(),
+                        c0.clone(),
                     ),
                     [next, rest1 @ ..] => {
                         let (next_cstmt, c1) = next.elab(c0, rest1);
@@ -341,7 +382,7 @@ impl Stmt {
                 let c3 = if val.is_neutral() {
                     c2.bind_param(name, &ty)
                 } else {
-                    c2.bind(name, ty, val.reference())
+                    c2.bind(name, ty, val.clone())
                 };
 
                 // elaborate the rest of the statements, using the new context
@@ -395,7 +436,7 @@ impl Stmt {
             }
             StmtData::If { branches } => {
                 let (cbranches, c1) = {
-                    let mut cx = c0.reference();
+                    let mut cx = c0.clone();
                     let mut cbranches = vec![];
                     for branch in branches {
                         let (cbranch, cy) = branch.elab(c0);
@@ -451,7 +492,7 @@ impl Branch {
             BranchData::Matches { tm, branches } => {
                 let (ctm, cty, c1) = tm.infer(c0);
 
-                let mut final_ty = core::Val::AnyTy;
+                let mut final_ty = cty;
 
                 let mut final_branches = vec![];
                 let mut cx = c1;
@@ -503,6 +544,7 @@ impl PatternBranch {
         ty: &Val<'p>,
     ) -> (core::PatternBranch<'p>, Val<'p>, Context<'p>) {
         let (matcher, ty1, bind_tys) = self.data.pat.infer(c0, ty);
+        eprintln!("bind_tys = {}", bind_tys);
 
         let c1 = if !ty1.equiv(ty) {
             c0.report(elab_error::ElabError::new(
@@ -510,10 +552,11 @@ impl PatternBranch {
                 &format!("mismatched types: expected {}, found {}", ty, ty1),
             ))
         } else {
-            c0.reference()
+            c0.clone()
         };
 
-        let (stmt, c2) = self.data.stmt.elab(&c1, &[]);
+        let (stmt, c2) = self.data.stmt.elab(&bind_tys, &[]);
+        let c3 = c1.with_global_from(c2);
 
         (
             core::PatternBranch::new(
@@ -521,7 +564,7 @@ impl PatternBranch {
                 core::PatternBranchData { matcher, stmt },
             ),
             ty1,
-            c2,
+            c3,
         )
     }
 }
@@ -545,20 +588,16 @@ impl Pattern {
 
                 (matcher, ty1, c2)
             }
-            PatternData::Hole => (
-                Arc::new(core::matcher::Succeed {}),
-                Val::AnyTy,
-                c0.reference(),
-            ),
+            PatternData::Hole => (Arc::new(core::matcher::Succeed {}), Val::AnyTy, c0.clone()),
             PatternData::BoolLit { b } => (
                 Arc::new(core::matcher::Equal::new(&Val::Bool { b: *b })),
                 Val::BoolTy,
-                c0.reference(),
+                c0.clone(),
             ),
             PatternData::NumLit { n } => (
                 Arc::new(core::matcher::Equal::new(&Val::Num { n: n.get_float() })),
                 Val::NumTy,
-                c0.reference(),
+                c0.clone(),
             ),
             PatternData::StrLit { s } => (
                 // WARN could be wasteful
@@ -566,7 +605,7 @@ impl Pattern {
                     s: core::StrVal::new_concrete(s.clone()),
                 })),
                 Val::StrTy,
-                c0.reference(),
+                c0.clone(),
             ),
             PatternData::RecLit { fields } => {
                 // TODO warn if the name is already assigned
@@ -576,7 +615,7 @@ impl Pattern {
                     (
                         Arc::new(core::matcher::Succeed {}) as Arc<dyn core::matcher::Matcher>,
                         vec![],
-                        c0.reference(),
+                        c0.clone(),
                     ),
                     |(m0, tys, cx), field| {
                         let (m1, ty1, c1) = field.data.infer(&cx, ty);
@@ -606,7 +645,7 @@ impl Pattern {
                 // and the type of it itself
 
                 // everything else happens in here
-                let (matcher, c2) = ReadMatcher::infer(c0, regs, binds, mode, &self.location);
+                let (matcher, c2) = ReadMatcher::infer(c0, regs, binds, mode, &self.location, ty);
 
                 let matcher1 = match matcher {
                     itertools::Either::Left(m) => Arc::new(m) as Arc<dyn Matcher>,
@@ -672,7 +711,7 @@ impl Tm {
                                 Address::Local { index } => core::TmData::Local { index },
                             },
                         ),
-                        ty.reference(),
+                        ty.clone(),
                         c0.clone(),
                     ),
                     // looking up unbound names is reported as an error
@@ -707,7 +746,7 @@ impl Tm {
                 (ctm, Val::StrTy, c1)
             }
             TmData::RecTy { fields } => {
-                let mut cx = c0.reference();
+                let mut cx = c0.clone();
                 let mut core_fields = vec![];
 
                 for field in fields {
@@ -732,7 +771,7 @@ impl Tm {
                 )
             }
             TmData::RecWithTy { fields } => {
-                let mut cx = c0.reference();
+                let mut cx = c0.clone();
                 let mut core_fields = vec![];
 
                 for field in fields {
@@ -757,7 +796,7 @@ impl Tm {
                 )
             }
             TmData::RecLit { fields } => {
-                let mut cx = c0.reference();
+                let mut cx = c0.clone();
                 let mut ctms = vec![];
                 let mut tys = vec![];
 
@@ -795,7 +834,7 @@ impl Tm {
                                         name: name.as_bytes().to_vec(),
                                     },
                                 ),
-                                field.data.reference(),
+                                field.data.clone(),
                                 c1,
                             ),
                             None => (core::Tm::new_error(&self.location), Val::ErrorTy, c1.report(elab_error::ElabError::new(&self.location, "trying to access field of a value which doesn't have any fields"))),
@@ -826,7 +865,7 @@ impl Tm {
             }
             TmData::ListLit { tms } => {
                 // go through each tm, inferring and checking type
-                let mut cx = c0.reference();
+                let mut cx = c0.clone();
 
                 let mut final_ty = Val::AnyTy;
                 let mut ctms = vec![];
@@ -858,19 +897,18 @@ impl Tm {
                 )
             }
             TmData::FunTy { args, opts, body } => {
-                let (core_args, c1) =
-                    args.iter().fold((vec![], c0.reference()), |(acc, cx), tm| {
-                        let (ctm, cy) = tm.check(&cx, &Val::Univ);
-                        let mut acc1 = acc.clone();
-                        acc1.push(ctm);
+                let (core_args, c1) = args.iter().fold((vec![], c0.clone()), |(acc, cx), tm| {
+                    let (ctm, cy) = tm.check(&cx, &Val::Univ);
+                    let mut acc1 = acc.clone();
+                    acc1.push(ctm);
 
-                        (acc1, cy)
-                    });
+                    (acc1, cy)
+                });
 
                 let (core_opts, c2) =
                     match opts
                         .iter()
-                        .try_fold((vec![], c1.reference()), |(acc, cx), opt| {
+                        .try_fold((vec![], c1.clone()), |(acc, cx), opt| {
                             let (ty, cx1) = opt.ty.check(&cx, &Val::Univ);
                             let ty_val = match ty.eval2(&cx1.get_global_env(), &cx1.get_local_env())
                             {
@@ -916,7 +954,7 @@ impl Tm {
                 // make sure each param has a type associated which is actually a type
                 let (arg_ctms, c1) = {
                     let mut arg_ctms = vec![];
-                    let mut cx = c0.reference();
+                    let mut cx = c0.clone();
                     for arg in args {
                         let (arg_ty_ctm, cy) = arg.ty.check(&cx, &Val::Univ);
                         cx = cy;
@@ -939,7 +977,7 @@ impl Tm {
                 // add together all the optional arguments and regular arguments
                 let (opt_tys_ctms, c2) = {
                     let mut opt_tys_ctms = vec![];
-                    let mut cx = c1.reference();
+                    let mut cx = c1.clone();
                     for opt in opts {
                         let (opt_ty_ctm, cy) = opt.ty.check(&cx, &Val::Univ);
                         cx = cy;
@@ -966,7 +1004,7 @@ impl Tm {
                 };
 
                 let c_inner = {
-                    let mut cx = c2.reference();
+                    let mut cx = c2.clone();
                     // first bind all the params
                     for (name, val) in &arg_ctms {
                         cx = cx.bind_param(&name, &val);
@@ -989,11 +1027,11 @@ impl Tm {
                         },
                     ),
                     Val::FunTy {
-                        args: arg_ctms.iter().map(|(_, val)| val.concretise()).collect(),
+                        args: arg_ctms.iter().map(|(_, val)| val.clone()).collect(),
                         opts: opt_tys_ctms
                             .iter()
                             .map(|(name, val, tm)| {
-                                (name.as_bytes().to_vec(), val.concretise(), tm.clone())
+                                (name.as_bytes().to_vec(), val.clone(), tm.clone())
                             })
                             .collect(),
                         body: Arc::new(body_ty),
@@ -1010,7 +1048,7 @@ impl Tm {
                 // make sure each param has a type associated which is actually a type
                 let (arg_ctms, c1) = {
                     let mut arg_ctms = vec![];
-                    let mut cx = c0.reference();
+                    let mut cx = c0.clone();
                     for arg in args {
                         let (arg_ty_ctm, cy) = arg.ty.check(&cx, &Val::Univ);
                         cx = cy;
@@ -1033,7 +1071,7 @@ impl Tm {
                 // add together all the optional arguments and regular arguments
                 let (opt_tys_ctms, c2) = {
                     let mut opt_tys_ctms = vec![];
-                    let mut cx = c1.reference();
+                    let mut cx = c1.clone();
                     for opt in opts {
                         let (opt_ty_ctm, cy) = opt.ty.check(&cx, &Val::Univ);
                         cx = cy;
@@ -1060,7 +1098,7 @@ impl Tm {
                 };
 
                 let c_inner = {
-                    let mut cx = c2.reference();
+                    let mut cx = c2.clone();
                     // first bind all the params
                     for (name, val) in &arg_ctms {
                         cx = cx.bind_param(&name, &val);
@@ -1073,13 +1111,14 @@ impl Tm {
                     cx
                 };
 
-                let (cty, c3) = ty.check(&c_inner, &Val::Univ);
+                let (cty, c1_inner) = ty.check(&c_inner, &Val::Univ);
                 let (cty_val, c4) =
-                    match cty.eval2(&c_inner.get_global_env(), &c_inner.get_local_env()) {
-                        Ok(val) => (val.concretise(), c3),
+                    match cty.eval2(&c1_inner.get_global_env(), &c1_inner.get_local_env()) {
+                        Ok(val) => (val.concretise(), c2.with_global_from(c1_inner)),
                         Err(e) => (
                             Val::Error,
-                            c3.report(elab_error::ElabError::from_eval_error(e)),
+                            c2.with_global_from(c1_inner)
+                                .report(elab_error::ElabError::from_eval_error(e)),
                         ),
                     };
 
@@ -1164,7 +1203,7 @@ impl Tm {
                         // then, go through the optional arguments from the type.
                         // where they have been provided in this application, overwrite their associated term
                         let (opt_ctms, c2) = {
-                            let mut cx = c1.reference();
+                            let mut cx = c1.clone();
                             let mut ctms = vec![];
                             for (name, ty, tm) in &opts_ty {
                                 match opts
@@ -1188,7 +1227,7 @@ impl Tm {
                         // correspond to the function's argument type
                         // - and if any are neutrals, the whole thing is neutral
                         let (arg_ctms, c3) = {
-                            let mut cx = c2.reference();
+                            let mut cx = c2.clone();
                             let mut arg_ctms = vec![];
                             for (arg, arg_ty) in args.iter().zip(args_ty) {
                                 let (arg_ctm, cy) = arg.check(&cx, &arg_ty);
@@ -1429,7 +1468,7 @@ fn elab_str_lit_regs<'p>(
         // we started with an empty region
         [] => (
             core::Tm::new(location.clone(), core::TmData::StrLit { s: vec![] }),
-            c0.reference(),
+            c0.clone(),
         ),
     }
 }
@@ -1439,7 +1478,7 @@ impl StrLitRegion {
         match &self.data {
             StrLitRegionData::Str { s } => (
                 core::Tm::new(self.location.clone(), core::TmData::StrLit { s: s.clone() }),
-                c0.reference(),
+                c0.clone(),
             ),
             StrLitRegionData::Tm { tm } => tm.check(c0, &Val::StrTy),
         }
@@ -1481,7 +1520,7 @@ impl BinOp {
                                 Address::Local { index } => core::TmData::Local { index },
                             },
                         ),
-                        ty.concretise(),
+                        ty.clone(),
                     ),
                     Ok(None) => {
                         return (
@@ -1511,7 +1550,7 @@ impl BinOp {
                                 args: vec![ctm0, ctm1],
                             },
                         ),
-                        (*body).concretise(),
+                        (*body).clone(),
                         c2,
                     ),
 
@@ -1588,7 +1627,7 @@ impl UnOp {
                                 Address::Local { index } => core::TmData::Local { index },
                             },
                         ),
-                        ty.concretise(),
+                        ty.clone(),
                     ),
                     Ok(None) => {
                         return (
@@ -1618,7 +1657,7 @@ impl UnOp {
                                 args: vec![ctm],
                             },
                         ),
-                        (*body).concretise(),
+                        (*body).clone(),
                         cx,
                     ),
 

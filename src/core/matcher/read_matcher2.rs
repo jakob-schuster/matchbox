@@ -7,7 +7,6 @@ use crate::{
         self,
         eval2::env,
         matcher::read_matcher2::{
-            elab2::{CoreReadParameter, CoreReadParameterData},
             eval2::match_context::{bind_context::BindContext, location_context::LocationContext},
             seq::Seq,
         },
@@ -54,7 +53,7 @@ pub struct ReadMatcher<'p> {
 
 impl<'p> Display for ReadMatcher<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        "#read_matcher".fmt(f)
     }
 }
 
@@ -189,7 +188,46 @@ impl<'p> OpData<'p> {
     }
 
     fn reference<'r>(&'r self) -> OpData<'r> {
-        todo!()
+        match self {
+            OpData::Unevaluated {
+                params,
+                tm,
+                error_tm,
+            } => OpData::Unevaluated {
+                params: params.iter().map(|param| param.reference()).collect(),
+                tm: tm.clone(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialA {
+                binds,
+                tm,
+                error_tm,
+            } => OpData::PartialA {
+                binds: binds.iter().map(|bind_ctx| bind_ctx.reference()).collect(),
+                tm: tm.clone(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialB { binds, error_tm } => OpData::PartialB {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, val)| (bind_ctx.reference(), val.reference()))
+                    .collect(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialC { binds, tm } => OpData::PartialC {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, error_rate)| (bind_ctx.reference(), *error_rate))
+                    .collect(),
+                tm: tm.clone(),
+            },
+            OpData::FullyEvaluated { binds } => OpData::FullyEvaluated {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, seq)| (bind_ctx.reference(), seq.clone()))
+                    .collect(),
+            },
+        }
     }
 
     fn concretise<'q>(&self) -> OpData<'q> {
@@ -249,22 +287,44 @@ impl<'p> OpData<'p> {
     }
 }
 
-#[derive(Clone)]
+enum OpDataEvalResult<'p> {
+    Concrete { v: Vec<(BindContext<'p>, Seq)> },
+    Reference { v: &'p Vec<(BindContext<'p>, Seq)> },
+}
+
+impl<'p> OpDataEvalResult<'p> {
+    pub fn iter(&self) -> std::slice::Iter<'_, (BindContext<'p>, seq::Seq)> {
+        match self {
+            OpDataEvalResult::Concrete { v } => v.iter(),
+            OpDataEvalResult::Reference { v } => v.iter(),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
 struct ParamContext<'p> {
     map: HashMap<String, ParamData<'p>>,
 }
 
 impl<'p> ParamContext<'p> {
     fn new() -> ParamContext<'p> {
-        todo!()
+        ParamContext::default()
     }
 
     fn with(&self, name: &str, param_data: ParamData<'p>) -> ParamContext<'p> {
-        todo!()
+        let mut new_map = self
+            .map
+            .iter()
+            .map(|(key, val)| (key.clone(), val.concretise()))
+            .collect::<HashMap<_, _>>();
+
+        new_map.insert(name.to_string(), param_data);
+
+        ParamContext { map: new_map }
     }
 
     fn get(&self, name: &str) -> Option<ParamData<'p>> {
-        todo!()
+        self.map.get(name).map(|param_data| param_data.concretise())
     }
 }
 

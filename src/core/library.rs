@@ -1500,21 +1500,6 @@ pub fn average_eff<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>,
     }
 }
 
-pub fn slice_read<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
-    match vtms {
-        [Val::Rec { rec }] => {
-            let a = todo!();
-
-            todo!()
-        }
-
-        _ => Err(EvalError::new(
-            &location,
-            "bad arguments given to function?!",
-        )),
-    }
-}
-
 pub fn min<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalError> {
     match vtms {
         [Val::List { v }] => {

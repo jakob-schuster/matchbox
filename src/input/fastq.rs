@@ -104,7 +104,7 @@ impl Reader for FastqReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 }
@@ -254,7 +254,7 @@ impl Reader for PairedFastqReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 }
@@ -360,7 +360,7 @@ impl Reader for RevCompFastqReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 }
@@ -452,7 +452,7 @@ impl Reader for FastqDebugReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 }

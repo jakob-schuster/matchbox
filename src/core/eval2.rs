@@ -78,13 +78,13 @@ pub mod env {
     }
 
     impl<'p> Env<Val<'p>> {
-        pub fn with_val(&self, val: Val<'p>) -> Env<Val<'p>> {
+        pub fn with_val<'a>(&'a self, val: Val<'a>) -> Env<Val<'a>> {
             let mut new = self.reference();
             new.push(val);
             new
         }
 
-        pub fn reference(&self) -> Env<Val<'p>> {
+        pub fn reference<'a>(&'a self) -> Env<Val<'a>> {
             Env {
                 vec: self.vec.iter().map(|val| val.reference()).collect(),
             }
@@ -249,7 +249,7 @@ impl<'p> PatternBranch<'p> {
 impl Tm {
     pub fn eval2<'q: 'r, 'p: 'r, 'r: 'a, 'a>(
         &'q self,
-        global: &'a env::Env<Val<'p>>,
+        global: &'q env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
     ) -> Result<Val<'r>, EvalError> {
         match &self.data {
@@ -260,7 +260,7 @@ impl Tm {
             TmData::Local { index } => Ok(local
                 .get(*index)
                 .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
-                .clone()),
+                .concretise()),
             TmData::Univ => Ok(Val::Univ),
             TmData::AnyTy => Ok(Val::AnyTy),
             TmData::BoolTy => Ok(Val::BoolTy),
@@ -437,7 +437,7 @@ impl Tm {
                         tm: Arc::new(Val::Neutral {
                             neutral: neutral.clone(),
                         }),
-                        name,
+                        name: name.to_vec(),
                     },
                 }),
                 val => Err(EvalError::from_internal(

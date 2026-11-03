@@ -48,12 +48,12 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                 // or all the possible worlds
                 match self.mode {
                     MatchMode::All => {
-                        let mut envs = vec![];
+                        let mut envs: Vec<env::Env<Val<'r>>> = vec![];
                         for c0 in worlds {
-                            let mut vals = local.reference();
+                            let mut vals = local.clone();
 
                             for (_, val) in c0.binds.map.iter().sorted_by_key(|(id, _)| **id) {
-                                vals.push(val.reference());
+                                vals.push(val.clone());
                             }
 
                             for ran in self.binds.iter() {
@@ -76,10 +76,10 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
                     }
                     MatchMode::One => {
                         if let Some(c0) = worlds.iter().sorted_by_key(|c0| c0.edit_dist).next() {
-                            let mut vals = local.reference();
+                            let mut vals = local.clone();
 
                             for (_, val) in c0.binds.map.iter().sorted_by_key(|(id, _)| **id) {
-                                vals.push(val.reference());
+                                vals.push(val.clone());
                             }
 
                             for ran in self.binds.iter() {
@@ -109,12 +109,12 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
 
                             match &all_best[..] {
                                 [c0] => {
-                                    let mut vals = local.reference();
+                                    let mut vals = local.clone();
 
                                     for (_, val) in
                                         c0.binds.map.iter().sorted_by_key(|(id, _)| **id)
                                     {
-                                        vals.push(val.reference());
+                                        vals.push(val.clone());
                                     }
 
                                     for ran in self.binds.iter() {
@@ -211,7 +211,7 @@ pub mod match_context {
         pub fn with_loc(&self, loc: usize, pos: i32) -> MatchContext<'p> {
             MatchContext {
                 locs: self.locs.with(loc, pos),
-                binds: self.binds.reference(),
+                binds: self.binds.clone(),
                 edit_dist: self.edit_dist,
             }
         }
@@ -227,12 +227,12 @@ pub mod match_context {
         pub fn with_edit_dist(&self, edit_dist: u8) -> MatchContext<'p> {
             MatchContext {
                 locs: self.locs.clone(),
-                binds: self.binds.reference(),
+                binds: self.binds.clone(),
                 edit_dist: edit_dist,
             }
         }
 
-        pub fn reference(&self) -> MatchContext<'p> {
+        pub fn reference<'a>(&'a self) -> MatchContext<'a> {
             MatchContext {
                 locs: self.locs.clone(),
                 binds: self.binds.reference(),
@@ -300,14 +300,14 @@ pub mod match_context {
                 let mut map = self
                     .map
                     .iter()
-                    .map(|(id, val)| (*id, val.reference()))
+                    .map(|(id, val)| (*id, val.clone()))
                     .collect::<HashMap<usize, Val<'p>>>();
                 map.insert(id, val);
 
                 BindContext { map }
             }
 
-            pub fn reference(&self) -> BindContext<'p> {
+            pub fn reference<'a>(&'a self) -> BindContext<'a> {
                 BindContext {
                     map: self
                         .map
@@ -331,9 +331,7 @@ pub mod match_context {
                 self.map
                     .iter()
                     .sorted_by_key(|(index, _)| **index)
-                    .fold(env0.reference(), |env0, (_, val)| {
-                        env0.with_val(val.reference())
-                    })
+                    .fold(env0.clone(), |env0, (_, val)| env0.with(val.clone()))
             }
 
             pub fn iter(&self) -> std::collections::hash_map::Iter<'_, usize, Val<'_>> {
@@ -349,7 +347,7 @@ impl<'p> Op<'p> {
         global: &'a env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
         seq: &[u8],
-        c0: &MatchContext<'p>,
+        c0: &'a MatchContext<'p>,
         location: &Location,
     ) -> Result<Vec<MatchContext<'p>>, EvalError>
     where
@@ -377,7 +375,7 @@ impl<'p> Op<'p> {
                 data,
             } => {
                 // we must be able to concretise A at this point; otherwise, we're in trouble
-                let ctxs: Vec<(BindContext<'p>, Seq)> = data.eval(global, local, location)?;
+                let ctxs = data.eval(global, local, location)?;
 
                 let filtered = ctxs.iter().filter(|(bs, _)| {
                     bs.iter().all(|(id, val)| {
@@ -407,7 +405,7 @@ impl<'p> Op<'p> {
                             .combinations(save.len())
                             .map(|c| MatchContext {
                                 binds: local_binds.iter().fold(
-                                    c0.binds.reference(),
+                                    c0.binds.clone(),
                                     |old_bind_ctx, (id, val)| {
                                         // bit costly... can we do this differently?
                                         old_bind_ctx.with(*id, val.concretise())
@@ -459,11 +457,11 @@ impl<'p> Op<'p> {
 
 impl<'p> OpData<'p> {
     fn eval<'r, 'a>(
-        &self,
+        &'p self,
         global: &'a env::Env<Val<'p>>,
         local: &'a env::Env<Val<'r>>,
         location: &Location,
-    ) -> Result<Vec<(BindContext<'p>, Seq)>, EvalError>
+    ) -> Result<OpDataEvalResult, EvalError>
     where
         'p: 'r,
         'r: 'a,
@@ -480,16 +478,17 @@ impl<'p> OpData<'p> {
                         ParamData::Unevaluated { index, tm, ty } => {
                             let val = tm.eval2(global, local)?;
 
-                            let list_val =
-                                match val {
-                                    Val::List { v } => a.push((*index, v)),
-                                    _ => return Err(EvalError::from_internal(
+                            match val {
+                                Val::List { v } => a.push((*index, v)),
+                                _ => {
+                                    return Err(EvalError::from_internal(
                                         InternalError::new(
                                             "could not evaluate parameter even in read context?!",
                                         ),
                                         location.clone(),
-                                    )),
-                                };
+                                    ))
+                                }
+                            }
                         }
                         ParamData::Evaluated { index, vals, ty } => {
                             a.push((*index, vals.reference()))
@@ -519,7 +518,7 @@ impl<'p> OpData<'p> {
                     }
                 }
 
-                Ok(new_binds)
+                Ok(OpDataEvalResult::Concrete { v: new_binds })
             }
             OpData::PartialA {
                 binds,
@@ -536,7 +535,7 @@ impl<'p> OpData<'p> {
 
                     match (val, error_val) {
                         (Val::Str { s }, Val::Num { n }) => {
-                            new_binds.push((bind.reference(), Seq::new(s.as_bytes(), n)))
+                            new_binds.push((bind.clone(), Seq::new(s.as_bytes(), n)))
                         }
                         _ => return Err(EvalError::from_internal(
                             InternalError::new(
@@ -547,7 +546,7 @@ impl<'p> OpData<'p> {
                     }
                 }
 
-                Ok(new_binds)
+                Ok(OpDataEvalResult::Concrete { v: new_binds })
             }
             OpData::PartialB { binds, error_tm } => {
                 let mut new_binds = vec![];
@@ -558,7 +557,7 @@ impl<'p> OpData<'p> {
 
                     match val {
                         Val::Num { n } => {
-                            new_binds.push((bind.reference(), Seq::new(str_val.as_bytes(), n)))
+                            new_binds.push((bind.clone(), Seq::new(str_val.as_bytes(), n)))
                         }
                         _ => {
                             return Err(EvalError::from_internal(
@@ -571,7 +570,7 @@ impl<'p> OpData<'p> {
                     }
                 }
 
-                Ok(new_binds)
+                Ok(OpDataEvalResult::Concrete { v: new_binds })
             }
             OpData::PartialC { binds, tm } => {
                 let mut new_binds = vec![];
@@ -583,7 +582,7 @@ impl<'p> OpData<'p> {
 
                     match val {
                         Val::Str { s } => {
-                            new_binds.push((bind.reference(), Seq::new(s.as_bytes(), *error_val)))
+                            new_binds.push((bind.clone(), Seq::new(s.as_bytes(), *error_val)))
                         }
                         _ => {
                             return Err(EvalError::from_internal(
@@ -596,9 +595,9 @@ impl<'p> OpData<'p> {
                     }
                 }
 
-                Ok(new_binds)
+                Ok(OpDataEvalResult::Concrete { v: new_binds })
             }
-            OpData::FullyEvaluated { binds } => Ok(binds.to_vec()),
+            OpData::FullyEvaluated { binds } => Ok(OpDataEvalResult::Reference { v: binds }),
         }
     }
 }

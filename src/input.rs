@@ -414,7 +414,7 @@ impl ReaderWithBar {
         self.reader.map(prog, global, output_handler, &mut self.bar)
     }
 
-    pub fn get_ty<'a>(&mut self) -> Val<'a> {
+    pub fn get_ty<'a>(&'a self) -> Val<'a> {
         self.reader.get_ty()
     }
 
@@ -439,7 +439,7 @@ pub trait Reader {
 
     fn count(&mut self) -> usize;
 
-    fn get_ty<'a>(&self) -> Val<'a>;
+    fn get_ty<'a>(&'a self) -> Val<'a>;
 
     fn get_aux_data(&self) -> AuxiliaryInputData {
         AuxiliaryInputData::None

@@ -213,7 +213,7 @@ impl Reader for BamReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 
@@ -589,7 +589,7 @@ impl Reader for PairedBamReader {
         self.reader.records().count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 
@@ -957,7 +957,7 @@ impl Reader for RevCompBamReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 

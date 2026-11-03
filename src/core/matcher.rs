@@ -122,7 +122,7 @@ impl<'p> Matcher<'p> for Bind {
         'p: 'r,
         'r: 'a,
     {
-        Ok(vec![Env::default().with_val(val.reference())])
+        Ok(vec![Env::default().with(val.clone())])
     }
 }
 
@@ -138,9 +138,7 @@ pub struct Equal<'p> {
 
 impl<'p> Equal<'p> {
     pub fn new(val: &Val<'p>) -> Equal<'p> {
-        Equal {
-            val: val.reference(),
-        }
+        Equal { val: val.clone() }
     }
 }
 

@@ -9,11 +9,10 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use rec::{ConcreteRec, FastaRead, FullyConcreteRec, Rec};
 
 use crate::{
-    core::rec::Rec2,
+    core::{eval2::env::Env, rec::Rec2},
     util::{
         self, bytes_to_string,
         cache::Cache,
-        env::Env,
         location::{Located, Location},
         recfield::{CoreRecField, RecField},
         Arena,
@@ -226,8 +225,8 @@ struct FunSig {
 /// Function that explicitly captures its environment.
 #[derive(Clone)]
 pub struct FunData<'r> {
-    pub global: eval2::env::Env<Val<'r>>,
-    pub local: eval2::env::Env<Val<'r>>,
+    pub global: Env<Val<'r>>,
+    pub local: Env<Val<'r>>,
     pub body: Tm,
 }
 
@@ -240,6 +239,22 @@ impl<'r> FunData<'r> {
         }
 
         self.body.eval2(&self.global, &new_local)
+    }
+
+    pub fn reference<'a>(&'a self) -> FunData<'a> {
+        FunData {
+            global: self.global.reference(),
+            local: self.local.reference(),
+            body: self.body.clone(),
+        }
+    }
+
+    pub fn concretise<'p>(&self) -> FunData<'p> {
+        FunData {
+            global: self.global.concretise(),
+            local: self.local.concretise(),
+            body: self.body.clone(),
+        }
     }
 }
 
@@ -325,12 +340,116 @@ pub enum Val<'r> {
 }
 
 impl<'r> Val<'r> {
-    pub fn reference(&self) -> Val<'r> {
-        todo!()
+    pub fn reference<'a>(&'a self) -> Val<'a> {
+        match self {
+            Val::Univ => Val::Univ,
+            Val::AnyTy => Val::AnyTy,
+            Val::BoolTy => Val::BoolTy,
+            Val::Bool { b } => Val::Bool { b: *b },
+            Val::NumTy => Val::NumTy,
+            Val::Num { n } => Val::Num { n: *n },
+            Val::StrTy => Val::StrTy,
+            Val::Str { s } => Val::Str { s: s.reference() },
+            Val::ListTy { ty } => Val::ListTy {
+                ty: Arc::new(ty.reference()),
+            },
+            Val::List { v } => Val::List { v: v.reference() },
+            Val::RecTy { fields } => Val::RecTy {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.reference()))
+                    .collect(),
+            },
+            Val::RecWithTy { fields } => Val::RecWithTy {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.reference()))
+                    .collect(),
+            },
+            Val::Rec { rec } => Val::Rec {
+                rec: rec.reference(),
+            },
+            Val::FunTy { args, opts, body } => Val::FunTy {
+                args: args.iter().map(|arg| arg.reference()).collect(),
+                opts: opts
+                    .iter()
+                    .map(|(name, ty, tm)| (name.clone(), ty.reference(), tm.clone()))
+                    .collect(),
+                body: Arc::new(body.reference()),
+            },
+            Val::Fun { data } => Val::Fun {
+                data: data.reference(),
+            },
+            Val::FunForeign { body } => Val::FunForeign { body: body.clone() },
+            Val::FunReturnTyAwaiting { data } => Val::FunReturnTyAwaiting {
+                data: data.reference(),
+            },
+            Val::Neutral { neutral } => Val::Neutral {
+                neutral: neutral.reference(),
+            },
+            Val::EffectTy => Val::EffectTy,
+            Val::Effect { effect } => Val::Effect {
+                effect: effect.clone(),
+            },
+            Val::ErrorTy => Val::ErrorTy,
+            Val::Error => Val::Error,
+        }
     }
 
     pub fn concretise<'p>(&self) -> Val<'p> {
-        todo!()
+        match self {
+            Val::Univ => Val::Univ,
+            Val::AnyTy => Val::AnyTy,
+            Val::BoolTy => Val::BoolTy,
+            Val::Bool { b } => Val::Bool { b: *b },
+            Val::NumTy => Val::NumTy,
+            Val::Num { n } => Val::Num { n: *n },
+            Val::StrTy => Val::StrTy,
+            Val::Str { s } => Val::Str { s: s.concretise() },
+            Val::ListTy { ty } => Val::ListTy {
+                ty: Arc::new(ty.concretise()),
+            },
+            Val::List { v } => Val::List { v: v.concretise() },
+            Val::RecTy { fields } => Val::RecTy {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.concretise()))
+                    .collect(),
+            },
+            Val::RecWithTy { fields } => Val::RecWithTy {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.concretise()))
+                    .collect(),
+            },
+            Val::Rec { rec } => Val::Rec {
+                rec: rec.concretise(),
+            },
+            Val::FunTy { args, opts, body } => Val::FunTy {
+                args: args.iter().map(|arg| arg.concretise()).collect(),
+                opts: opts
+                    .iter()
+                    .map(|(name, ty, tm)| (name.clone(), ty.concretise(), tm.clone()))
+                    .collect(),
+                body: Arc::new(body.concretise()),
+            },
+            Val::Fun { data } => Val::Fun {
+                data: data.concretise(),
+            },
+            Val::FunForeign { body } => Val::FunForeign { body: body.clone() },
+            Val::FunReturnTyAwaiting { data } => Val::FunReturnTyAwaiting {
+                data: data.concretise(),
+            },
+            Val::Neutral { neutral } => Val::Neutral {
+                neutral: neutral.concretise(),
+            },
+            Val::EffectTy => Val::EffectTy,
+            Val::Effect { effect } => Val::Effect {
+                effect: effect.clone(),
+            },
+            Val::ErrorTy => Val::ErrorTy,
+            Val::Error => Val::Error,
+        }
     }
 }
 
@@ -804,8 +923,110 @@ pub enum Neutral<'a> {
     },
     RecProj {
         tm: Arc<Val<'a>>,
-        name: &'a [u8],
+        name: Vec<u8>,
     },
+}
+
+impl<'r> Neutral<'r> {
+    pub fn reference<'a>(&'a self) -> Neutral<'a> {
+        match self {
+            Neutral::Var { level } => Neutral::Var { level: *level },
+            Neutral::ListTy { ty } => Neutral::ListTy {
+                ty: Arc::new(ty.reference()),
+            },
+            Neutral::ListLit { tms } => Neutral::ListLit {
+                tms: tms.iter().map(Val::reference).collect(),
+            },
+            Neutral::FunTy { args, opts, body } => Neutral::FunTy {
+                args: args.iter().map(Val::reference).collect(),
+                opts: opts
+                    .iter()
+                    .map(|(name, ty, tm)| (name.clone(), ty.reference(), tm.clone()))
+                    .collect(),
+                body: Arc::new(body.reference()),
+            },
+            Neutral::FunLit { body } => Neutral::FunLit {
+                body: Arc::new(body.reference()),
+            },
+            Neutral::FunForeignLit { body } => Neutral::FunForeignLit { body: body.clone() },
+            Neutral::FunApp { head, args } => Neutral::FunApp {
+                head: Arc::new(head.reference()),
+                args: args.iter().map(Val::reference).collect(),
+            },
+            Neutral::RecTy { fields } => Neutral::RecTy {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.reference()))
+                    .collect(),
+            },
+            Neutral::RecWithTy { fields } => Neutral::RecWithTy {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.reference()))
+                    .collect(),
+            },
+            Neutral::RecLit { fields } => Neutral::RecLit {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.reference()))
+                    .collect(),
+            },
+            Neutral::RecProj { tm, name } => Neutral::RecProj {
+                tm: Arc::new(tm.reference()),
+                name: name.clone(),
+            },
+        }
+    }
+
+    pub fn concretise<'p>(&self) -> Neutral<'p> {
+        match self {
+            Neutral::Var { level } => Neutral::Var { level: *level },
+            Neutral::ListTy { ty } => Neutral::ListTy {
+                ty: Arc::new(ty.concretise()),
+            },
+            Neutral::ListLit { tms } => Neutral::ListLit {
+                tms: tms.iter().map(Val::concretise).collect(),
+            },
+            Neutral::FunTy { args, opts, body } => Neutral::FunTy {
+                args: args.iter().map(Val::concretise).collect(),
+                opts: opts
+                    .iter()
+                    .map(|(name, ty, tm)| (name.clone(), ty.concretise(), tm.clone()))
+                    .collect(),
+                body: Arc::new(body.concretise()),
+            },
+            Neutral::FunLit { body } => Neutral::FunLit {
+                body: Arc::new(body.concretise()),
+            },
+            Neutral::FunForeignLit { body } => Neutral::FunForeignLit { body: body.clone() },
+            Neutral::FunApp { head, args } => Neutral::FunApp {
+                head: Arc::new(head.concretise()),
+                args: args.iter().map(Val::concretise).collect(),
+            },
+            Neutral::RecTy { fields } => Neutral::RecTy {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.concretise()))
+                    .collect(),
+            },
+            Neutral::RecWithTy { fields } => Neutral::RecWithTy {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.concretise()))
+                    .collect(),
+            },
+            Neutral::RecLit { fields } => Neutral::RecLit {
+                fields: fields
+                    .iter()
+                    .map(|c| CoreRecField::new(&c.name, c.data.concretise()))
+                    .collect(),
+            },
+            Neutral::RecProj { tm, name } => Neutral::RecProj {
+                tm: Arc::new(tm.concretise()),
+                name: name.clone(),
+            },
+        }
+    }
 }
 
 /// Represents an error INTERNAL to matchbox; expected to never appear to the user.
@@ -928,7 +1149,7 @@ impl Display for TmData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TmData::Global { index } => format!("#cached[{}]", index).fmt(f),
-            TmData::Local { index } => format!("#[{}]", index).fmt(f),
+            TmData::Local { index } => format!("#[{}]", *index).fmt(f),
             TmData::Univ => "Univ".fmt(f),
             TmData::AnyTy => "Any".fmt(f),
             TmData::BoolTy => "Bool".fmt(f),

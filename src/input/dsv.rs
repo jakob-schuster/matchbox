@@ -106,7 +106,7 @@ impl Reader for DSVReader {
         self.reader.records().count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         let fields = self
             .field_names
             .iter()

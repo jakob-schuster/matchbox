@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    fmt::{Debug, Display},
+    sync::Arc,
+};
 
 use itertools::{Either, Itertools};
 
@@ -26,7 +29,7 @@ use crate::{
     util::{location::Location, ran::Ran},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum FlatRegion {
     Hole,
     Tm {
@@ -34,14 +37,6 @@ enum FlatRegion {
         tm: surface::Tm,
         // the term representing the error rate
         error_tm: surface::Tm,
-    },
-}
-enum CoreFlatRegionA {
-    Hole,
-    Tm {
-        params: Vec<core::Tm>,
-        tm: core::Tm,
-        error_tm: core::Tm,
     },
 }
 
@@ -61,23 +56,6 @@ impl<'p> CoreFlatRegion<'p> {
 }
 
 #[derive(Clone)]
-pub struct CoreReadParameter<'p> {
-    pub name: String,
-    pub tm: core::Tm,
-    pub ty: Val<'p>,
-}
-
-impl<'p> CoreReadParameter<'p> {
-    pub fn reference<'r>(&'r self) -> CoreReadParameter<'r> {
-        CoreReadParameter {
-            name: self.name.clone(),
-            tm: self.tm.clone(),
-            ty: self.ty.reference(),
-        }
-    }
-}
-
-#[derive(Clone)]
 pub enum CoreReadParameterData<'p> {
     Unevaluated { ctm: &'p core::Tm },
     Evaluated { vals: ListVal<'p> },
@@ -92,38 +70,6 @@ impl<'p> CoreReadParameterData<'p> {
         match self {
             CoreReadParameterData::Unevaluated { ctm } => true,
             CoreReadParameterData::Evaluated { vals } => false,
-        }
-    }
-
-    pub fn partial_eval<'r, 'a>(
-        &self,
-        global: &'a env::Env<Val<'p>>,
-        local: &'a env::Env<Val<'r>>,
-        location: &Location,
-    ) -> Result<Either<CoreReadParameterData<'r>, ListVal<'r>>, EvalError>
-    where
-        'p: 'r,
-        'r: 'a,
-    {
-        match self {
-            CoreReadParameterData::Unevaluated { ctm } => {
-                let val = ctm.eval2(global, local)?;
-
-                if val.is_neutral() {
-                    Ok(Either::Left(CoreReadParameterData::Unevaluated {
-                        ctm: ctm,
-                    }))
-                } else {
-                    match val {
-                        Val::List { v } => Ok(Either::Right(v)),
-                        _ => Err(EvalError::new(
-                            location,
-                            "match parameter was not a list value?!",
-                        )),
-                    }
-                }
-            }
-            CoreReadParameterData::Evaluated { vals } => Ok(Either::Right(vals.concretise())),
         }
     }
 
@@ -157,60 +103,6 @@ impl<'p> CoreReadParameterData<'p> {
     }
 }
 
-struct ParamTable<'a> {
-    vec: Vec<(String, core::Tm, Option<ListVal<'a>>)>,
-}
-
-impl<'a> ParamTable<'a> {
-    fn new(c0: Context<'a>, params: &[ReadParameter]) -> (Option<ParamTable<'a>>, Context<'a>) {
-        // elaborate each read parameter
-        let mut cx = c0.reference();
-        let mut v = vec![];
-        for param in params {
-            let (ctm, ty, cy) = param.data.tm.infer(&cx);
-            cx = cy;
-
-            // extract the inner type;
-            let inner_ty = match ty {
-                Val::ListTy { ty } => ty.reference(),
-                _ => {
-                    return (
-                        None,
-                        cx.report(ElabError::new(
-                            &param.location,
-                            &format!(
-                                "parameter {} must be selecting from a List",
-                                param.data.name
-                            ),
-                        )),
-                    )
-                }
-            };
-
-            // try to evaluate
-            let owned_ctm = ctm.clone();
-
-            let val = match owned_ctm.eval2(&cx.get_global_env(), &cx.get_local_env()) {
-                Ok(val) => val.concretise(),
-                Err(_) => return (None, cx),
-            };
-
-            if val.is_neutral() {
-                v.push((param.data.name.clone(), ctm.clone(), None));
-            } else {
-                match &val {
-                    Val::List { v: list_val } => {
-                        v.push((param.data.name.clone(), owned_ctm, Some(val.clone())));
-                    }
-                    _ => return (None, cx),
-                }
-            }
-        }
-
-        todo!()
-    }
-}
-
 impl<'p> ReadMatcher<'p> {
     pub fn infer(
         c0: &Context<'p>,
@@ -218,6 +110,7 @@ impl<'p> ReadMatcher<'p> {
         params: &[ReadParameter],
         mode: &MatchMode,
         location: &Location,
+        ty: &Val<'p>,
     ) -> (Either<ReadMatcher<'p>, ErrorMatcher>, Context<'p>) {
         // first, separate all the regions out into
         // - a vec of hole/tm
@@ -237,10 +130,23 @@ impl<'p> ReadMatcher<'p> {
             (r.sized, r.named, r.regions)
         };
 
+        eprintln!(
+            "sized: {}",
+            sized.iter().map(|e| format!("{:?}", e)).join(",")
+        );
+        eprintln!(
+            "named: {}",
+            named.iter().map(|e| format!("{:?}", e)).join(",")
+        );
+        eprintln!(
+            "regs: {}",
+            regs.iter().map(|e| format!("{:?}", e)).join(",")
+        );
+
         // go through the params, and typecheck them,
         // building a context with all params in
         let (params_ctx, c1): (_, Context<'p>) = {
-            let mut cx = c0.reference();
+            let mut cx = c0.clone();
 
             let mut params_ctx = ParamContext::new();
 
@@ -250,7 +156,7 @@ impl<'p> ReadMatcher<'p> {
 
                 // extract the inner type;
                 let inner_ty = match ty {
-                    Val::ListTy { ty } => ty.reference(),
+                    Val::ListTy { ty } => ty.concretise(),
                     _ => {
                         return (
                             Either::Right(ErrorMatcher::new(location)),
@@ -319,9 +225,9 @@ impl<'p> ReadMatcher<'p> {
         };
 
         // now go through each term, and if all the params are already evaluated, then build ctxs and try to evaluate the tm and the error_tm
-        let (core_regs, c4): (Vec<Ranged<CoreFlatRegion>>, Context<'p>) = {
+        let (core_regs, c3): (Vec<Ranged<CoreFlatRegion>>, Context<'p>) = {
             let mut core_regs = vec![];
-            let mut cx = c2.reference();
+            let mut cx = c2.clone();
 
             for reg in &regs {
                 let core_reg = match &reg.data {
@@ -329,6 +235,7 @@ impl<'p> ReadMatcher<'p> {
                     FlatRegion::Tm { tm, error_tm } => {
                         // first, get the list of parameters that need to be bound in this region
                         // get the ids from the term that are also in the ids of the params
+                        eprintln!("entered a tm");
                         let param_names = params
                             .iter()
                             .map(|param| param.data.name.clone())
@@ -352,20 +259,21 @@ impl<'p> ReadMatcher<'p> {
                         let c3 = params
                             .iter()
                             .sorted_by_key(|(_, param)| param.get_index())
-                            .fold(c2.reference(), |c0, (name, param)| {
+                            .fold(c2.clone(), |c0, (name, param)| {
                                 c0.bind_param(name, param.get_ty())
                             });
                         // elaborate the terms
                         let (ctm, tm_ctx) = tm.check(&c3, &Val::StrTy);
-                        let (error_ctm, error_tm_ctx) = error_tm.check(&tm_ctx, &Val::StrTy);
+                        let (error_ctm, error_tm_ctx) = error_tm.check(&tm_ctx, &Val::NumTy);
                         cx = cx.with_global_from(tm_ctx).with_global_from(error_tm_ctx);
+                        eprintln!("elaborated tm");
 
                         if let Some(a) = params
                             .iter()
                             .map(|(_, param)| match param {
                                 ParamData::Unevaluated { .. } => None,
                                 ParamData::Evaluated { index, vals, ty } => {
-                                    Some((*index, vals.concretise()))
+                                    Some((*index, vals.clone()))
                                 }
                             })
                             .collect::<Option<Vec<_>>>()
@@ -374,6 +282,7 @@ impl<'p> ReadMatcher<'p> {
 
                             // also, build an env we can evaluate in
                             let bind_ctxs = core_read_params_to_bind_ctxs(&a);
+                            eprintln!("elaborated tm");
 
                             let mut all_tm_evaluated = true;
                             let mut all_error_tm_evaluated = true;
@@ -384,15 +293,16 @@ impl<'p> ReadMatcher<'p> {
                                 let local = bind_ctx.to_env(&cx.get_local_env());
 
                                 if all_tm_evaluated {
-                                    let val = match ctm.eval2(&cx.get_global_env(), &local) {
-                                        Ok(val) => val.concretise(),
-                                        Err(e) => {
-                                            return (
-                                                Either::Right(ErrorMatcher::new(location)),
-                                                cx.report(ElabError::from_eval_error(e)),
-                                            )
-                                        }
-                                    };
+                                    let val =
+                                        match ctm.eval2(&cx.get_global_env_reference(), &local) {
+                                            Ok(val) => val.concretise(),
+                                            Err(e) => {
+                                                return (
+                                                    Either::Right(ErrorMatcher::new(location)),
+                                                    cx.report(ElabError::from_eval_error(e)),
+                                                )
+                                            }
+                                        };
 
                                     if val.is_neutral() {
                                         all_tm_evaluated = false;
@@ -405,16 +315,17 @@ impl<'p> ReadMatcher<'p> {
                                 }
 
                                 if all_error_tm_evaluated {
-                                    let error_val =
-                                        match error_ctm.eval2(&cx.get_global_env(), &local) {
-                                            Ok(val) => val.concretise(),
-                                            Err(e) => {
-                                                return (
-                                                    Either::Right(ErrorMatcher::new(location)),
-                                                    cx.report(ElabError::from_eval_error(e)),
-                                                )
-                                            }
-                                        };
+                                    let error_val = match error_ctm
+                                        .eval2(&cx.get_global_env_reference(), &local)
+                                    {
+                                        Ok(val) => val.concretise(),
+                                        Err(e) => {
+                                            return (
+                                                Either::Right(ErrorMatcher::new(location)),
+                                                cx.report(ElabError::from_eval_error(e)),
+                                            )
+                                        }
+                                    };
 
                                     if error_val.is_neutral() {
                                         all_error_tm_evaluated = false;
@@ -436,7 +347,7 @@ impl<'p> ReadMatcher<'p> {
                                             .zip(error_vals)
                                             .map(|((bind_ctx, str_val), error)| {
                                                 (
-                                                    bind_ctx.reference(),
+                                                    bind_ctx.clone(),
                                                     Seq::new(str_val.as_bytes(), error),
                                                 )
                                             })
@@ -449,9 +360,7 @@ impl<'p> ReadMatcher<'p> {
                                         &bind_ctxs
                                             .iter()
                                             .zip(vals)
-                                            .map(|(bind_ctx, str_val)| {
-                                                (bind_ctx.reference(), str_val)
-                                            })
+                                            .map(|(bind_ctx, str_val)| (bind_ctx.clone(), str_val))
                                             .collect::<Vec<_>>()[..],
                                         error_ctm.clone(),
                                     )),
@@ -463,7 +372,7 @@ impl<'p> ReadMatcher<'p> {
                                             .iter()
                                             .zip(error_vals)
                                             .map(|(bind_ctx, error_val)| {
-                                                (bind_ctx.reference(), error_val)
+                                                (bind_ctx.clone(), error_val)
                                             })
                                             .collect::<Vec<_>>()[..],
                                         ctm.clone(),
@@ -501,6 +410,7 @@ impl<'p> ReadMatcher<'p> {
 
             (core_regs, cx)
         };
+        eprintln!("got core_regs");
 
         // now we have a list of partially evaluated term forms which can live for 'p and we will just write an eval function which is a normal eval function
 
@@ -518,6 +428,8 @@ impl<'p> ReadMatcher<'p> {
             // and compare them against each other...
             .sorted_by_key(|ranged| ranged.data.get_priority())
             .collect();
+
+        eprintln!("got bindable_regs");
 
         fn check_all_fixed_lens<'p>(
             ops: &[Op<'p>],
@@ -548,7 +460,7 @@ impl<'p> ReadMatcher<'p> {
                                 },
                                 flanking,
                             });
-                            known.push(a.ran.start);
+                            known.push(a.ran.end);
                         }
                         (false, true) => {
                             ops.push(Op::Let {
@@ -563,11 +475,10 @@ impl<'p> ReadMatcher<'p> {
                             known.push(a.ran.start);
                         }
 
-                        // can't get here
                         (false, false) => {
-                            return Err(InternalError::new(
-                                "trying to bind a region unbounded on both sides?!",
-                            ))
+                            // return Err(InternalError::new(
+                            //     "trying to bind a region unbounded on both sides",
+                            // ))
                         }
                     }
                 }
@@ -575,7 +486,7 @@ impl<'p> ReadMatcher<'p> {
                 Ok(ops)
             }
 
-            let mut ops1 = ops.iter().map(Op::concretise).collect::<Vec<_>>();
+            let mut ops1 = ops.iter().map(Op::clone).collect::<Vec<_>>();
             let mut known1 = known.to_vec();
             let mut previous_len = ops1.len();
 
@@ -595,6 +506,12 @@ impl<'p> ReadMatcher<'p> {
             known: &[usize],
             ran: &Ran<usize>,
         ) -> Result<Ran<usize>, InternalError> {
+            eprintln!(
+                "known: [{}]; ran: {}",
+                known.iter().map(|a| a.to_string()).join(","),
+                ran
+            );
+
             if let (Some(start), Some(end)) = (
                 known.iter().filter(|loc| **loc <= ran.start).max(),
                 known.iter().filter(|loc| **loc >= ran.end).min(),
@@ -612,9 +529,15 @@ impl<'p> ReadMatcher<'p> {
 
         // now, we go through each of the bindable regions
         for op_data in &bindable_regs {
+            eprintln!("doing {:?}", op_data.ran);
             let (known1, ops1) = match check_all_fixed_lens(&ops, &known, &sized_ctm) {
                 Ok(data) => data,
-                Err(e) => return (Either::Right(ErrorMatcher::new(location)), c4),
+                Err(e) => {
+                    return (
+                        Either::Right(ErrorMatcher::new(location)),
+                        c3.report(ElabError::from_internal_error(location.clone(), e)),
+                    )
+                }
             };
 
             known = known1;
@@ -622,7 +545,12 @@ impl<'p> ReadMatcher<'p> {
 
             let search: Ran<usize> = match get_tightest_known(&known, &op_data.ran) {
                 Ok(ran) => ran,
-                Err(e) => return (Either::Right(ErrorMatcher::new(location)), c4),
+                Err(e) => {
+                    return (
+                        Either::Right(ErrorMatcher::new(location)),
+                        c3.report(ElabError::from_internal_error(location.clone(), e)),
+                    )
+                }
             };
 
             let fixed = Ran::new(
@@ -639,13 +567,41 @@ impl<'p> ReadMatcher<'p> {
 
             known.push(op_data.ran.start);
             known.push(op_data.ran.end);
+
+            eprintln!("now known is {:?}", known);
         }
 
         // check for range restriction one final time
         let (known, ops) = match check_all_fixed_lens(&ops, &known, &sized_ctm) {
             Ok(data) => data,
-            Err(e) => return (Either::Right(ErrorMatcher::new(location)), c4),
+            Err(e) => {
+                return (
+                    Either::Right(ErrorMatcher::new(location)),
+                    c3.report(ElabError::from_internal_error(location.clone(), e)),
+                )
+            }
         };
+
+        eprintln!(
+            "binds = {}",
+            named
+                .iter()
+                .map(|a| format!("{} {}", a.ran, a.data))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+
+        // bind the params and then the names
+        let c4 = params_ctx.map.iter().fold(c3.clone(), |cx, (name, param)| {
+            cx.bind_param(name, param.get_ty())
+        });
+        let c5 = named
+            .iter()
+            .fold(c4.clone(), |cx, name| cx.bind_param(&name.data, ty));
+
+        // params_ctx.map.iter().map(|(a,b)| c);
+
+        eprintln!("c5 = {}", c5);
 
         (
             Either::Left(ReadMatcher {
@@ -655,12 +611,12 @@ impl<'p> ReadMatcher<'p> {
                 mode: mode.elab(),
                 location: location.clone(),
             }),
-            c4,
+            c5,
         )
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Ranged<T> {
     data: T,
     ran: Ran<usize>,
@@ -689,19 +645,57 @@ fn flatten(regions: &[Region]) -> FlattenResult {
 
     impl Accumulator {
         fn with_hole(&self, loc: usize) -> Accumulator {
-            todo!()
+            let mut new_regions = self.regions.clone();
+            new_regions.push(Ranged::new(FlatRegion::Hole, Ran::new(loc, loc + 1)));
+
+            Accumulator {
+                i: self.i + 1,
+                sized: self.sized.clone(),
+                named: self.named.clone(),
+                regions: new_regions,
+            }
         }
 
         fn with_named(&self, name: &str, loc: usize, length: usize) -> Accumulator {
-            todo!()
+            let mut new_named = self.named.clone();
+            new_named.push(Ranged::new(name.to_string(), Ran::new(loc, loc + length)));
+
+            Accumulator {
+                i: self.i,
+                sized: self.sized.clone(),
+                named: new_named,
+                regions: self.regions.clone(),
+            }
         }
 
         fn with_sized(&self, size: surface::Tm, loc: usize, length: usize) -> Accumulator {
-            todo!()
+            let mut new_sized = self.sized.clone();
+            new_sized.push(Ranged::new(size, Ran::new(loc, loc + length)));
+
+            Accumulator {
+                i: self.i,
+                sized: new_sized,
+                named: self.named.clone(),
+                regions: self.regions.clone(),
+            }
         }
 
         fn with_term(&self, tm: surface::Tm, error: surface::Tm, loc: usize) -> Accumulator {
-            todo!()
+            let mut new_regions = self.regions.clone();
+            new_regions.push(Ranged::new(
+                FlatRegion::Tm {
+                    tm,
+                    error_tm: error,
+                },
+                Ran::new(loc, loc + 1),
+            ));
+
+            Accumulator {
+                i: self.i + 1,
+                sized: self.sized.clone(),
+                named: self.named.clone(),
+                regions: new_regions,
+            }
         }
     }
 
@@ -767,7 +761,7 @@ pub fn core_read_params_to_bind_ctxs<'p>(
         let mut new_ctxs = vec![];
         for ctx in &ctxs {
             for val in list_val.get_reference() {
-                let new_ctx = ctx.with(*index, val.reference());
+                let new_ctx = ctx.with(*index, val.clone());
                 new_ctxs.push(new_ctx);
             }
         }

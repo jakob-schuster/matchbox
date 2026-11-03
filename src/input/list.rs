@@ -71,8 +71,8 @@ impl Reader for ListReader {
         (&mut self.lines).count()
     }
 
-    fn get_ty<'a>(&self) -> crate::core::Val<'a> {
-        crate::core::Val::StrTy
+    fn get_ty<'a>(&'a self) -> Val<'a> {
+        Val::StrTy
     }
 }
 
@@ -149,7 +149,7 @@ impl Reader for RevCompListReader {
         (&mut self.lines).count()
     }
 
-    fn get_ty<'a>(&self) -> crate::core::Val<'a> {
-        crate::core::Val::StrTy
+    fn get_ty<'a>(&'a self) -> Val<'a> {
+        Val::StrTy
     }
 }

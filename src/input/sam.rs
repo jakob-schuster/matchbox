@@ -177,7 +177,7 @@ impl Reader for SamReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 
@@ -482,7 +482,7 @@ impl Reader for PairedSamReader {
         self.reader.records().count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 
@@ -666,7 +666,7 @@ impl Reader for RevCompSamReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         self.ty.reference()
     }
 

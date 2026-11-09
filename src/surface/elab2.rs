@@ -90,6 +90,8 @@ pub mod context {
         sync::Arc,
     };
 
+    use itertools::Itertools;
+
     use crate::{
         core::{eval2::env::Env, InternalError, Neutral, Val},
         surface::elab2::elab_error::ElabError,
@@ -289,6 +291,7 @@ pub mod context {
                 "global = {{{}}}\nglobal_tys = {{{}}}\nglobal_tms = {{{}}}\nlocal = {{{}}}\nlocal_tys = {{{}}}\nlocal_tms = {{{}}}\nerrors = {{{}}}",
                 self.global_names
                     .iter()
+                    .sorted_by_key(|(_,index)| *index)
                     .map(|(key, val)| format!("{}: {}", key, val))
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -296,6 +299,7 @@ pub mod context {
                     .get_slice()
                     .iter()
                     .enumerate()
+                    .sorted_by_key(|(index,_)| *index)
                     .map(|(key, val)| format!("{}: {}", key, val))
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -303,11 +307,13 @@ pub mod context {
                     .get_slice()
                     .iter()
                     .enumerate()
+                    .sorted_by_key(|(index,_)| *index)
                     .map(|(key, val)| format!("{}: {}", key, val))
                     .collect::<Vec<_>>()
                     .join(", "),
                 self.local_names
                     .iter()
+                    .sorted_by_key(|(_,index)| *index)
                     .map(|(key, val)| format!("{}: {}", key, val))
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -315,6 +321,7 @@ pub mod context {
                     .get_slice()
                     .iter()
                     .enumerate()
+                    .sorted_by_key(|(index,_)| *index)
                     .map(|(key, val)| format!("{}: {}", key, val))
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -322,6 +329,7 @@ pub mod context {
                     .get_slice()
                     .iter()
                     .enumerate()
+                    .sorted_by_key(|(index,_)| *index)
                     .map(|(key, val)| format!("{}: {}", key, val))
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -1522,7 +1530,41 @@ impl StrLitRegion {
                 core::Tm::new(self.location.clone(), core::TmData::StrLit { s: s.clone() }),
                 c0.clone(),
             ),
-            StrLitRegionData::Tm { tm } => tm.check(c0, &Val::StrTy),
+            StrLitRegionData::Tm { tm } => {
+                let (ctm, ty, c1) = tm.infer(&c0);
+
+                match ty {
+                    Val::StrTy => (ctm, c1),
+                    _ => {
+                        // we need to wrap any formatted terms in a function call to to_str
+                        let (head, c2) = Tm::new(
+                            self.location.clone(),
+                            TmData::Name {
+                                name: "to_str".to_string(),
+                            },
+                        )
+                        .check(
+                            &c1,
+                            &Val::FunTy {
+                                args: vec![Val::AnyTy],
+                                opts: vec![],
+                                body: Arc::new(Val::StrTy),
+                            },
+                        );
+
+                        (
+                            core::Tm::new(
+                                self.location.clone(),
+                                core::TmData::FunApp {
+                                    head: Arc::new(head),
+                                    args: vec![ctm],
+                                },
+                            ),
+                            c2,
+                        )
+                    }
+                }
+            }
         }
     }
 }

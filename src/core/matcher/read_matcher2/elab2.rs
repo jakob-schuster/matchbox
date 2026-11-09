@@ -55,54 +55,6 @@ impl<'p> CoreFlatRegion<'p> {
     }
 }
 
-#[derive(Clone)]
-pub enum CoreReadParameterData<'p> {
-    Unevaluated { ctm: &'p core::Tm },
-    Evaluated { vals: ListVal<'p> },
-}
-
-impl<'p> CoreReadParameterData<'p> {
-    pub fn new(ctm: &'p core::Tm) -> CoreReadParameterData<'p> {
-        CoreReadParameterData::Unevaluated { ctm }
-    }
-
-    pub fn is_neutral(&self) -> bool {
-        match self {
-            CoreReadParameterData::Unevaluated { ctm } => true,
-            CoreReadParameterData::Evaluated { vals } => false,
-        }
-    }
-
-    pub fn get_list_or_neutral<'r>(&'r self) -> Option<ListVal<'r>>
-    where
-        'p: 'r,
-    {
-        match self {
-            CoreReadParameterData::Unevaluated { ctm } => None,
-            CoreReadParameterData::Evaluated { vals, .. } => Some(vals.reference()),
-        }
-    }
-
-    // fn eval(&self) -> ListVal<'p> {
-    //     match self {
-    //         CoreReadParameterData::Unevaluated { tm } => ,
-    //         CoreReadParameterData::Evaluated { vals } => vals.reference(),
-    //     }
-    // }
-
-    pub fn reference<'r>(&'r self) -> CoreReadParameterData<'r>
-    where
-        'p: 'r,
-    {
-        match self {
-            CoreReadParameterData::Unevaluated { ctm: tm } => self.clone(),
-            CoreReadParameterData::Evaluated { vals } => CoreReadParameterData::Evaluated {
-                vals: vals.reference(),
-            },
-        }
-    }
-}
-
 impl<'p> ReadMatcher<'p> {
     pub fn infer(
         c0: &Context<'p>,

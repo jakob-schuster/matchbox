@@ -263,6 +263,7 @@ fn run(code: &str, global_config: &GlobalConfig) {
     let (core_prog, c3) =
         prog.elab(&c2.bind_read_from_reader(reader_with_bar.get_ty().concretise()));
 
+    // drop the read parameter from the context
     let c4 = c2.with_global_from(c3);
 
     // if we are printing compilation debug info, print it now
@@ -293,13 +294,11 @@ fn run(code: &str, global_config: &GlobalConfig) {
     let global = c4.get_global_env();
 
     // process the reads
-    let a = reader_with_bar
+    reader_with_bar
         .map(&core_prog, &global, &mut output_handler)
         .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap
         .unwrap();
-
-    let b = 1;
 }
 
 /// Given the name of a matchbox script,

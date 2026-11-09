@@ -71,7 +71,7 @@ impl Reader for DSVReader {
                     .map(|record| match record {
                         Ok(read) => {
                             let val = core::Val::Rec {
-                                rec: rec::Rec2::CSVRead {
+                                rec: rec::RecVal::CSVRead {
                                     r: rec::CSVRead {
                                         header: &header,
                                         fields: read,

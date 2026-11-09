@@ -6,7 +6,7 @@ use itertools::Itertools;
 use matcher::Matcher;
 
 use crate::{
-    core::{eval::env::Env, rec::Rec2},
+    core::{eval::env::Env, rec::RecVal},
     util::{
         self, bytes_to_string,
         location::{Located, Location},
@@ -292,7 +292,7 @@ pub enum Val<'r> {
         fields: Vec<CoreRecField<Val<'r>>>,
     },
     Rec {
-        rec: Rec2<'r>,
+        rec: RecVal<'r>,
     },
 
     /// Function value; defunctionalised, carries the context it needs

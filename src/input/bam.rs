@@ -10,7 +10,7 @@ use crate::{
     core::{
         self,
         eval::env::Env,
-        rec::{self, FullyConcreteRec, Rec2},
+        rec::{self, FullyConcreteRec, RecVal},
         Effect, Val,
     },
     input::{AuxiliaryInputData, ExecError, InputError, Progress, ProgressSummary, Reader},
@@ -172,7 +172,7 @@ impl Reader for BamReader {
                             };
 
                             let val = core::Val::Rec {
-                                rec: Rec2::BamRead {
+                                rec: RecVal::BamRead {
                                     r: rec::BamRead {
                                         read: &read,
                                         rname,
@@ -523,13 +523,13 @@ impl Reader for PairedBamReader {
                             };
 
                             let val = core::Val::Rec {
-                                rec: Rec2::FullyConcrete {
+                                rec: RecVal::FullyConcrete {
                                     r: FullyConcreteRec {
                                         map: HashMap::from([
                                             (
                                                 b"r1".to_vec(),
                                                 core::Val::Rec {
-                                                    rec: Rec2::BamRead {
+                                                    rec: RecVal::BamRead {
                                                         r: rec::BamRead {
                                                             read,
                                                             rname,
@@ -545,7 +545,7 @@ impl Reader for PairedBamReader {
                                             (
                                                 b"r2".to_vec(),
                                                 core::Val::Rec {
-                                                    rec: Rec2::BamRead {
+                                                    rec: RecVal::BamRead {
                                                         r: rec::BamRead {
                                                             read: paired_read,
                                                             rname: paired_rname,
@@ -902,7 +902,7 @@ impl Reader for RevCompBamReader {
                             };
 
                             let val = core::Val::Rec {
-                                rec: Rec2::BamRead {
+                                rec: RecVal::BamRead {
                                     r: rec::BamRead {
                                         read: &read,
                                         rname,

@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     core::{
-        rec::{ConcreteRec, FullyConcreteRec, Rec2},
+        rec::{ConcreteRec, FullyConcreteRec, RecVal},
         Branch, BranchData, Effect, EvalError, FunData, InternalError, ListVal, Neutral,
         PatternBranch, Prog, Stmt, StmtData, StrVal, Tm, TmData, Val,
     },
@@ -423,7 +423,7 @@ impl Tm {
                     })
                 } else {
                     Ok(Val::Rec {
-                        rec: Rec2::Concrete {
+                        rec: RecVal::Concrete {
                             r: ConcreteRec { map: new_fields },
                         },
                     })

@@ -3,7 +3,7 @@ use itertools::Itertools;
 use crate::{
     core::{
         self,
-        rec::{FullyConcreteRec, Rec2},
+        rec::{FullyConcreteRec, RecVal},
         ListVal, StrVal,
     },
     input::{get_filetype_and_buffer, FileType},
@@ -881,7 +881,7 @@ pub fn csv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
                 .map(|r| {
                     r.map(|sr| -> Val<'_> {
                         Val::Rec {
-                            rec: Rec2::FullyConcrete {
+                            rec: RecVal::FullyConcrete {
                                 r: FullyConcreteRec {
                                     map: HashMap::from_iter(sr.into_iter().enumerate().map(
                                         |(i, s)| {
@@ -995,7 +995,7 @@ pub fn tsv<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalErr
                 .map(|r| {
                     r.map(|sr| -> Val<'_> {
                         Val::Rec {
-                            rec: Rec2::FullyConcrete {
+                            rec: RecVal::FullyConcrete {
                                 r: FullyConcreteRec {
                                     map: HashMap::from_iter(sr.into_iter().enumerate().map(
                                         |(i, s)| {
@@ -1081,7 +1081,7 @@ pub fn fasta<'a>(location: &Location, vtms: &[Val<'a>]) -> Result<Val<'a>, EvalE
                         ]);
 
                         v.push(Val::Rec {
-                            rec: Rec2::FullyConcrete {
+                            rec: RecVal::FullyConcrete {
                                 r: FullyConcreteRec { map },
                             },
                         });

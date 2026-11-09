@@ -9,7 +9,7 @@ use crate::{
     core::{
         self,
         eval::env::Env,
-        rec::{self, FullyConcreteRec, Rec2},
+        rec::{self, FullyConcreteRec, RecVal},
         Effect, Val,
     },
     input::{AuxiliaryInputData, ExecError, Input, InputError, Progress, ProgressSummary, Reader},
@@ -136,7 +136,7 @@ impl Reader for SamReader {
                             let data = read.data();
 
                             let val = core::Val::Rec {
-                                rec: Rec2::SamRead {
+                                rec: RecVal::SamRead {
                                     r: rec::SamRead {
                                         read: &read,
                                         cigar: &cigar,
@@ -417,13 +417,13 @@ impl Reader for PairedSamReader {
                             let paired_data = paired_read.data();
 
                             let val = core::Val::Rec {
-                                rec: Rec2::FullyConcrete {
+                                rec: RecVal::FullyConcrete {
                                     r: FullyConcreteRec {
                                         map: HashMap::from([
                                             (
                                                 b"r1".to_vec(),
                                                 core::Val::Rec {
-                                                    rec: Rec2::SamRead {
+                                                    rec: RecVal::SamRead {
                                                         r: rec::SamRead {
                                                             read,
                                                             cigar: &cigar,
@@ -437,7 +437,7 @@ impl Reader for PairedSamReader {
                                             (
                                                 b"r2".to_vec(),
                                                 core::Val::Rec {
-                                                    rec: Rec2::SamRead {
+                                                    rec: RecVal::SamRead {
                                                         r: rec::SamRead {
                                                             read: paired_read,
                                                             cigar: &paired_cigar,
@@ -610,7 +610,7 @@ impl Reader for RevCompSamReader {
                             let data = read.data();
 
                             let val = core::Val::Rec {
-                                rec: Rec2::SamRead {
+                                rec: RecVal::SamRead {
                                     r: rec::SamRead {
                                         read: &read,
                                         cigar: &cigar,

@@ -19,7 +19,7 @@ pub enum RecError {
 }
 
 #[derive(Clone)]
-pub enum Rec2<'r> {
+pub enum RecVal<'r> {
     Concrete { r: ConcreteRec<'r> },
     FullyConcrete { r: FullyConcreteRec<'r> },
     FastaRead { r: FastaRead<'r> },
@@ -29,99 +29,99 @@ pub enum Rec2<'r> {
     CSVRead { r: CSVRead<'r> },
 }
 
-impl<'r> Rec2<'r> {
+impl<'r> RecVal<'r> {
     pub fn get(&self, key: &[u8]) -> Result<Val<'r>, InternalError> {
         match self {
-            Rec2::Concrete { r } => r.get(key),
-            Rec2::FastaRead { r } => r.get(key),
-            Rec2::FastqRead { r } => r.get(key),
-            Rec2::SamRead { r } => r.get(key),
-            Rec2::BamRead { r } => r.get(key),
-            Rec2::CSVRead { r } => r.get(key),
-            Rec2::FullyConcrete { r } => r.get(key),
+            RecVal::Concrete { r } => r.get(key),
+            RecVal::FastaRead { r } => r.get(key),
+            RecVal::FastqRead { r } => r.get(key),
+            RecVal::SamRead { r } => r.get(key),
+            RecVal::BamRead { r } => r.get(key),
+            RecVal::CSVRead { r } => r.get(key),
+            RecVal::FullyConcrete { r } => r.get(key),
         }
     }
 
     pub fn all(&self) -> HashMap<Vec<u8>, Val<'r>> {
         match self {
-            Rec2::Concrete { r } => r.all_reference(),
-            Rec2::FastaRead { r } => r.all_reference(),
-            Rec2::FastqRead { r } => r.all_reference(),
-            Rec2::SamRead { r } => r.all_reference(),
-            Rec2::BamRead { r } => r.all_reference(),
-            Rec2::CSVRead { r } => r.all_reference(),
-            Rec2::FullyConcrete { r } => r.all_reference(),
+            RecVal::Concrete { r } => r.all_reference(),
+            RecVal::FastaRead { r } => r.all_reference(),
+            RecVal::FastqRead { r } => r.all_reference(),
+            RecVal::SamRead { r } => r.all_reference(),
+            RecVal::BamRead { r } => r.all_reference(),
+            RecVal::CSVRead { r } => r.all_reference(),
+            RecVal::FullyConcrete { r } => r.all_reference(),
         }
     }
 
-    pub fn with<'a>(&self, key: &[u8], val: Val<'a>) -> Rec2<'a>
+    pub fn with<'a>(&self, key: &[u8], val: Val<'a>) -> RecVal<'a>
     where
         'r: 'a,
     {
         match self {
-            Rec2::Concrete { r } => r.with(key, val),
-            Rec2::FullyConcrete { r } => r.with(key, val),
-            Rec2::FastaRead { r } => r.with(key, val),
-            Rec2::FastqRead { r } => r.with(key, val),
-            Rec2::SamRead { r } => r.with(key, val),
-            Rec2::BamRead { r } => r.with(key, val),
-            Rec2::CSVRead { r } => r.with(key, val),
+            RecVal::Concrete { r } => r.with(key, val),
+            RecVal::FullyConcrete { r } => r.with(key, val),
+            RecVal::FastaRead { r } => r.with(key, val),
+            RecVal::FastqRead { r } => r.with(key, val),
+            RecVal::SamRead { r } => r.with(key, val),
+            RecVal::BamRead { r } => r.with(key, val),
+            RecVal::CSVRead { r } => r.with(key, val),
         }
     }
 
-    pub fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> Rec2<'a>
+    pub fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> RecVal<'a>
     where
         'r: 'a,
     {
         match self {
-            Rec2::Concrete { r } => r.with_all(entries),
-            Rec2::FullyConcrete { r } => r.with_all(entries),
-            Rec2::FastaRead { r } => r.with_all(entries),
-            Rec2::FastqRead { r } => r.with_all(entries),
-            Rec2::SamRead { r } => r.with_all(entries),
-            Rec2::BamRead { r } => r.with_all(entries),
-            Rec2::CSVRead { r } => r.with_all(entries),
+            RecVal::Concrete { r } => r.with_all(entries),
+            RecVal::FullyConcrete { r } => r.with_all(entries),
+            RecVal::FastaRead { r } => r.with_all(entries),
+            RecVal::FastqRead { r } => r.with_all(entries),
+            RecVal::SamRead { r } => r.with_all(entries),
+            RecVal::BamRead { r } => r.with_all(entries),
+            RecVal::CSVRead { r } => r.with_all(entries),
         }
     }
 
     pub fn slice(&self, start: usize, end: usize) -> Result<Val<'r>, InternalError> {
         match self {
-            Rec2::Concrete { r } => r.slice(start, end),
-            Rec2::FullyConcrete { r } => r.slice(start, end),
-            Rec2::FastaRead { r } => r.slice(start, end),
-            Rec2::FastqRead { r } => r.slice(start, end),
-            Rec2::SamRead { r } => r.slice(start, end),
-            Rec2::BamRead { r } => r.slice(start, end),
-            Rec2::CSVRead { r } => r.slice(start, end),
+            RecVal::Concrete { r } => r.slice(start, end),
+            RecVal::FullyConcrete { r } => r.slice(start, end),
+            RecVal::FastaRead { r } => r.slice(start, end),
+            RecVal::FastqRead { r } => r.slice(start, end),
+            RecVal::SamRead { r } => r.slice(start, end),
+            RecVal::BamRead { r } => r.slice(start, end),
+            RecVal::CSVRead { r } => r.slice(start, end),
         }
     }
 
     pub fn is_neutral(&self) -> bool {
         match self {
-            Rec2::Concrete { r } => r.is_neutral(),
-            Rec2::FullyConcrete { r } => r.is_neutral(),
-            Rec2::FastaRead { r } => r.is_neutral(),
-            Rec2::FastqRead { r } => r.is_neutral(),
-            Rec2::SamRead { r } => r.is_neutral(),
-            Rec2::BamRead { r } => r.is_neutral(),
-            Rec2::CSVRead { r } => r.is_neutral(),
+            RecVal::Concrete { r } => r.is_neutral(),
+            RecVal::FullyConcrete { r } => r.is_neutral(),
+            RecVal::FastaRead { r } => r.is_neutral(),
+            RecVal::FastqRead { r } => r.is_neutral(),
+            RecVal::SamRead { r } => r.is_neutral(),
+            RecVal::BamRead { r } => r.is_neutral(),
+            RecVal::CSVRead { r } => r.is_neutral(),
         }
     }
 
-    pub fn reference<'a>(&'a self) -> Rec2<'a> {
+    pub fn reference<'a>(&'a self) -> RecVal<'a> {
         match self {
-            Rec2::Concrete { r } => r.reference(),
-            Rec2::FullyConcrete { r } => r.reference(),
-            Rec2::FastaRead { r } => r.reference(),
-            Rec2::FastqRead { r } => r.reference(),
-            Rec2::SamRead { r } => r.reference(),
-            Rec2::BamRead { r } => r.reference(),
-            Rec2::CSVRead { r } => r.reference(),
+            RecVal::Concrete { r } => r.reference(),
+            RecVal::FullyConcrete { r } => r.reference(),
+            RecVal::FastaRead { r } => r.reference(),
+            RecVal::FastqRead { r } => r.reference(),
+            RecVal::SamRead { r } => r.reference(),
+            RecVal::BamRead { r } => r.reference(),
+            RecVal::CSVRead { r } => r.reference(),
         }
     }
 
-    pub fn concretise<'q>(&self) -> Rec2<'q> {
-        Rec2::FullyConcrete {
+    pub fn concretise<'q>(&self) -> RecVal<'q> {
+        RecVal::FullyConcrete {
             r: FullyConcreteRec {
                 map: self
                     .all()
@@ -133,14 +133,14 @@ impl<'r> Rec2<'r> {
     }
 }
 
-impl<'r> Display for Rec2<'r> {
+impl<'r> Display for RecVal<'r> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         format!(
             "{{ {} }}",
             self.all()
                 .iter()
-                .sorted_by_key(|(name, _)| name.clone())
-                .map(|(name, val)| format!("{}: {}", bytes_to_string(name).unwrap(), val))
+                .sorted_by_key(|(name, _)| *name)
+                .map(|(name, val)| format!("{} = {}", bytes_to_string(name).unwrap(), val))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -153,18 +153,18 @@ pub trait Rec<'p>: Display + Send + Sync {
 
     fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>>;
 
-    fn with<'a>(&self, key: &[u8], val: Val<'a>) -> Rec2<'a>
+    fn with<'a>(&self, key: &[u8], val: Val<'a>) -> RecVal<'a>
     where
         'p: 'a,
     {
         let mut map = self.all_reference();
         map.insert(key.to_vec(), val);
 
-        Rec2::FullyConcrete {
+        RecVal::FullyConcrete {
             r: FullyConcreteRec { map },
         }
     }
-    fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> Rec2<'a>
+    fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> RecVal<'a>
     where
         'p: 'a,
     {
@@ -174,7 +174,7 @@ pub trait Rec<'p>: Display + Send + Sync {
             map.insert(key.to_vec(), val.clone());
         }
 
-        Rec2::FullyConcrete {
+        RecVal::FullyConcrete {
             r: FullyConcreteRec { map },
         }
     }
@@ -223,7 +223,7 @@ pub trait Rec<'p>: Display + Send + Sync {
         }
     }
 
-    fn reference<'a>(&'a self) -> Rec2<'a>
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a;
 }
@@ -253,11 +253,11 @@ impl<'p> Rec<'p> for ConcreteRec<'p> {
             .collect()
     }
 
-    fn reference<'a>(&'a self) -> Rec2<'a>
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
-        Rec2::Concrete {
+        RecVal::Concrete {
             r: ConcreteRec {
                 map: self
                     .map
@@ -308,11 +308,11 @@ impl<'p> Rec<'p> for FullyConcreteRec<'p> {
             .collect()
     }
 
-    fn reference<'a>(&'a self) -> Rec2<'a>
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
-        Rec2::FullyConcrete {
+        RecVal::FullyConcrete {
             r: FullyConcreteRec {
                 map: self
                     .map
@@ -380,11 +380,11 @@ impl<'p> Rec<'p> for FastaRead<'p> {
         map
     }
 
-    fn reference<'a>(&'a self) -> Rec2<'a>
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
-        Rec2::FastaRead {
+        RecVal::FastaRead {
             r: FastaRead { read: self.read },
         }
     }
@@ -450,11 +450,11 @@ impl<'p> Rec<'p> for FastqRead<'p> {
         map
     }
 
-    fn reference<'a>(&'a self) -> Rec2<'a>
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
-        Rec2::FastqRead {
+        RecVal::FastqRead {
             r: FastqRead { read: self.read },
         }
     }
@@ -605,11 +605,11 @@ impl<'p> Rec<'p> for SamRead<'p> {
         map
     }
 
-    fn reference<'a>(&'a self) -> Rec2<'a>
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
-        Rec2::SamRead {
+        RecVal::SamRead {
             r: SamRead {
                 read: self.read,
                 cigar: self.cigar,
@@ -756,11 +756,11 @@ impl<'p> Rec<'p> for BamRead<'p> {
         map
     }
 
-    fn reference<'a>(&'a self) -> Rec2<'a>
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
-        Rec2::BamRead {
+        RecVal::BamRead {
             r: BamRead {
                 read: self.read,
                 rname: self.rname,
@@ -817,7 +817,7 @@ impl<'p> Rec<'p> for SamFlags {
         map
     }
 
-    fn reference<'a>(&'a self) -> Rec2<'a>
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
@@ -893,11 +893,11 @@ impl<'p> Rec<'p> for CSVRead<'p> {
         map
     }
 
-    fn reference<'a>(&'a self) -> Rec2<'a>
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
-        Rec2::CSVRead {
+        RecVal::CSVRead {
             r: CSVRead {
                 header: self.header,
                 fields: self.fields,

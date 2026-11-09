@@ -67,7 +67,7 @@ impl Reader for FastaReader {
                     .map(|record| match record {
                         Ok(read) => {
                             let val = core::Val::Rec {
-                                rec: rec::Rec2::FastaRead {
+                                rec: rec::RecVal::FastaRead {
                                     r: rec::FastaRead { read },
                                 },
                             };
@@ -189,13 +189,13 @@ impl Reader for PairedFastaReader {
                     .map(|(record, paired_record)| match (record, paired_record) {
                         (Ok(read), Ok(paired_read)) => {
                             let val = core::Val::Rec {
-                                rec: rec::Rec2::FullyConcrete {
+                                rec: rec::RecVal::FullyConcrete {
                                     r: FullyConcreteRec {
                                         map: HashMap::from([
                                             (
                                                 b"r1".to_vec(),
                                                 core::Val::Rec {
-                                                    rec: rec::Rec2::FastaRead {
+                                                    rec: rec::RecVal::FastaRead {
                                                         r: FastaRead { read },
                                                     },
                                                 },
@@ -203,7 +203,7 @@ impl Reader for PairedFastaReader {
                                             (
                                                 b"r2".to_vec(),
                                                 core::Val::Rec {
-                                                    rec: rec::Rec2::FastaRead {
+                                                    rec: rec::RecVal::FastaRead {
                                                         r: FastaRead { read: paired_read },
                                                     },
                                                 },
@@ -297,7 +297,7 @@ impl Reader for RevCompFastaReader {
                     .map(|record| match record {
                         Ok(read) => {
                             let val = core::Val::Rec {
-                                rec: rec::Rec2::FastaRead {
+                                rec: rec::RecVal::FastaRead {
                                     r: FastaRead { read },
                                 },
                             };

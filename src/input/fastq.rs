@@ -9,7 +9,7 @@ use crate::{
     core::{
         self,
         eval::env::Env,
-        rec::{self, FullyConcreteRec, Rec2},
+        rec::{self, FullyConcreteRec, RecVal},
         Effect, Val,
     },
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
@@ -71,7 +71,7 @@ impl Reader for FastqReader {
                     .map(|record| match record {
                         Ok(read) => {
                             let val = core::Val::Rec {
-                                rec: rec::Rec2::FastqRead {
+                                rec: rec::RecVal::FastqRead {
                                     r: rec::FastqRead { read },
                                 },
                             };
@@ -200,13 +200,13 @@ impl Reader for PairedFastqReader {
                     .map(|(record, paired_record)| match (record, paired_record) {
                         (Ok(read), Ok(paired_read)) => {
                             let val = core::Val::Rec {
-                                rec: Rec2::FullyConcrete {
+                                rec: RecVal::FullyConcrete {
                                     r: FullyConcreteRec {
                                         map: HashMap::from([
                                             (
                                                 b"r1".to_vec(),
                                                 core::Val::Rec {
-                                                    rec: Rec2::FastqRead {
+                                                    rec: RecVal::FastqRead {
                                                         r: rec::FastqRead { read },
                                                     },
                                                 },
@@ -214,7 +214,7 @@ impl Reader for PairedFastqReader {
                                             (
                                                 b"r2".to_vec(),
                                                 core::Val::Rec {
-                                                    rec: Rec2::FastqRead {
+                                                    rec: RecVal::FastqRead {
                                                         r: rec::FastqRead { read: paired_read },
                                                     },
                                                 },
@@ -312,7 +312,7 @@ impl Reader for RevCompFastqReader {
                     .map(|record| match record {
                         Ok(read) => {
                             let val = core::Val::Rec {
-                                rec: Rec2::FastqRead {
+                                rec: RecVal::FastqRead {
                                     r: rec::FastqRead { read },
                                 },
                             };
@@ -417,7 +417,7 @@ impl Reader for FastqDebugReader {
                     .map(|record| match record {
                         Ok(read) => {
                             let val = core::Val::Rec {
-                                rec: Rec2::FastqRead {
+                                rec: RecVal::FastqRead {
                                     r: rec::FastqRead { read },
                                 },
                             };

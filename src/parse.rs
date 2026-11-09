@@ -3,9 +3,9 @@
 use parser::{prog, tm};
 
 use crate::{
+    global_config::GlobalConfig,
     surface::*,
     util::{self, location::Location},
-    GlobalConfig,
 };
 use std::rc::Rc;
 

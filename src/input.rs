@@ -5,7 +5,6 @@ use std::{
     fs::File,
     io::{stdin, BufRead, BufReader, Read},
     path::Path,
-    sync::Arc,
 };
 
 use clap::ValueEnum;
@@ -14,6 +13,7 @@ use itertools::Itertools;
 
 use crate::{
     core::{self, eval::env::Env, EvalError, Val},
+    global_config::InputReads,
     input::{
         bam::{BamReader, PairedBamReader, RevCompBamReader},
         dsv::DSVReader,
@@ -24,7 +24,6 @@ use crate::{
     },
     output::{OutputError, OutputHandler, OutputHandlerSummary},
     ui::Interface,
-    InputReads,
 };
 
 mod bam;

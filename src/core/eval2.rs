@@ -150,7 +150,13 @@ impl<'p> Stmt<'p> {
                             .chain(next.eval2(global, local)?)
                             .collect::<Vec<_>>())
                     }
-                    _ => panic!("type error in statement-level effect, found {}?!", val),
+                    _ => Err(EvalError::from_internal(
+                        InternalError::new(&format!(
+                            "type error in statement-level effect, found {}?!",
+                            val,
+                        )),
+                        self.location.clone(),
+                    )),
                 }
             }
             StmtData::If { branches, next } => {

@@ -285,12 +285,53 @@ pub mod context {
 
     impl<'p> Display for Context<'p> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            self.local_names
-                .iter()
-                .map(|(key, val)| format!("{}: {}", key, val))
-                .collect::<Vec<_>>()
-                .join(", ")
-                .fmt(f)
+            format!(
+                "global = {{{}}}\nglobal_tys = {{{}}}\nglobal_tms = {{{}}}\nlocal = {{{}}}\nlocal_tys = {{{}}}\nlocal_tms = {{{}}}\nerrors = {{{}}}",
+                self.global_names
+                    .iter()
+                    .map(|(key, val)| format!("{}: {}", key, val))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                self.global_tys
+                    .get_slice()
+                    .iter()
+                    .enumerate()
+                    .map(|(key, val)| format!("{}: {}", key, val))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                self.global_tms
+                    .get_slice()
+                    .iter()
+                    .enumerate()
+                    .map(|(key, val)| format!("{}: {}", key, val))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                self.local_names
+                    .iter()
+                    .map(|(key, val)| format!("{}: {}", key, val))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                self.local_tys
+                    .get_slice()
+                    .iter()
+                    .enumerate()
+                    .map(|(key, val)| format!("{}: {}", key, val))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                self.local_tms
+                    .get_slice()
+                    .iter()
+                    .enumerate()
+                    .map(|(key, val)| format!("{}: {}", key, val))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                self.get_errors()
+                    .iter()
+                    .map(|e| format!("[{}:{}] {}", e.location.start, e.location.end, e.message))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .fmt(f)
         }
     }
 
@@ -544,7 +585,6 @@ impl PatternBranch {
         ty: &Val<'p>,
     ) -> (core::PatternBranch<'p>, Val<'p>, Context<'p>) {
         let (matcher, ty1, bind_tys) = self.data.pat.infer(c0, ty);
-        eprintln!("bind_tys = {}", bind_tys);
 
         let c1 = if !ty1.equiv(ty) {
             c0.report(elab_error::ElabError::new(
@@ -1036,7 +1076,9 @@ impl Tm {
                             .collect(),
                         body: Arc::new(body_ty),
                     },
-                    c3,
+                    // here, we crucially drop the bound parameters
+                    // so that the returned environment has the correct indices
+                    c0.with_global_from(c3),
                 )
             }
             TmData::FunLitForeign {

@@ -130,19 +130,6 @@ impl<'p> ReadMatcher<'p> {
             (r.sized, r.named, r.regions)
         };
 
-        eprintln!(
-            "sized: {}",
-            sized.iter().map(|e| format!("{:?}", e)).join(",")
-        );
-        eprintln!(
-            "named: {}",
-            named.iter().map(|e| format!("{:?}", e)).join(",")
-        );
-        eprintln!(
-            "regs: {}",
-            regs.iter().map(|e| format!("{:?}", e)).join(",")
-        );
-
         // go through the params, and typecheck them,
         // building a context with all params in
         let (params_ctx, c1): (_, Context<'p>) = {
@@ -235,7 +222,6 @@ impl<'p> ReadMatcher<'p> {
                     FlatRegion::Tm { tm, error_tm } => {
                         // first, get the list of parameters that need to be bound in this region
                         // get the ids from the term that are also in the ids of the params
-                        eprintln!("entered a tm");
                         let param_names = params
                             .iter()
                             .map(|param| param.data.name.clone())
@@ -266,7 +252,6 @@ impl<'p> ReadMatcher<'p> {
                         let (ctm, tm_ctx) = tm.check(&c3, &Val::StrTy);
                         let (error_ctm, error_tm_ctx) = error_tm.check(&tm_ctx, &Val::NumTy);
                         cx = cx.with_global_from(tm_ctx).with_global_from(error_tm_ctx);
-                        eprintln!("elaborated tm");
 
                         if let Some(a) = params
                             .iter()
@@ -282,7 +267,6 @@ impl<'p> ReadMatcher<'p> {
 
                             // also, build an env we can evaluate in
                             let bind_ctxs = core_read_params_to_bind_ctxs(&a);
-                            eprintln!("elaborated tm");
 
                             let mut all_tm_evaluated = true;
                             let mut all_error_tm_evaluated = true;
@@ -309,7 +293,12 @@ impl<'p> ReadMatcher<'p> {
                                     } else {
                                         match val {
                                             Val::Str { s } => vals.push(s),
-                                            _ => return (Either::Right(ErrorMatcher::new(location)), cx.report(ElabError::new(location, "pattern tm had wrong type despite typechecking?!")))
+                                            _ => {
+                                                return (
+                                                    Either::Right(ErrorMatcher::new(location)),
+                                                    cx,
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -332,7 +321,12 @@ impl<'p> ReadMatcher<'p> {
                                     } else {
                                         match error_val {
                                             Val::Num { n } => error_vals.push(n),
-                                            _ => return (Either::Right(ErrorMatcher::new(location)), cx.report(ElabError::new(location, "pattern error tm had wrong type despite typechecking?!")))
+                                            _ => {
+                                                return (
+                                                    Either::Right(ErrorMatcher::new(location)),
+                                                    cx,
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -410,7 +404,6 @@ impl<'p> ReadMatcher<'p> {
 
             (core_regs, cx)
         };
-        eprintln!("got core_regs");
 
         // now we have a list of partially evaluated term forms which can live for 'p and we will just write an eval function which is a normal eval function
 
@@ -428,8 +421,6 @@ impl<'p> ReadMatcher<'p> {
             // and compare them against each other...
             .sorted_by_key(|ranged| ranged.data.get_priority())
             .collect();
-
-        eprintln!("got bindable_regs");
 
         fn check_all_fixed_lens<'p>(
             ops: &[Op<'p>],
@@ -506,12 +497,6 @@ impl<'p> ReadMatcher<'p> {
             known: &[usize],
             ran: &Ran<usize>,
         ) -> Result<Ran<usize>, InternalError> {
-            eprintln!(
-                "known: [{}]; ran: {}",
-                known.iter().map(|a| a.to_string()).join(","),
-                ran
-            );
-
             if let (Some(start), Some(end)) = (
                 known.iter().filter(|loc| **loc <= ran.start).max(),
                 known.iter().filter(|loc| **loc >= ran.end).min(),
@@ -529,7 +514,6 @@ impl<'p> ReadMatcher<'p> {
 
         // now, we go through each of the bindable regions
         for op_data in &bindable_regs {
-            eprintln!("doing {:?}", op_data.ran);
             let (known1, ops1) = match check_all_fixed_lens(&ops, &known, &sized_ctm) {
                 Ok(data) => data,
                 Err(e) => {
@@ -567,8 +551,6 @@ impl<'p> ReadMatcher<'p> {
 
             known.push(op_data.ran.start);
             known.push(op_data.ran.end);
-
-            eprintln!("now known is {:?}", known);
         }
 
         // check for range restriction one final time
@@ -582,15 +564,6 @@ impl<'p> ReadMatcher<'p> {
             }
         };
 
-        eprintln!(
-            "binds = {}",
-            named
-                .iter()
-                .map(|a| format!("{} {}", a.ran, a.data))
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-
         // bind the params and then the names
         let c4 = params_ctx.map.iter().fold(c3.clone(), |cx, (name, param)| {
             cx.bind_param(name, param.get_ty())
@@ -600,8 +573,6 @@ impl<'p> ReadMatcher<'p> {
             .fold(c4.clone(), |cx, name| cx.bind_param(&name.data, ty));
 
         // params_ctx.map.iter().map(|(a,b)| c);
-
-        eprintln!("c5 = {}", c5);
 
         (
             Either::Left(ReadMatcher {

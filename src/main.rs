@@ -263,8 +263,6 @@ fn run(code: &str, global_config: &GlobalConfig) {
     let (core_prog, c3) =
         prog.elab(&c2.bind_read_from_reader(reader_with_bar.get_ty().concretise()));
 
-    eprintln!("{}", c3);
-
     let c4 = c2.with_global_from(c3);
 
     // if we are printing compilation debug info, print it now

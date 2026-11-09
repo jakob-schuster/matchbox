@@ -584,6 +584,8 @@ impl<'r> Val<'r> {
             (Val::Neutral { .. }, _) | (_, Val::Neutral { .. }) => true,
             // Similar with awaiting
             (Val::FunReturnTyAwaiting { .. }, _) | (_, Val::FunReturnTyAwaiting { .. }) => true,
+            // ErrorTy we also let through; it represents something that's already been caught
+            (Val::ErrorTy, _) | (_, Val::ErrorTy) => true,
 
             // Any is equivalent to everything
             (Val::AnyTy, _) | (_, Val::AnyTy) => true,

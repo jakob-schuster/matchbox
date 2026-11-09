@@ -8,10 +8,10 @@ use itertools::{Either, Itertools};
 use crate::{
     core::{
         self,
-        eval2::env,
+        eval::env,
         matcher::{
-            read_matcher2::{
-                eval2::match_context::bind_context::BindContext, seq::Seq, Direction, LocOp, Op,
+            read_matcher::{
+                eval::match_context::bind_context::BindContext, seq::Seq, Direction, LocOp, Op,
                 OpData, ParamContext, ParamData, ReadMatcher,
             },
             ErrorMatcher,
@@ -20,7 +20,7 @@ use crate::{
     },
     surface::{
         self,
-        elab2::{
+        elab::{
             context::{Address, Context},
             elab_error::ElabError,
         },

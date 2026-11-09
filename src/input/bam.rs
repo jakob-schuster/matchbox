@@ -1,6 +1,6 @@
 //! Handle binary alignment map (BAM) reading with noodles.
 
-use std::{collections::HashMap, fmt::Pointer, io::BufRead, sync::Arc};
+use std::{collections::HashMap, io::BufRead};
 
 use itertools::Itertools;
 use noodles::sam::io::writer::record::write_cigar;
@@ -9,13 +9,13 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{
         self,
-        eval2::env::Env,
+        eval::env::Env,
         rec::{self, FullyConcreteRec, Rec2},
-        Effect, InternalError, Val,
+        Effect, Val,
     },
-    input::{AuxiliaryInputData, ExecError, Input, InputError, Progress, ProgressSummary, Reader},
+    input::{AuxiliaryInputData, ExecError, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{cache::Cache, location::Location, recfield::CoreRecField, Arena},
+    util::{location::Location, recfield::CoreRecField},
 };
 
 pub struct BamReader {

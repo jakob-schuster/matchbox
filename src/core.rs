@@ -2,26 +2,19 @@
 
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use bio::stats::probs;
 use itertools::Itertools;
 use matcher::Matcher;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use rec::{ConcreteRec, FastaRead, FullyConcreteRec, Rec};
 
 use crate::{
-    core::{eval2::env::Env, rec::Rec2},
+    core::{eval::env::Env, rec::Rec2},
     util::{
         self, bytes_to_string,
-        cache::Cache,
         location::{Located, Location},
-        recfield::{CoreRecField, RecField},
-        Arena,
+        recfield::CoreRecField,
     },
 };
 
-// pub mod cache;
-// pub mod eval;
-pub mod eval2;
+pub mod eval;
 pub mod library;
 pub mod matcher;
 pub mod rec;
@@ -902,13 +895,6 @@ pub enum Neutral<'a> {
     FunLit {
         body: Arc<Val<'a>>,
     },
-    FunForeignLit {
-        body: Arc<
-            dyn for<'b> Fn(&'b Arena, &Location, &[Val<'b>]) -> Result<Val<'b>, EvalError>
-                + Send
-                + Sync,
-        >,
-    },
     FunApp {
         head: Arc<Val<'a>>,
         args: Vec<Val<'a>>,
@@ -950,7 +936,6 @@ impl<'r> Neutral<'r> {
             Neutral::FunLit { body } => Neutral::FunLit {
                 body: Arc::new(body.reference()),
             },
-            Neutral::FunForeignLit { body } => Neutral::FunForeignLit { body: body.clone() },
             Neutral::FunApp { head, args } => Neutral::FunApp {
                 head: Arc::new(head.reference()),
                 args: args.iter().map(Val::reference).collect(),
@@ -1000,7 +985,6 @@ impl<'r> Neutral<'r> {
             Neutral::FunLit { body } => Neutral::FunLit {
                 body: Arc::new(body.concretise()),
             },
-            Neutral::FunForeignLit { body } => Neutral::FunForeignLit { body: body.clone() },
             Neutral::FunApp { head, args } => Neutral::FunApp {
                 head: Arc::new(head.concretise()),
                 args: args.iter().map(Val::concretise).collect(),
@@ -1357,7 +1341,6 @@ impl<'a> Display for Neutral<'a> {
             )
             .fmt(f),
             Neutral::FunLit { body } => format!("#fun({})", body).fmt(f),
-            Neutral::FunForeignLit { body } => format!("#fun-foreign",).fmt(f),
         }
     }
 }

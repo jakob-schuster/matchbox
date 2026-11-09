@@ -1,15 +1,24 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use itertools::Itertools;
+use itertools::{Either, FlattenOk, Itertools};
 
 use crate::{
-    core::{self, matcher, EvalError, InternalError, Val},
-    myers::VarMyers,
-    surface::{self, check_tm, Context, ElabError, Region, RegionData},
-    util::{bytes_to_string, cache::Cache, env::Env, location::Location, ran::Ran, Arena},
+    core::{
+        self,
+        eval::env,
+        matcher::read_matcher::{
+            eval::match_context::{bind_context::BindContext, location_context::LocationContext},
+            seq::Seq,
+        },
+        InternalError, ListVal, StrVal, Val,
+    },
+    surface::{self, elab::context::Context},
+    util::{location::Location, ran::Ran},
 };
 
-use super::Matcher;
+pub mod elab;
+pub mod eval;
+pub mod seq;
 
 #[derive(Clone)]
 pub enum MatchMode {
@@ -29,1076 +38,392 @@ impl Display for MatchMode {
     }
 }
 
-pub struct ReadMatcher<'a> {
+pub struct ReadMatcher<'p> {
     /// The search operations to perform
-    pub ops: Vec<OpVal<'a>>,
+    pub ops: Vec<Op<'p>>,
     /// The location ranges to bind at the end in each world
     pub binds: Vec<Ran<usize>>,
     /// The location to label to the end
     pub end: usize,
     /// Whether the matcher will return all possible matches, or just one
     pub mode: MatchMode,
+    /// Additionally, stay tagged with a location
+    pub location: Location,
 }
 
-impl<'p> Matcher<'p> for ReadMatcher<'p> {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
-    where
-        'p: 'a,
-    {
-        if let Val::Rec { rec } = val {
-            if let Val::Str { s: seq } = rec.get(b"seq").expect("") {
-                // first, generate all the worlds from the operations
-                let loc_ctx = LocCtx::default()
-                    .with(0, 0)
-                    .with(self.end, seq.get_reference().len() as i32);
-                let worlds =
-                    self.ops
-                        .iter()
-                        .fold(vec![(BindCtx::default(), loc_ctx, 0)], |worlds, op| {
-                            worlds
-                                .iter()
-                                .flat_map(|(bind_ctx, loc_ctx, edit_dist)| {
-                                    op.exec(
-                                        arena,
-                                        env,
-                                        seq.get_reference(),
-                                        loc_ctx,
-                                        bind_ctx,
-                                        *edit_dist,
-                                    )
-                                })
-                                .flatten()
-                                .collect::<Vec<_>>()
-                        });
-
-                // choose either the first world,
-                // or all the possible worlds
-                match self.mode {
-                    MatchMode::All => {
-                        // then, make all the binds
-                        let envs = worlds.iter().map(|(bind_ctx, loc_ctx, _)| {
-                            // make all the binds from bind_ctx one by one
-                            let vals = bind_ctx
-                                .map
-                                .iter()
-                                .sorted_by_key(|(id, _)| **id)
-                                .map(|(_, val)| Ok((*val).clone()))
-                                .chain(
-                                    // then make the other sequence binds
-                                    self.binds.iter().map(|ran| {
-                                        let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                        let sliced = rec
-                                            .slice(pos_ran.start as usize, pos_ran.end as usize)?;
-
-                                        Ok(sliced as Val<'a>)
-                                    }),
-                                )
-                                .collect::<Result<Vec<_>, InternalError>>()
-                                .map_err(|e| EvalError::from_internal(e, Location::new(0, 0)));
-
-                            vals
-                        });
-
-                        envs.collect()
-                    }
-                    MatchMode::One => {
-                        // then, make all the binds
-                        if let Some((bind_ctx, loc_ctx, _)) = worlds
-                            .iter()
-                            .sorted_by_key(|(_, _, edit_dist)| *edit_dist)
-                            // just pick an arbitrary first of the tied best worlds
-                            .next()
-                        {
-                            // make all the binds from bind_ctx one by one
-                            let vals = bind_ctx
-                                .map
-                                .iter()
-                                .sorted_by_key(|(id, _)| **id)
-                                .map(|(_, val)| Ok((*val).clone()))
-                                .chain(
-                                    // then make the other sequence binds
-                                    self.binds.iter().map(|ran| {
-                                        let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                        let sliced = rec
-                                            .slice(pos_ran.start as usize, pos_ran.end as usize)?;
-
-                                        Ok(sliced as Val<'a>)
-                                    }),
-                                )
-                                .collect::<Result<Vec<_>, InternalError>>()
-                                .map_err(|e| EvalError::from_internal(e, Location::new(0, 0)));
-
-                            vals.map(|v| vec![v])
-                        } else {
-                            Ok(vec![])
-                        }
-                    }
-                    MatchMode::Unique => {
-                        // then, make all the binds
-                        if let Some(best_dist) =
-                            worlds.iter().map(|(_, _, edit_dist)| *edit_dist).min()
-                        {
-                            let all_best = worlds
-                                .iter()
-                                .filter(|(_, _, edit_dist)| edit_dist.eq(&best_dist))
-                                .collect_vec();
-
-                            match &all_best[..] {
-                                // if there is exactly one best world
-                                [(bind_ctx, loc_ctx, _)] => {
-                                    // make all the binds from bind_ctx one by one
-                                    let vals = bind_ctx
-                                        .map
-                                        .iter()
-                                        .sorted_by_key(|(id, _)| **id)
-                                        .map(|(_, val)| Ok((*val).clone()))
-                                        .chain(
-                                            // then make the other sequence binds
-                                            self.binds.iter().map(|ran| {
-                                                let pos_ran = ran.map(|loc| loc_ctx.get(loc));
-                                                let sliced = rec.slice(
-                                                    pos_ran.start as usize,
-                                                    pos_ran.end as usize,
-                                                )?;
-
-                                                Ok(sliced as Val<'a>)
-                                            }),
-                                        )
-                                        .collect::<Result<Vec<_>, InternalError>>()
-                                        .map_err(|e| {
-                                            EvalError::from_internal(e, Location::new(0, 0))
-                                        });
-
-                                    vals.map(|v| vec![v])
-                                }
-                                _ => Ok(vec![]),
-                            }
-                        } else {
-                            Ok(vec![])
-                        }
-                    }
-                }
-            } else {
-                panic!("gave non-read value {} to read matcher?!", val)
-            }
-        } else {
-            panic!("gave non-record value {} to read matcher?!", val)
-        }
-    }
-}
-
-impl<'a> Display for ReadMatcher<'a> {
+impl<'p> Display for ReadMatcher<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        format!(
-            "read_matcher(binds: [{}], end: {}, mode: {}, ops: [{}])",
-            self.binds
-                .iter()
-                .map(|b| b.to_string())
-                .collect::<Vec<_>>()
-                .join(","),
-            self.end,
-            self.mode,
-            self.ops
-                .iter()
-                .map(|op| op.to_string())
-                .collect::<Vec<_>>()
-                .join("; ")
-        )
-        .fmt(f)
+        "#read_matcher".fmt(f)
     }
 }
 
 #[derive(Clone)]
-enum Reg {
-    Hole,
-    Exp {
-        ids: Vec<String>,
-        ctm: core::Tm,
-        error_ctm: core::Tm,
-    },
-}
-
-fn flatten_regs<'a>(
-    binds: &[String],
-    bind_tys: &HashMap<String, core::Val<'a>>,
-    i: usize,
-    regs: Vec<&'a Region>,
-    sized_acc: Vec<(core::Tm, Ran<usize>)>,
-    named_acc: Vec<(String, Ran<usize>)>,
-    regs_acc: Vec<(Reg, Ran<usize>)>,
-    arena: &'a Arena,
-    ctx: &Context<'a>,
-) -> Result<
-    (
-        Vec<(core::Tm, Ran<usize>)>,
-        Vec<(String, Ran<usize>)>,
-        Vec<(Reg, Ran<usize>)>,
-    ),
-    ElabError,
-> {
-    let first = regs.first();
-    let rest = regs.iter().skip(1).cloned().collect_vec();
-
-    match first {
-        Some(reg) => match &reg.data {
-            RegionData::Hole => flatten_regs(
-                binds,
-                bind_tys,
-                i + 1,
-                rest,
-                sized_acc,
-                named_acc,
-                regs_acc
-                    .into_iter()
-                    .chain([(Reg::Hole, Ran::new(i, i + 1))])
-                    .collect(),
-                arena,
-                ctx,
-            ),
-            RegionData::Term { tm, error } => {
-                // get the ids used in the tm
-                let ids = surface::elab::get_ids(tm)
-                    .into_iter()
-                    .filter(|id| binds.contains(id))
-                    .collect::<Vec<_>>();
-
-                // build a new context with these bound
-                let new_ctx = ids.iter().fold(ctx.clone(), |ctx0, id| {
-                    ctx0.bind_param(id.clone(), bind_tys.get(id).unwrap().clone(), arena)
-                });
-
-                // check that the tm is a string
-                let ctm = check_tm(arena, &new_ctx, tm, &core::Val::StrTy)?;
-                // and that the error tm is a num
-                let error_ctm = check_tm(arena, &new_ctx, error, &core::Val::NumTy)?;
-
-                flatten_regs(
-                    binds,
-                    bind_tys,
-                    i + 1,
-                    rest,
-                    sized_acc,
-                    named_acc,
-                    regs_acc
-                        .into_iter()
-                        .chain([(
-                            Reg::Exp {
-                                ids,
-                                ctm,
-                                error_ctm,
-                            },
-                            Ran::new(i, i + 1),
-                        )])
-                        .collect(),
-                    arena,
-                    ctx,
-                )
-            }
-            RegionData::Named {
-                name,
-                regs: inner_regs,
-            } => flatten_regs(
-                binds,
-                bind_tys,
-                i,
-                inner_regs.iter().chain(rest).collect_vec(),
-                sized_acc,
-                named_acc
-                    .into_iter()
-                    .chain([(name.clone(), Ran::new(i, i + inner_regs.len()))])
-                    .collect(),
-                regs_acc,
-                arena,
-                ctx,
-            ),
-            RegionData::Sized {
-                tm,
-                regs: inner_regs,
-            } => {
-                // first check that tm is a numeric
-                let ctm = check_tm(arena, ctx, tm, &core::Val::NumTy)?;
-
-                flatten_regs(
-                    binds,
-                    bind_tys,
-                    i,
-                    inner_regs.iter().chain(rest).collect_vec(),
-                    sized_acc
-                        .into_iter()
-                        .chain([(ctm, Ran::new(i, i + inner_regs.len()))])
-                        .collect_vec(),
-                    named_acc,
-                    regs_acc,
-                    arena,
-                    ctx,
-                )
-            }
-        },
-        None => Ok((sized_acc, named_acc, regs_acc)),
-    }
-}
-
-pub fn infer_read_pattern<'a>(
-    arena: &'a Arena,
-    ctx: &Context<'a>,
-    regs: &'a [Region],
-    params: Vec<(String, core::Val<'a>, core::Val<'a>)>,
-    mode: &MatchMode,
-) -> Result<(ReadMatcher<'a>, Vec<String>), ElabError> {
-    // first, separate all the regions out into
-    // - a vec of hole/tm
-    // - the list of named, sized, etc with location ranges
-
-    let param_names = params
-        .iter()
-        .map(|(name, _, _)| name.clone())
-        .collect::<Vec<_>>();
-
-    let bind_tys = params
-        .clone()
-        .into_iter()
-        .map(|(name, _, ty)| (name, ty))
-        .collect::<HashMap<_, _>>();
-
-    let (sized, named, regs) = flatten_regs(
-        &param_names,
-        &bind_tys,
-        0,
-        regs.iter().collect(),
-        vec![],
-        vec![],
-        vec![],
-        arena,
-        ctx,
-    )?;
-
-    // then, walk along and generate an order for everything to happen in
-    // gaining information as we go
-
-    // the locations we know at the start
-    let mut known = vec![0, regs.len()];
-
-    let mut ops: Vec<OpTm> = vec![];
-
-    fn check_all_fixed_lens<'a>(
-        ops: &Vec<OpTm<'a>>,
-        known: &mut Vec<usize>,
-        sized: &Vec<(core::Tm, Ran<usize>)>,
-        arena: &'a Arena,
-    ) -> (Vec<usize>, Vec<OpTm<'a>>) {
-        fn learn_new_fixed_lens<'aa>(
-            known: &mut Vec<usize>,
-            fixed_lens: &[(core::Tm<'aa>, Ran<usize>)],
-            arena: &'aa Arena,
-        ) -> Vec<OpTm<'aa>> {
-            let mut ops = vec![];
-            let mut new_known = known.clone();
-
-            for (expr_num, ran) in fixed_lens {
-                // get the closest flanking sequences
-                let flanking = get_tightest_known(known, ran);
-
-                match ran.map(|l| known.contains(l)).to_tuple() {
-                    // todo: insert something that actually verifies the length?
-                    (true, true) => {}
-
-                    // if one end is known, insert a let operation
-                    (true, false) => {
-                        ops.push(OpTm::Let {
-                            loc: ran.end,
-                            tm: LocTm::Plus {
-                                loc_tm: Arc::new(LocTm::Var { loc: ran.start }),
-                                offset: expr_num.clone(),
-                            },
-                            flanking,
-                        });
-                        new_known.push(ran.end);
-                    }
-                    (false, true) => {
-                        ops.push(OpTm::Let {
-                            loc: ran.start,
-                            tm: LocTm::Minus {
-                                loc_tm: Arc::new(LocTm::Var { loc: ran.end }),
-                                offset: expr_num.clone(),
-                            },
-                            flanking,
-                        });
-                        new_known.push(ran.start);
-                    }
-
-                    (false, false) => {}
-                }
-            }
-
-            known.clone_from(&new_known);
-
-            ops
-        }
-
-        // first check if we know one side of any fixed-length regions
-        let mut ops = ops.clone();
-        let mut known = known.clone();
-
-        let mut ops_new = ops.clone();
-        ops_new.extend(learn_new_fixed_lens(&mut known, sized, arena));
-        // WARN have changed this -- see if it works
-        while !ops.len().eq(&ops_new.len()) {
-            // update the old ops
-            ops.clone_from(&ops_new);
-            // extend the new ops
-            ops_new.extend(learn_new_fixed_lens(&mut known, sized, arena));
-        }
-        ops.clone_from(&ops_new);
-
-        (known, ops)
-    }
-
-    // first, the naive approach - just bind everything left to right
-
-    fn get_tightest_known(known_locs: &[usize], ran: &Ran<usize>) -> Ran<usize> {
-        if let (Some(start), Some(end)) = (
-            known_locs.iter().filter(|loc| **loc <= ran.start).max(),
-            known_locs.iter().filter(|loc| **loc >= ran.end).min(),
-        ) {
-            Ran::new(*start, *end)
-        } else {
-            panic!("didn't know the necessary locations?!");
-        }
-    }
-
-    // rank the binds - with ones as-yet-unknown ranking the worst
-
-    // rank the fixed-size regions we know,
-    // with as-yet-unknown ranking the worst
-
-    // in that order, can we make any restrictions within these regions?
-
-    let bindable_regs = regs.iter().flat_map(|(reg, ran)| match reg {
-        Reg::Hole => None,
-        Reg::Exp {
-            ids: binds,
-            ctm: exp,
-            error_ctm: error,
-        } => Some((ran.clone(), (binds, exp.clone(), error.clone()))),
-    });
-
-    for (ran, (binds, exp, error)) in bindable_regs {
-        // first, do the whole checking-for-range-restrictions thing
-        (known, ops) = check_all_fixed_lens(&ops, &mut known, &sized, arena);
-
-        let search: Ran<usize> = get_tightest_known(&known, &ran);
-
-        // todo: check if the loc is fixed
-        let fixed = Ran::new(search.start == ran.start, search.end == ran.end);
-
-        ops.push(OpTm::Restrict {
-            ids: binds.clone(),
-            tm: exp,
-            ran: search,
-            fixed,
-            save: vec![ran.clone()],
-            error,
-        });
-
-        known.push(ran.start);
-        known.push(ran.end);
-    }
-
-    // check for range restriction one final time
-    (_, ops) = check_all_fixed_lens(&ops, &mut known, &sized, arena);
-
-    let param_vals = params
-        .clone()
-        .iter()
-        .map(|(name, val, _)| match val {
-            core::Val::List { v } => (name.clone(), v.clone()),
-            _ => panic!("parameter was not drawing from list?"),
-        })
-        .collect::<HashMap<_, _>>();
-    let param_indices = param_names
-        .iter()
-        .enumerate()
-        .map(|(i, name)| (name.clone(), i))
-        .collect::<HashMap<_, _>>();
-
-    let final_ops = ops
-        .iter()
-        .map(|op| op.eval(arena, ctx, param_vals.clone(), param_indices.clone()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(ElabError::from_eval_error)?;
-
-    Ok((
-        ReadMatcher {
-            ops: final_ops,
-            binds: named.iter().map(|(_, ran)| ran.clone()).collect::<Vec<_>>(),
-            end: regs.len(),
-            mode: mode.clone(),
-        },
-        named.iter().map(|(name, _)| name.clone()).collect(),
-    ))
-}
-
-#[derive(Clone)]
-pub enum OpTm {
+pub enum Op<'p> {
     Let {
         // the location to assign to
         loc: usize,
-        // the
-        tm: LocTm,
+        // the operation to calculate the new position
+        op: LocOp,
         // the closest known locations to check bounds against
         flanking: Ran<usize>,
     },
     Restrict {
-        // list of new binds to make
-        ids: Vec<String>,
-        tm: core::Tm,
-        // the location range to search between
+        // location range to search between
         ran: Ran<usize>,
         // whether the ends are fixed
         fixed: Ran<bool>,
         // the locations to save
         save: Vec<Ran<usize>>,
-        // the error rate to apply
-        error: core::Tm,
+        // partially computed list of binds to make
+        data: OpData<'p>,
     },
 }
 
-impl OpTm {
-    pub fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        ctx: &Context<'a>,
-        params: HashMap<String, Vec<Val<'a>>>,
-        param_indices: HashMap<String, usize>,
-    ) -> Result<OpVal<'a>, EvalError> {
+impl<'p> Op<'p> {
+    fn reference<'r>(&'r self) -> Op<'r> {
         match self {
-            OpTm::Let { loc, tm, flanking } => Ok(OpVal::Let {
+            Op::Let { loc, op, flanking } => Op::Let {
                 loc: *loc,
-                tm: tm.coerce(arena),
+                op: op.clone(),
                 flanking: flanking.clone(),
-            }),
-
-            OpTm::Restrict {
-                ids,
-                tm,
+            },
+            Op::Restrict {
                 ran,
                 fixed,
                 save,
-                error,
-            } => {
-                if ids.is_empty() {
-                    // special case - just wrap up the one value
-                    // (cache can be empty, because this is pre-caching)
-                    let val = tm.eval(arena, &Env::default(), &Cache::default(), &ctx.tms)?;
-                    let error_val =
-                        error.eval(arena, &Env::default(), &Cache::default(), &ctx.tms)?;
-
-                    match (&val, &error_val) {
-                        (Val::Str { s }, Val::Num { n }) => Ok(OpVal::Restrict {
-                            ctxs: vec![(HashMap::default(), Seq::new(*s, *n))],
-                            ran: ran.clone(),
-                            fixed: fixed.clone(),
-                            save: save.clone(),
-                        }),
-                        _ => panic!("term in region was of the wrong type?!"),
-                    }
-                } else {
-                    let new_binds = params
-                        .into_iter()
-                        .filter(|(id, vals)| ids.contains(id))
-                        .map(|(id, vals)| {
-                            vals.iter()
-                                .map(|val| (id.clone(), val.clone()))
-                                .collect::<Vec<_>>()
-                        })
-                        .collect::<Vec<_>>();
-
-                    let ctxs = match &new_binds[..] {
-                        [first, rest @ ..] => {
-                            first.into_iter().flat_map(|first_val: &(String, Val<'a>)| {
-                                rest.iter().fold(
-                                    vec![vec![first_val.clone()]],
-                                    |v: Vec<Vec<(String, Val<'a>)>>, bind| {
-                                        v.iter()
-                                            .cartesian_product(bind)
-                                            .map(|(v, new)| {
-                                                v.iter().chain([new]).cloned().collect::<Vec<_>>()
-                                            })
-                                            .collect::<Vec<_>>()
-                                    },
-                                )
-                            })
-                        }
-
-                        // this can't happen
-                        [] => {
-                            panic!("binds were empty, but did not end up in special case block?!")
-                        }
-                    }
-                    .map(|bind_ctx| {
-                        // WARN this may not be binding things in the right order?
-                        let new_ctx =
-                            bind_ctx
-                                .clone()
-                                .into_iter()
-                                .fold(ctx.clone(), |ctx0, (name, val)| {
-                                    ctx0.bind_def(name, core::Val::StrTy, val as Val<'a>)
-                                });
-
-                        // WARN cache can be empty because this is pre-caching.
-                        let val =
-                            tm.eval(arena, &Env::default(), &Cache::default(), &new_ctx.tms)?;
-                        let error_val =
-                            error.eval(arena, &Env::default(), &Cache::default(), &new_ctx.tms)?;
-
-                        match (val, error_val) {
-                            (Val::Str { s }, Val::Num { n }) => Ok((
-                                bind_ctx
-                                    .into_iter()
-                                    .map(|(name, val)| {
-                                        (
-                                            *param_indices
-                                                .get(&name)
-                                                .expect("bind index was invalid?!"),
-                                            val,
-                                        )
-                                    })
-                                    .collect::<HashMap<_, _>>(),
-                                Seq::new(&s, n),
-                            )),
-                            _ => panic!("term in read region wasn't a string?!"),
-                        }
-                    })
-                    .collect::<Result<Vec<_>, EvalError>>()?;
-
-                                        for ran in self.binds.iter() {
-        Ok(OpVal::Restrict {
-                        ctxs,
-                        ran: ran.clone(),
-                        fixed: fixed.clone(),
-                        save: save.clone(),
-                    })
-                }
-            }
+                data,
+            } => Op::Restrict {
+                ran: ran.clone(),
+                fixed: fixed.clone(),
+                save: save.clone(),
+                data: data.reference(),
+            },
         }
     }
-}
 
-pub enum OpVal<'a> {
-    Let {
-        // the location to assign to
-        loc: usize,
-        // the
-        tm: LocTm,
-        // the closest known locations to check bounds against
-        flanking: Ran<usize>,
-    },
-    Restrict {
-        // list of new binds to make
-        ctxs: Vec<(HashMap<usize, Val<'a>>, Seq)>,
-        // the location range to search between
-        ran: Ran<usize>,
-        // whether the ends are fixed
-        fixed: Ran<bool>,
-        // the locations to save
-        save: Vec<Ran<usize>>,
-    },
-}
-
-impl<'a> Display for OpVal<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn concretise<'q>(&self) -> Op<'q> {
         match self {
-            OpVal::Let { loc, tm, flanking } => {
-                format!("let {} = {} checking between {}", loc, tm, flanking).fmt(f)
-            }
-            OpVal::Restrict {
-                ctxs,
+            Op::Let { loc, op, flanking } => Op::Let {
+                loc: *loc,
+                op: op.clone(),
+                flanking: flanking.clone(),
+            },
+            Op::Restrict {
                 ran,
                 fixed,
                 save,
-            } => format!(
-                "restrict [{}] to {} with fixed {} saving to [{}]",
-                ctxs.iter()
-                    .map(|(map, seq)| format!(
-                        "ctx(map: {}, seq: {})",
-                        map.iter()
-                            .map(|(a, b)| format!("({}, {})", a, b))
-                            .collect_vec()
-                            .join(","),
-                        bytes_to_string(&seq.bytes).unwrap()
-                    ))
-                    .collect_vec()
-                    .join(","),
-                ran,
-                fixed,
-                save.iter().map(|a| a.to_string()).collect_vec().join(",")
-            )
-            .fmt(f),
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct LocCtx {
-    map: HashMap<usize, i32>,
-}
-
-impl LocCtx {
-    fn get(&self, loc: &usize) -> i32 {
-        *self
-            .map
-            .get(loc)
-            .expect("couldn't find location {loc} in location context?!") as i32
-    }
-
-    fn with(&self, loc: usize, pos: i32) -> LocCtx {
-        let mut map = self.map.clone();
-        map.insert(loc, pos);
-
-        LocCtx { map }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct BindCtx<'a> {
-    map: HashMap<usize, core::Val<'a>>,
-}
-
-impl<'a> BindCtx<'a> {
-    fn get(&self, id: &usize) -> Option<&core::Val<'a>> {
-        self.map.get(id)
-    }
-
-    fn with(&self, id: usize, val: core::Val<'a>) -> BindCtx<'a> {
-        let mut map = self.map.clone();
-        map.insert(id, val);
-
-        BindCtx { map }
-    }
-}
-
-impl<'p> OpVal<'p> {
-    fn exec<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<core::Val<'a>>,
-        seq: &'a [u8],
-        loc_ctx: &LocCtx,
-        bind_ctx: &BindCtx<'a>,
-        edit_dist: u8,
-    ) -> Result<Vec<(BindCtx<'a>, LocCtx, u8)>, core::EvalError>
-    where
-        'p: 'a,
-    {
-        match self {
-            OpVal::Let { loc, tm, flanking } => {
-                let pos = tm.eval(arena, env, loc_ctx)?;
-                let flanking_pos = flanking.map(|loc| loc_ctx.get(loc));
-
-                // return out if the range is inappropriate
-                if pos > flanking_pos.start && pos < flanking_pos.end {
-                    Ok(vec![(bind_ctx.clone(), loc_ctx.with(*loc, pos), edit_dist)])
-                } else {
-                    Ok(vec![])
-                }
-            }
-            OpVal::Restrict {
-                ctxs,
-                ran,
-                fixed,
-                save,
-            } => {
-                //
-                let filtered = ctxs
-                    .iter()
-                    // filter out any that would incur a contradictory binding
-                    .filter(|(bs, _)| {
-                        bs.iter().all(|(id, val)| {
-                            if let Some(val2) = bind_ctx.get(id) {
-                                (*val).eq(val2)
-                            } else {
-                                true
-                            }
-                        })
-                    });
-
-                let mut accumulated = vec![];
-                for (local_binds, tm_seq) in filtered {
-                    let matches =
-                        tm_seq.find_all_disjoint(seq, &ran.map(|i| loc_ctx.get(i) as usize), fixed);
-
-                    // if we have found the pattern sufficient times
-                    if matches.len() >= save.len() {
-                        // // get the
-                        // let min_edit_dist = matches.iter()
-                        //     .map(|a| a.dist)
-                        //     .sorted()
-                        //     .take(save.len())
-                        //     .last();
-
-                        let combs: Vec<(BindCtx<'a>, LocCtx, u8)> = matches
-                            .iter()
-                            .combinations(save.len())
-                            .map(|c| {
-                                (
-                                    local_binds.iter().fold(
-                                        bind_ctx.clone(),
-                                        |old_bind_ctx, (id, val)| {
-                                            old_bind_ctx.with(*id, val.coerce())
-                                        },
-                                    ) as BindCtx<'a>,
-                                    c.iter().enumerate().fold(
-                                        loc_ctx.clone(),
-                                        |old_loc_ctx, (i, mat)| {
-                                            old_loc_ctx
-                                                .with(
-                                                    save.get(i).unwrap().start,
-                                                    mat.ran.start as i32,
-                                                )
-                                                .with(save.get(i).unwrap().end, mat.ran.end as i32)
-                                        },
-                                    ) as LocCtx,
-                                    c.iter().fold(0, |acc, mat| acc + mat.dist) as u8,
-                                )
-                            })
-                            .collect_vec();
-
-                        // return early - we've found it!
-                        // return Ok(combs)
-
-                        // return best
-
-                        // return all matching patterns
-                        for v in combs {
-                            accumulated.push(v);
-                        }
-                    }
-                }
-
-                // for best
-
-                if !accumulated.is_empty() {
-                    let best_dist = accumulated
-                        .clone()
-                        .into_iter()
-                        .map(|(_, _, dist)| dist)
-                        .min()
-                        .unwrap();
-                    let final_accumulated_2 = accumulated
-                        .into_iter()
-                        .filter(|(_, _, dist)| *dist == best_dist)
-                        .map(|(a, b, c)| (a, b, c + edit_dist))
-                        .collect();
-
-                    Ok(final_accumulated_2)
-                } else {
-                    Ok(vec![])
-                }
-            }
+                data,
+            } => Op::Restrict {
+                ran: ran.clone(),
+                fixed: fixed.clone(),
+                save: save.clone(),
+                data: data.concretise(),
+            },
         }
     }
 }
 
 #[derive(Clone)]
-pub enum LocTm {
+enum OpData<'p> {
+    Unevaluated {
+        params: Vec<ParamData<'p>>,
+        tm: core::Tm,
+        error_tm: core::Tm,
+    },
+
+    PartialA {
+        binds: Vec<BindContext<'p>>,
+        tm: core::Tm,
+        error_tm: core::Tm,
+    },
+    PartialB {
+        binds: Vec<(BindContext<'p>, StrVal<'p>)>,
+        error_tm: core::Tm,
+    },
+    PartialC {
+        binds: Vec<(BindContext<'p>, f64)>,
+        tm: core::Tm,
+    },
+
+    FullyEvaluated {
+        binds: Vec<(BindContext<'p>, Seq)>,
+    },
+}
+
+impl<'p> OpData<'p> {
+    fn new_unevaluated(params: &[ParamData<'p>], tm: core::Tm, error_tm: core::Tm) -> OpData<'p> {
+        OpData::Unevaluated {
+            params: params.to_vec(),
+            tm,
+            error_tm,
+        }
+    }
+
+    fn new_partial_a(binds: &[BindContext<'p>], tm: core::Tm, error_tm: core::Tm) -> OpData<'p> {
+        OpData::PartialA {
+            binds: binds.to_vec(),
+            tm,
+            error_tm,
+        }
+    }
+
+    fn new_partial_b(binds: &[(BindContext<'p>, StrVal<'p>)], error_tm: core::Tm) -> OpData<'p> {
+        OpData::PartialB {
+            binds: binds.to_vec(),
+            error_tm,
+        }
+    }
+
+    fn new_partial_c(binds: &[(BindContext<'p>, f64)], tm: core::Tm) -> OpData<'p> {
+        OpData::PartialC {
+            binds: binds.to_vec(),
+            tm,
+        }
+    }
+
+    fn new_evaluated(binds: &[(BindContext<'p>, Seq)]) -> OpData<'p> {
+        OpData::FullyEvaluated {
+            binds: binds.to_vec(),
+        }
+    }
+
+    fn reference<'r>(&'r self) -> OpData<'r> {
+        match self {
+            OpData::Unevaluated {
+                params,
+                tm,
+                error_tm,
+            } => OpData::Unevaluated {
+                params: params.iter().map(|param| param.reference()).collect(),
+                tm: tm.clone(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialA {
+                binds,
+                tm,
+                error_tm,
+            } => OpData::PartialA {
+                binds: binds.iter().map(|bind_ctx| bind_ctx.reference()).collect(),
+                tm: tm.clone(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialB { binds, error_tm } => OpData::PartialB {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, val)| (bind_ctx.reference(), val.reference()))
+                    .collect(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialC { binds, tm } => OpData::PartialC {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, error_rate)| (bind_ctx.reference(), *error_rate))
+                    .collect(),
+                tm: tm.clone(),
+            },
+            OpData::FullyEvaluated { binds } => OpData::FullyEvaluated {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, seq)| (bind_ctx.reference(), seq.clone()))
+                    .collect(),
+            },
+        }
+    }
+
+    fn concretise<'q>(&self) -> OpData<'q> {
+        match self {
+            OpData::Unevaluated {
+                params,
+                tm,
+                error_tm,
+            } => OpData::Unevaluated {
+                params: params.iter().map(|param| param.concretise()).collect(),
+                tm: tm.clone(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialA {
+                binds,
+                tm,
+                error_tm,
+            } => OpData::PartialA {
+                binds: binds.iter().map(|bind_ctx| bind_ctx.concretise()).collect(),
+                tm: tm.clone(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialB { binds, error_tm } => OpData::PartialB {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, str_val)| (bind_ctx.concretise(), str_val.concretise()))
+                    .collect(),
+                error_tm: error_tm.clone(),
+            },
+            OpData::PartialC { binds, tm } => OpData::PartialC {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, error_val)| (bind_ctx.concretise(), *error_val))
+                    .collect(),
+                tm: tm.clone(),
+            },
+            OpData::FullyEvaluated { binds } => OpData::FullyEvaluated {
+                binds: binds
+                    .iter()
+                    .map(|(bind_ctx, seq)| (bind_ctx.concretise(), seq.clone()))
+                    .collect(),
+            },
+        }
+    }
+
+    fn get_priority(&self) -> usize {
+        match self {
+            // if unevaluated, we can just roughly estimate by how many parameters are involved
+            OpData::Unevaluated { params, .. } => params.len(),
+
+            // otherwise, based on the number of different bind contexts that must be considered
+            OpData::PartialA { binds, .. } => binds.len(),
+            OpData::PartialB { binds, .. } => binds.len(),
+            OpData::PartialC { binds, .. } => binds.len(),
+            OpData::FullyEvaluated { binds } => binds.len(),
+        }
+    }
+}
+
+enum OpDataEvalResult<'p> {
+    Concrete { v: Vec<(BindContext<'p>, Seq)> },
+    Reference { v: &'p Vec<(BindContext<'p>, Seq)> },
+}
+
+impl<'p> OpDataEvalResult<'p> {
+    pub fn iter(&self) -> std::slice::Iter<'_, (BindContext<'p>, seq::Seq)> {
+        match self {
+            OpDataEvalResult::Concrete { v } => v.iter(),
+            OpDataEvalResult::Reference { v } => v.iter(),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct ParamContext<'p> {
+    map: HashMap<String, ParamData<'p>>,
+}
+
+impl<'p> ParamContext<'p> {
+    fn new() -> ParamContext<'p> {
+        ParamContext::default()
+    }
+
+    fn with(&self, name: &str, param_data: ParamData<'p>) -> ParamContext<'p> {
+        let mut new_map = self
+            .map
+            .iter()
+            .map(|(key, val)| (key.clone(), val.concretise()))
+            .collect::<HashMap<_, _>>();
+
+        new_map.insert(name.to_string(), param_data);
+
+        ParamContext { map: new_map }
+    }
+
+    fn get(&self, name: &str) -> Option<ParamData<'p>> {
+        self.map.get(name).map(|param_data| param_data.concretise())
+    }
+}
+
+#[derive(Clone)]
+enum ParamData<'p> {
+    Unevaluated {
+        index: usize,
+        tm: core::Tm,
+        ty: core::Val<'p>,
+    },
+    Evaluated {
+        index: usize,
+        vals: ListVal<'p>,
+        ty: core::Val<'p>,
+    },
+}
+
+impl<'p> ParamData<'p> {
+    fn new_unevaluated(index: usize, tm: core::Tm, ty: core::Val<'p>) -> ParamData<'p> {
+        ParamData::Unevaluated { index, tm, ty }
+    }
+
+    fn new_evaluated(index: usize, vals: ListVal<'p>, ty: core::Val<'p>) -> ParamData<'p> {
+        ParamData::Evaluated { index, vals, ty }
+    }
+
+    fn get_ty(&self) -> &Val<'p> {
+        match self {
+            ParamData::Unevaluated { index, tm, ty } => ty,
+            ParamData::Evaluated { index, vals, ty } => ty,
+        }
+    }
+
+    fn get_index(&self) -> usize {
+        match self {
+            ParamData::Unevaluated { index, tm, ty } => *index,
+            ParamData::Evaluated { index, vals, ty } => *index,
+        }
+    }
+
+    fn reference<'r>(&'r self) -> ParamData<'r> {
+        match self {
+            ParamData::Unevaluated { index, tm, ty } => ParamData::Unevaluated {
+                index: *index,
+                tm: tm.clone(),
+                ty: ty.reference(),
+            },
+            ParamData::Evaluated { index, vals, ty } => ParamData::Evaluated {
+                index: *index,
+                vals: vals.reference(),
+                ty: ty.reference(),
+            },
+        }
+    }
+
+    fn concretise<'q>(&self) -> ParamData<'q> {
+        match self {
+            ParamData::Unevaluated { index, tm, ty } => ParamData::Unevaluated {
+                index: *index,
+                tm: tm.clone(),
+                ty: ty.concretise(),
+            },
+            ParamData::Evaluated { index, vals, ty } => ParamData::Evaluated {
+                index: *index,
+                vals: vals.concretise(),
+                ty: ty.concretise(),
+            },
+        }
+    }
+}
+
+struct Bind<'p> {
+    index: usize,
+    val: Val<'p>,
+}
+
+#[derive(Clone)]
+pub enum LocOp {
     Var {
         loc: usize,
     },
-    Plus {
-        loc_tm: Arc<LocTm>,
+    Offset {
+        loc_op: Arc<LocOp>,
         offset: core::Tm,
+        direction: Direction,
     },
-    Minus {
-        loc_tm: Arc<LocTm>,
-        offset: core::Tm,
-    },
-}
-
-impl<'p> LocTm<'p> {
-    fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<core::Val<'a>>,
-        loc_ctx: &LocCtx,
-    ) -> Result<i32, core::EvalError>
-    where
-        'p: 'a,
-    {
-        match self {
-            LocTm::Var { loc } => Ok(loc_ctx.get(loc) as i32),
-            LocTm::Plus { loc_tm, offset } => {
-                // WARN changed the order of env and env default; see if this works
-                // WARN cache can be empty because this is pre-caching
-                if let core::Val::Num { n } =
-                    offset.eval(arena, &Env::default(), &Cache::default(), env)?
-                {
-                    let i = n.round() as i32;
-
-                    Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 + i) as i32)
-                } else {
-                    panic!("sized read pattern wasn't numeric type?!")
-                }
-            }
-            LocTm::Minus { loc_tm, offset } => {
-                // WARN changed the order of env and env default; see if this works
-                // WARN cache can be empty because this is pre-caching
-                if let core::Val::Num { n } =
-                    offset.eval(arena, &Env::default(), &Cache::default(), env)?
-                {
-                    let i = n.round() as i32;
-
-                    Ok((loc_tm.eval(arena, env, loc_ctx)? as i32 - i) as i32)
-                } else {
-                    panic!("sized read pattern wasn't numeric type?!")
-                }
-            }
-        }
-    }
-
-    fn coerce<'a>(&self, arena: &'a Arena) -> LocTm<'a>
-    where
-        'p: 'a,
-    {
-        match self {
-            LocTm::Var { loc } => LocTm::Var { loc: *loc },
-            LocTm::Plus { loc_tm, offset } => LocTm::Plus {
-                loc_tm: Arc::new(loc_tm.coerce(arena)),
-                offset: offset.coerce(),
-            },
-            LocTm::Minus { loc_tm, offset } => LocTm::Minus {
-                loc_tm: Arc::new(loc_tm.coerce(arena)),
-                offset: offset.coerce(),
-            },
-        }
-    }
 }
 
 #[derive(Clone)]
-pub struct Seq {
-    bytes: Vec<u8>,
-    dist: usize,
-    myers: VarMyers,
+enum Direction {
+    Plus,
+    Minus,
 }
 
-impl Seq {
-    pub fn new(bytes: &[u8], error: f64) -> Seq {
-        Seq {
-            bytes: bytes.to_ascii_uppercase(),
-            myers: VarMyers::new(&bytes.to_ascii_uppercase()),
-            dist: (bytes.len() as f64 * error).floor() as usize,
-        }
-    }
-
-    pub fn find_all_disjoint(
-        &self,
-        seq: &[u8],
-        search_ran: &Ran<usize>,
-        fixed: &Ran<bool>,
-    ) -> Vec<Mat> {
-        let (start, end): (i32, i32) = match (fixed.start, fixed.end) {
-            // somehow pin both ends
-            // - i guess just calculate straight levenshtein distance?
-            (true, true) => todo!(),
-
-            // pin the start
-            (true, false) => (
-                search_ran.start as i32,
-                (search_ran.start + self.bytes.len() + self.dist as usize) as i32,
-            ),
-
-            // pin the end
-            (false, true) => (
-                search_ran.end as i32 - self.bytes.len() as i32 - self.dist as i32,
-                search_ran.end as i32,
-            ),
-
-            // just grab the whole slice of the sequence
-            (false, false) => (search_ran.start as i32, search_ran.end as i32),
-        };
-
-        // return early if the range is inappropriate
-        if start < 0 || end > seq.len() as i32 {
-            return vec![];
-        }
-
-        let trimmed = &seq[start as usize..end as usize];
-
-        self.myers
-            .find_all_disjoint(trimmed, self.dist)
-            .iter()
-            .map(|(mat_start, mat_end, dist)| {
-                Mat::new(
-                    Ran::new(*mat_start + start as usize, *mat_end + start as usize),
-                    *dist as u8,
-                )
-            })
-            .collect()
-    }
-}
-
-#[derive(Debug)]
-struct Mat {
-    pub ran: Ran<usize>,
-    pub dist: u8,
-}
-
-impl Mat {
-    fn new(ran: Ran<usize>, dist: u8) -> Mat {
-        Mat { ran, dist }
-    }
-}
-
-impl<'a> Display for OpTm<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Direction {
+    fn get(&self) -> i32 {
         match self {
-            OpTm::Let { loc, tm, flanking } => {
-                format!("{} = {} checking {}", loc, tm, flanking).fmt(f)
-            }
-            OpTm::Restrict {
-                ids,
-                tm,
-                ran,
-                fixed,
-                save,
-                error,
-            } => format!(
-                "find ({}){} in {} fixed {} save {} with error {}",
-                ids.join(","),
-                tm,
-                ran,
-                fixed,
-                "a",
-                error
-            )
-            .fmt(f),
-        }
-    }
-}
-
-impl<'a> Display for LocTm<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LocTm::Var { loc } => loc.fmt(f),
-            LocTm::Plus { loc_tm, offset } => format!("{} + {}", loc_tm, offset).fmt(f),
-            LocTm::Minus { loc_tm, offset } => format!("{} - {}", loc_tm, offset).fmt(f),
-        }
-    }
-}
-
-impl<'a> Display for Reg<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Reg::Hole => "_".fmt(f),
-            Reg::Exp {
-                ids: items,
-                ctm: located,
-                error_ctm: error,
-            } => format!("({}){}<{}>", items.join(","), located, error).fmt(f),
+            Direction::Plus => 1,
+            Direction::Minus => -1,
         }
     }
 }

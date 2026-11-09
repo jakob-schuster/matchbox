@@ -8,13 +8,13 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{
         self,
-        eval2::env::Env,
+        eval::env::Env,
         rec::{self, CSVHeader, FullyConcreteRec},
         Effect, Val,
     },
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{cache::Cache, recfield::CoreRecField, Arena},
+    util::recfield::CoreRecField,
 };
 
 pub struct DSVReader {
@@ -70,8 +70,6 @@ impl Reader for DSVReader {
                     .par_iter()
                     .map(|record| match record {
                         Ok(read) => {
-                            let arena = Arena::new();
-
                             let val = core::Val::Rec {
                                 rec: rec::Rec2::CSVRead {
                                     r: rec::CSVRead {

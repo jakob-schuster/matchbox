@@ -1,11 +1,11 @@
 use bio::data_structures::qgram_index::Match;
 use itertools::Itertools;
-pub mod read_matcher2;
+pub mod read_matcher;
 
 use crate::{
-    core::eval2::env::{self, Env},
+    core::eval::env::{self, Env},
     myers::VarMyers,
-    util::{location::Location, ran::Ran, Arena},
+    util::{location::Location, ran::Ran},
 };
 
 use super::{EvalError, Val};

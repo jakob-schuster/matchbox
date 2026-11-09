@@ -5,9 +5,9 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 
 use crate::{
     core,
-    core::{eval2::env::Env, library::unary_read_reverse_complement, Effect, StrVal, Val},
+    core::{eval::env::Env, library::unary_read_reverse_complement, Effect, StrVal, Val},
     input::{ExecError, ProgressSummary, Reader},
-    util::{location::Location, Arena},
+    util::location::Location,
 };
 
 pub struct ListReader {

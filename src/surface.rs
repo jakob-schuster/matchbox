@@ -1,21 +1,13 @@
 //! Define the surface language, and elaborate it to the core language using bidirectional type inference.
 
-use std::{collections::HashMap, fmt::Display, io::Read, ops::Deref, rc::Rc, sync::Arc};
+use std::{fmt::Display, rc::Rc};
 
 use itertools::Itertools;
 
-use crate::{
-    core::{self, library, EvalError, Val},
-    input::{FileType, InputError, Reader},
-    parse,
-    util::{
-        bytes_to_string, cache::Cache, env::Env, location::Located, location::Location, ran::Ran,
-        recfield::CoreRecField, recfield::RecField, Arena,
-    },
-};
+use crate::util::{location::Located, recfield::RecField};
 
 // pub mod elab;
-pub mod elab2;
+pub mod elab;
 
 pub type Prog = Located<ProgData>;
 /// A matchbox program, consisting of a list of statements.
@@ -29,20 +21,16 @@ pub type Stmt = Located<StmtData>;
 #[derive(Debug, Clone)]
 pub enum StmtData {
     /// A group of statements, executed together.
-    /// [ { let tso: AGCTG; read.name } ]
     Group { stmts: Vec<Stmt> },
 
     /// A let statement, binding a name to the value of a term.
-    /// [ let tso: AGCTGA ]
     Let { name: String, tm: Tm },
 
     /// An output statement, sending a value to an output destination.
     /// (For now, these are built-in rather than functions - may need to change)
-    /// [ read.name |> file('out.txt') ]
     Tm { tm: Tm },
 
     /// A conditional structure.
-    /// [ if read matches [ |3| rest:_ ] => rest |> trimmed ]
     If { branches: Vec<Branch> },
 }
 
@@ -51,11 +39,9 @@ pub type Branch = Located<BranchData>;
 #[derive(Debug, Clone)]
 pub enum BranchData {
     /// A boolean branch
-    /// [ read.seq.len() > 100 { read.name |> names } ]
     Bool { tm: Tm, stmt: Stmt },
 
     /// A pattern-matching branch
-    /// [ read matches [_ tso _] => read |> filtered ]
     Matches {
         tm: Tm,
         branches: Vec<PatternBranch>,

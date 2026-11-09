@@ -21,7 +21,7 @@ use codespan_reporting::{
 use input::{get_extensions, FileType, FileTypeError, InputError, ReaderWithBar};
 use output::{OutputError, OutputHandler};
 use parse::{parse, ParseError};
-use util::{location::Location, Arena};
+use util::location::Location;
 
 mod core;
 mod input;
@@ -40,7 +40,7 @@ use clap::{
 
 use crate::{
     input::{CLIFileType, ExecError},
-    surface::{elab2::elab_error::ElabError, MatchMode},
+    surface::{elab::elab_error::ElabError, MatchMode},
 };
 
 fn main() {

@@ -7,7 +7,7 @@ use noodles::sam::{
 use crate::{
     core::{self, StrVal},
     input::{Input, InputError},
-    util::{self, bytes_to_string, location::Location, recfield::CoreRecField, Arena},
+    util::{self, bytes_to_string, location::Location, recfield::CoreRecField},
 };
 use std::{collections::HashMap, fmt::Display, io::Read, rc::Rc, sync::Arc};
 

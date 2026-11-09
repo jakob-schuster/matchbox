@@ -8,18 +8,12 @@ use crate::{
     },
     input::{get_filetype_and_buffer, FileType},
     myers::VarMyers,
-    surface::elab2::context::Context,
-    util::{
-        self, bytes_to_string, cache::Cache, env::Env, get_bit, location::Location,
-        recfield::CoreRecField, Arena,
-    },
+    surface::elab::context::Context,
+    util::{self, bytes_to_string, get_bit, location::Location, recfield::CoreRecField},
 };
-use std::{collections::HashMap, io::Read, path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
-use super::{
-    rec::{self, ConcreteRec},
-    Effect, EvalError, PortableVal, Val,
-};
+use super::{Effect, EvalError, Val};
 
 pub fn standard_library<'a>() -> Context<'a> {
     Context::new()

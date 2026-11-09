@@ -8,13 +8,13 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{
         self,
-        eval2::env::Env,
+        eval::env::Env,
         rec::{self, FullyConcreteRec, Rec2},
         Effect, Val,
     },
     input::{AuxiliaryInputData, ExecError, Input, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{cache::Cache, location::Location, recfield::CoreRecField, Arena},
+    util::{location::Location, recfield::CoreRecField},
 };
 
 pub struct SamReader {
@@ -130,7 +130,6 @@ impl Reader for SamReader {
                     .par_iter()
                     .map(|record| match record {
                         Ok(read) => {
-                            let arena = Arena::new();
                             let cigar = read.cigar();
                             let seq = read.sequence();
                             let qual = read.quality_scores();
@@ -405,8 +404,6 @@ impl Reader for PairedSamReader {
                     .par_iter()
                     .map(|(record, paired_record)| match (record, paired_record) {
                         (Ok(read), Ok(paired_read)) => {
-                            let arena = Arena::new();
-
                             let cigar = read.cigar();
                             let paired_cigar = paired_read.cigar();
 

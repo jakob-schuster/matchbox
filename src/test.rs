@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use crate::parse::parse;
 use crate::{
     core::{self, rec::ConcreteRec, Val},
-    util::Arena,
     GenericError, GlobalConfig,
 };
 

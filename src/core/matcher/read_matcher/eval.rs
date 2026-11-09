@@ -1,10 +1,10 @@
-use crate::core::matcher::read_matcher2::elab2::core_read_params_to_bind_ctxs;
-use crate::core::matcher::read_matcher2::eval2::match_context::MatchContext;
+use crate::core::matcher::read_matcher::elab::core_read_params_to_bind_ctxs;
+use crate::core::matcher::read_matcher::eval::match_context::MatchContext;
 use crate::util::location::Location;
 
 use crate::core::EvalError;
 
-use crate::core::matcher::{read_matcher2::*, Matcher};
+use crate::core::matcher::{read_matcher::*, Matcher};
 
 impl<'p> Matcher<'p> for ReadMatcher<'p> {
     fn eval2<'q, 'r, 'a>(
@@ -174,7 +174,7 @@ impl<'p> Matcher<'p> for ReadMatcher<'p> {
 
 pub mod match_context {
     use crate::core::{
-        matcher::read_matcher2::eval2::match_context::{
+        matcher::read_matcher::eval::match_context::{
             bind_context::BindContext, location_context::LocationContext,
         },
         InternalError, Val,
@@ -275,7 +275,7 @@ pub mod match_context {
 
         use crate::core::InternalError;
 
-        use crate::core::eval2::env;
+        use crate::core::eval::env;
         use crate::core::Val;
 
         use std::collections::HashMap;

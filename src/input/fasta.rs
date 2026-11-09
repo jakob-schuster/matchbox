@@ -8,13 +8,13 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{
         self,
-        eval2::env::Env,
+        eval::env::Env,
         rec::{self, ConcreteRec, FastaRead, FullyConcreteRec},
         Effect, Val,
     },
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{cache::Cache, location::Location, recfield::CoreRecField, Arena},
+    util::{location::Location, recfield::CoreRecField},
 };
 
 pub struct FastaReader {

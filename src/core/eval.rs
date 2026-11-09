@@ -2,74 +2,168 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     core::{
-        app,
-        rec::{FullyConcreteRec, Rec},
-        Branch, BranchData, Effect, EvalError, FunData, InternalError, Neutral, PatternBranch,
-        PatternBranchData, Prog, ProgData, Stmt, StmtData, Tm, TmData, Val,
+        rec::{ConcreteRec, FullyConcreteRec, Rec2},
+        Branch, BranchData, Effect, EvalError, FunData, InternalError, ListVal, Neutral,
+        PatternBranch, Prog, Stmt, StmtData, StrVal, Tm, TmData, Val,
     },
-    util::{cache::Cache, env::Env, recfield::CoreRecField, Arena},
+    util::recfield::CoreRecField,
 };
 
+pub mod env {
+    use std::fmt::{self, Display, Formatter};
+
+    use crate::core::{EvalError, InternalError, Val};
+
+    #[derive(Clone)]
+    pub(crate) struct Env<A> {
+        pub(crate) vec: Vec<A>,
+    }
+
+    impl<A> Env<A> {
+        pub fn len(&self) -> usize {
+            self.vec.len()
+        }
+    }
+
+    impl<A: Clone + Display> Env<A> {
+        /// Push an element to the top of the environment.
+        /// Returns the index at which the value is found.
+        pub fn push(&mut self, a: A) -> usize {
+            let index = self.vec.len();
+            self.vec.push(a);
+
+            index
+        }
+
+        /// Make a copy of the environment, pushing the new item,
+        pub fn with(&self, a: A) -> Env<A> {
+            let mut new = self.clone();
+            new.push(a);
+            new
+        }
+
+        /// Get an item at an index in the cache.
+        pub fn get<'a>(&'a self, index: usize) -> Result<&'a A, InternalError> {
+            match self.vec.get(index) {
+                Some(a) => Ok(a),
+                None => Err(InternalError::new("couldn't index env at position ?!")),
+            }
+        }
+
+        pub fn get_slice(&self) -> &[A] {
+            &self.vec
+        }
+    }
+
+    impl<A: Display> Display for Env<A> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            format!(
+                "[{}]",
+                self.vec
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .fmt(f)
+        }
+    }
+
+    impl<A> Default for Env<A> {
+        fn default() -> Self {
+            Env {
+                vec: Vec::default(),
+            }
+        }
+    }
+
+    impl<'p> Env<Val<'p>> {
+        pub fn with_val<'a>(&'a self, val: Val<'a>) -> Env<Val<'a>> {
+            let mut new = self.reference();
+            new.push(val);
+            new
+        }
+
+        pub fn reference<'a>(&'a self) -> Env<Val<'a>> {
+            Env {
+                vec: self.vec.iter().map(|val| val.reference()).collect(),
+            }
+        }
+
+        pub fn concretise<'q>(&self) -> Env<Val<'q>> {
+            Env {
+                vec: self.vec.iter().map(|val| val.concretise()).collect(),
+            }
+        }
+    }
+}
+
 impl<'p> Prog<'p> {
-    /// In the context of an arena, an environment of values,
-    /// the cache of pre-computed values, and a single read,
-    /// evaluate a program into a list of effects.
-    pub fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+    pub fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
         read: Val<'a>,
     ) -> Result<Vec<Effect>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
-        self.data
-            .stmt
-            .eval(arena, env, cache, &Env::default().with(read.clone()))
+        // add the read to the local environment
+        let mut local2 = local.clone();
+        local2.push(read);
+
+        self.data.stmt.eval2(global, &local2)
     }
 }
 
 impl<'p> Stmt<'p> {
-    /// In the context of an arena, a global environment of values from the standard library,
-    /// the cache of pre-computed values, and a local environment,
-    /// evaluate a statement into a list of effects.
-    pub fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        global_env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
-        env: &Env<Val<'a>>,
+    pub fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
     ) -> Result<Vec<Effect>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
         match &self.data {
             StmtData::Let { tm, next } => {
                 // evaluate the term
-                let val = tm.eval(arena, global_env, cache, env)?;
+                let val = tm.eval2(global, local)?;
+                // bind the result in the environment
+                let mut local2 = local.reference();
+                local2.push(val);
                 // and then evaluate the statement with that binding
-                next.eval(arena, global_env, cache, &env.with(val))
+                next.eval2(global, &local2)
             }
             StmtData::Tm { tm, next } => {
-                let val = tm.eval(arena, global_env, cache, env)?;
+                let val = tm.eval2(global, local)?;
 
                 match val {
                     Val::Effect { effect } => {
                         // export the values to be portable
                         Ok([effect]
                             .into_iter()
-                            .chain(next.eval(arena, global_env, cache, env)?)
+                            .chain(next.eval2(global, local)?)
                             .collect::<Vec<_>>())
                     }
-                    _ => panic!("type error in statement-level effect, found {}?!", val),
+                    _ => Err(EvalError::from_internal(
+                        InternalError::new(&format!(
+                            "type error in statement-level effect, found {}?!",
+                            val,
+                        )),
+                        self.location.clone(),
+                    )),
                 }
             }
             StmtData::If { branches, next } => {
                 // return the results of the first successful branch
                 let get_first_branch_results = || {
                     for branch in branches {
-                        if let Some(vec) = branch.eval(arena, global_env, cache, env)? {
+                        if let Some(vec) = branch.eval2(global, local)? {
                             return Ok(vec);
                         }
                     }
@@ -80,7 +174,7 @@ impl<'p> Stmt<'p> {
                 // and then chain on the rest of the results after this statement
                 Ok(get_first_branch_results()?
                     .into_iter()
-                    .chain(next.eval(arena, global_env, cache, env)?)
+                    .chain(next.eval2(global, local)?)
                     .collect::<Vec<_>>())
             }
             StmtData::End => Ok(vec![]),
@@ -89,26 +183,26 @@ impl<'p> Stmt<'p> {
 }
 
 impl<'p> Branch<'p> {
-    /// In the context of an arena, a global environment of values from the standard library,
-    /// the cache of pre-computed values, and a local environment,
-    /// evaluate a branch into a list of effects.
-    pub fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        global_env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
-        env: &Env<Val<'a>>,
+    pub fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
     ) -> Result<Option<Vec<Effect>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
         match &self.data {
-            BranchData::Bool { tm, stmt } => match tm.eval(arena, global_env, cache, env)? {
-                Val::Bool { b } => match b {
-                    true => Ok(Some(stmt.eval(arena, global_env, cache, env)?)),
-                    false => Ok(None),
-                },
-                v @ _ => Err(EvalError::from_internal(
+            BranchData::Bool { tm, stmt } => match tm.eval2(global, local)? {
+                Val::Bool { b } => {
+                    if b {
+                        Ok(Some(stmt.eval2(global, local)?))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                v => Err(EvalError::from_internal(
                     InternalError {
                         message: format!("expected bool in branch, found {}?!", v),
                     },
@@ -116,15 +210,15 @@ impl<'p> Branch<'p> {
                 )),
             },
             BranchData::Matches { tm, branches } => {
-                let val = tm.eval(arena, global_env, cache, env)?;
+                let val = tm.eval2(global, local)?;
 
                 for branch in branches {
-                    if let Some(vec) = branch.eval(arena, global_env, cache, env, &val)? {
+                    if let Some(vec) = branch.eval2(global, local, &val)? {
                         return Ok(Some(vec));
                     }
                 }
 
-                // if no branch in the is has matched, continue on with the branches
+                // if no branch has matched, continue on with the branches
                 Ok(None)
             }
         }
@@ -132,35 +226,23 @@ impl<'p> Branch<'p> {
 }
 
 impl<'p> PatternBranch<'p> {
-    /// In the context of an arena, a global environment of values from the standard library,
-    /// the cache of pre-computed values, and a local environment,
-    /// evaluate a pattern branch into a list of effects.
-    pub fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        global_env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
+    pub fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
     ) -> Result<Option<Vec<Effect>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
-        match &self.data.matcher.evaluate(arena, env, val)?[..] {
+        match &self.data.matcher.eval2(global, local, val)?[..] {
             [] => Ok(None),
             bind_options => Ok(Some(
                 bind_options
-                    .into_iter()
-                    .map(|binds| {
-                        self.data.stmt.eval(
-                            arena,
-                            global_env,
-                            cache,
-                            &binds
-                                .iter()
-                                .fold(env.clone(), |env0, bind| env0.with(bind.clone())),
-                        )
-                    })
+                    .iter()
+                    .map(|new_local| self.data.stmt.eval2(global, &new_local))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .flatten()
@@ -170,63 +252,59 @@ impl<'p> PatternBranch<'p> {
     }
 }
 
-impl<'p> Tm<'p> {
-    /// In the context of an arena, a global environment of values from the standard library,
-    /// the cache of pre-computed values, and a local environment,
-    /// evaluate a term into a value.
-    pub fn eval<'a>(
-        &self,
-        arena: &'a Arena,
-        global_env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
-        env: &Env<Val<'a>>,
-    ) -> Result<Val<'a>, EvalError>
-    where
-        'p: 'a,
-    {
+impl Tm {
+    pub fn eval2<'q: 'r, 'p: 'r, 'r: 'a, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+    ) -> Result<Val<'r>, EvalError> {
         match &self.data {
-            // WARN clumsy and wasteful coercion
-            TmData::Global { index } => Ok(cache.get(*index).coerce()),
-
-            // look up the variable in the environment
-            TmData::Local { index } => {
-                Ok(if *index < env.iter().len() {
-                    (*env.get_index(*index)).clone()
-                } else {
-                    // WARN clumsy and wasteful coercion
-                    global_env.get_index(*index - env.iter().len()).coerce()
-                })
-            }
-
+            TmData::Global { index } => Ok(global
+                .get(*index)
+                .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
+                .reference()),
+            TmData::Local { index } => Ok(local
+                .get(*index)
+                .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
+                .concretise()),
             TmData::Univ => Ok(Val::Univ),
             TmData::AnyTy => Ok(Val::AnyTy),
-
             TmData::BoolTy => Ok(Val::BoolTy),
             TmData::BoolLit { b } => Ok(Val::Bool { b: *b }),
             TmData::NumTy => Ok(Val::NumTy),
             TmData::NumLit { n } => Ok(Val::Num { n: *n }),
             TmData::StrTy => Ok(Val::StrTy),
-            TmData::StrLit { s } => Ok(Val::Str { s }),
-
+            TmData::StrLit { s } => Ok(Val::Str {
+                s: StrVal::Reference { s },
+            }),
+            TmData::ListTy { ty } => Ok(Val::ListTy {
+                ty: Arc::new(ty.eval2(global, local)?),
+            }),
+            TmData::ListLit { tms } => Ok(Val::List {
+                v: ListVal::Concrete {
+                    v: tms
+                        .iter()
+                        .map(|tm| tm.eval2(global, local))
+                        .collect::<Result<Vec<Val<'r>>, EvalError>>()?,
+                },
+            }),
             TmData::FunTy { args, opts, body } => {
+                // first, evaluate the args
                 let args = args
                     .iter()
-                    .map(|arg| arg.eval(arena, global_env, cache, env))
+                    .map(|arg| arg.eval2(global, local))
                     .collect::<Result<Vec<_>, EvalError>>()?;
 
+                // then, evaluate the opts
                 let opts = opts
                     .iter()
                     .map(|(name, ty, val)| {
-                        Ok((
-                            *name,
-                            ty.eval(arena, global_env, cache, env)?,
-                            // val.eval(arena, global_env, cache, env)?,
-                            val.clone(),
-                        ))
+                        Ok((name.clone(), ty.eval2(global, local)?, val.clone()))
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<Vec<_>, EvalError>>()?;
 
-                let body = body.eval(arena, global_env, cache, env)?;
+                // then, evaluate the body
+                let body = body.eval2(global, local)?;
 
                 if args.iter().any(|arg| arg.is_neutral())
                     || opts.iter().any(|(_, ty, val)| ty.is_neutral())
@@ -247,96 +325,55 @@ impl<'p> Tm<'p> {
                     })
                 }
             }
-            // WARN we aren't giving an option for this to be neutral yet. is this a problem?
             TmData::FunLit { body } => Ok(Val::Fun {
                 data: FunData {
-                    global: env.clone() as Env<Val<'a>>,
-                    body: body.coerce(),
+                    global: global.clone(),
+                    local: local.clone(),
+                    body: body.as_ref().clone(),
                 },
             }),
-            TmData::FunForeignLit {
-                // args,
-                // body_ty,
-                body,
-            } => {
-                // let args = args
-                //     .iter()
-                //     .map(|arg| arg.eval(arena, global_env, cache, env))
-                //     .collect::<Result<Vec<_>, _>>()?;
-
-                // let smaller_env = args.iter().fold(env.clone(), |env0, _| {
-                //     env0.with(Val::Neutral {
-                //         neutral: Neutral::Var {
-                //             level: env0.iter().len(),
-                //         },
-                //     })
-                // });
-
-                // let body_ty = body_ty.eval(arena, global_env, cache, &smaller_env)?;
-
-                // we DON'T care if the body type is neutral
-                // if args.iter().any(|arg| arg.is_neutral()) {
-                //     Ok(Val::Neutral {
-                //         neutral: Neutral::FunForeignLit {
-                //             // args,
-                //             // body_ty: Arc::new(body_ty),
-                //             body: body.clone(),
-                //         },
-                //     })
-                // } else {
-                Ok(Val::FunForeign {
-                    // args,
-                    // body_ty: Arc::new(body_ty),
-                    body: body.clone(),
-                })
-                // }
-            }
-            TmData::FunApp { head, args } => app(
-                arena,
-                &self.location,
-                head.eval(arena, global_env, cache, env)?,
-                args.iter()
-                    .map(|arg| arg.eval(arena, global_env, cache, env))
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-
-            TmData::ListTy { ty } => {
-                let val = ty.eval(arena, global_env, cache, env)?;
-                if val.is_neutral() {
-                    Ok(Val::Neutral {
-                        neutral: Neutral::ListTy { ty: Arc::new(val) },
-                    })
-                } else {
-                    Ok(Val::ListTy {
-                        ty: Arc::new(ty.eval(arena, global_env, cache, env)?),
-                    })
-                }
-            }
-            TmData::ListLit { tms } => {
-                let v = tms
+            TmData::FunForeignLit { body } => Ok(Val::FunForeign { body: body.clone() }),
+            TmData::FunApp { head, args } => {
+                let head_val = head.eval2(global, local)?;
+                let args_vals = args
                     .iter()
-                    .map(|tm| tm.eval(arena, global_env, cache, env))
+                    .map(|arg| arg.eval2(global, local))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                if v.iter().any(|val| val.is_neutral()) {
+                if head_val.is_neutral() || args_vals.iter().any(|arg| arg.is_neutral()) {
                     Ok(Val::Neutral {
-                        neutral: Neutral::ListLit { tms: v },
+                        neutral: Neutral::FunApp {
+                            head: Arc::new(head_val),
+                            args: args_vals,
+                        },
                     })
                 } else {
-                    Ok(Val::List { v })
+                    match head_val {
+                        // WARN these concretises potentially VERY costly
+                        Val::Fun { data } => Ok(data.app(args_vals)?.concretise()),
+                        Val::FunForeign { body } => body(&self.location, &args_vals),
+                        Val::FunReturnTyAwaiting { data } => Ok(data.app(args_vals)?.concretise()),
+                        _ => Err(EvalError::from_internal(
+                            InternalError::new(&format!(
+                                "trying to apply '{}' as a function?!",
+                                head_val
+                            )),
+                            self.location.clone(),
+                        )),
+                    }
                 }
             }
-
             TmData::RecTy { fields } => {
                 let fields = fields
                     .iter()
                     .map(|field| {
                         Ok(CoreRecField::new(
-                            field.name,
-                            field.data.eval(arena, global_env, cache, env)?,
+                            &field.name,
+                            field.data.eval2(global, local)?,
                         ))
                     })
-                    .collect::<Result<Vec<_>, EvalError>>()?;
+                    .collect::<Result<Vec<_>, _>>()?;
+
                 if fields.iter().any(|field| field.data.is_neutral()) {
                     Ok(Val::Neutral {
                         neutral: Neutral::RecTy { fields },
@@ -350,85 +387,76 @@ impl<'p> Tm<'p> {
                     .iter()
                     .map(|field| {
                         Ok(CoreRecField::new(
-                            field.name,
-                            field.data.eval(arena, global_env, cache, env)?,
+                            &field.name,
+                            field.data.eval2(global, local)?,
                         ))
                     })
-                    .collect::<Result<Vec<_>, EvalError>>()?;
+                    .collect::<Result<Vec<_>, _>>()?;
+
                 if fields.iter().any(|field| field.data.is_neutral()) {
                     Ok(Val::Neutral {
-                        neutral: Neutral::RecWithTy { fields },
+                        neutral: Neutral::RecTy { fields },
                     })
                 } else {
                     Ok(Val::RecWithTy { fields })
                 }
             }
-
-            // allocate a RecLit as a ConcreteRec
             TmData::RecLit { fields } => {
                 let new_fields = fields
                     .iter()
-                    .map(|field| {
-                        Ok((
-                            field.name.to_vec(),
-                            field.data.eval(arena, global_env, cache, env)? as Val<'a>,
-                        ))
-                    })
-                    .collect::<Result<HashMap<_, _>, EvalError>>()?;
+                    .map(|field| Ok((&field.name[..], field.data.eval2(global, local)?)))
+                    .collect::<Result<HashMap<_, _>, _>>()?;
 
                 if new_fields.iter().any(|(_, val)| val.is_neutral()) {
-                    // if any value is neutral, the whole record is neutral
                     Ok(Val::Neutral {
                         neutral: Neutral::RecLit {
                             fields: fields
                                 .iter()
                                 .map(|field| {
                                     Ok(CoreRecField::new(
-                                        field.name,
-                                        field.data.eval(arena, global_env, cache, env)? as Val<'a>,
+                                        &field.name,
+                                        field.data.eval2(global, local)?,
                                     ))
                                 })
-                                .collect::<Result<Vec<_>, EvalError>>()?,
+                                .collect::<Result<Vec<_>, _>>()?,
                         },
                     })
                 } else {
                     Ok(Val::Rec {
-                        rec: Arc::new(FullyConcreteRec { map: new_fields })
-                            as Arc<dyn Rec<'a> + 'a>,
+                        rec: Rec2::Concrete {
+                            r: ConcreteRec { map: new_fields },
+                        },
                     })
                 }
             }
-            TmData::RecProj { tm: head_tm, name } => {
-                match head_tm.eval(arena, global_env, cache, env)? {
-                    Val::Rec { rec: r } => {
-                        let e = r
-                            .get(name)
-                            .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
-                            .clone();
+            TmData::RecProj { tm, name } => match tm.eval2(global, local)? {
+                Val::Rec { rec } => {
+                    let val = rec
+                        .get(name)
+                        .map_err(|e| EvalError::from_internal(e, self.location.clone()))?
+                        .clone();
 
-                        Ok(e)
-                    }
-                    Val::Neutral { neutral } => Ok(Val::Neutral {
-                        neutral: Neutral::RecProj {
-                            tm: Arc::new(Val::Neutral {
-                                neutral: neutral.clone(),
-                            }),
-                            name: *name,
-                        },
-                    }),
-                    val @ _ => Err(EvalError::from_internal(
-                        InternalError {
-                            message: format!(
-                                "trying to access field of non-record value {}?!",
-                                val
-                            ),
-                        },
-                        self.location.clone(),
-                    )),
+                    Ok(val)
                 }
-            }
-
+                Val::Neutral { neutral } => Ok(Val::Neutral {
+                    neutral: Neutral::RecProj {
+                        tm: Arc::new(Val::Neutral {
+                            neutral: neutral.clone(),
+                        }),
+                        name: name.to_vec(),
+                    },
+                }),
+                val => Err(EvalError::from_internal(
+                    InternalError::new(&format!(
+                        "trying to access field of non-record value {}?!",
+                        val
+                    )),
+                    self.location.clone(),
+                )),
+            },
             TmData::EffectTy => Ok(Val::EffectTy),
+            TmData::ErrorTy => Ok(Val::ErrorTy),
+            TmData::Error => Ok(Val::Error),
         }
     }
 }

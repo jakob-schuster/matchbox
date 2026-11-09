@@ -13,7 +13,7 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 
 use crate::{
-    core::{self, eval2::env::Env, EvalError, Val},
+    core::{self, eval::env::Env, EvalError, Val},
     input::{
         bam::{BamReader, PairedBamReader, RevCompBamReader},
         dsv::DSVReader,
@@ -24,7 +24,6 @@ use crate::{
     },
     output::{OutputError, OutputHandler, OutputHandlerSummary},
     ui::Interface,
-    util::{cache::Cache, Arena},
     InputReads,
 };
 

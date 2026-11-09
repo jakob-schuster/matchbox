@@ -8,13 +8,13 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{
         self,
-        eval2::env::Env,
+        eval::env::Env,
         rec::{self, FullyConcreteRec, Rec2},
         Effect, Val,
     },
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{cache::Cache, location::Location, recfield::CoreRecField, Arena},
+    util::{location::Location, recfield::CoreRecField},
 };
 
 pub struct FastqReader {
@@ -199,7 +199,6 @@ impl Reader for PairedFastqReader {
                     .par_iter()
                     .map(|(record, paired_record)| match (record, paired_record) {
                         (Ok(read), Ok(paired_read)) => {
-                            let arena = Arena::new();
                             let val = core::Val::Rec {
                                 rec: Rec2::FullyConcrete {
                                     r: FullyConcreteRec {
@@ -417,7 +416,6 @@ impl Reader for FastqDebugReader {
                     .iter()
                     .map(|record| match record {
                         Ok(read) => {
-                            let arena = Arena::new();
                             let val = core::Val::Rec {
                                 rec: Rec2::FastqRead {
                                     r: rec::FastqRead { read },

@@ -135,15 +135,16 @@ impl<'r> Rec2<'r> {
 
 impl<'r> Display for Rec2<'r> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Rec2::Concrete { r } => r.fmt(f),
-            Rec2::FullyConcrete { r } => r.fmt(f),
-            Rec2::FastaRead { r } => r.fmt(f),
-            Rec2::FastqRead { r } => r.fmt(f),
-            Rec2::SamRead { r } => r.fmt(f),
-            Rec2::BamRead { r } => r.fmt(f),
-            Rec2::CSVRead { r } => r.fmt(f),
-        }
+        format!(
+            "{{ {} }}",
+            self.all()
+                .iter()
+                .sorted_by_key(|(name, _)| name.clone())
+                .map(|(name, val)| format!("{}: {}", bytes_to_string(name).unwrap(), val))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .fmt(f)
     }
 }
 

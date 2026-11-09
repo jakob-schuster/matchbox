@@ -1176,6 +1176,7 @@ impl Display for TmData {
                 "{{ {} }}",
                 fields
                     .iter()
+                    .sorted_by_key(|field| &field.name)
                     .map(|f| f.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1185,6 +1186,7 @@ impl Display for TmData {
                 "{{ {} .. }}",
                 fields
                     .iter()
+                    .sorted_by_key(|field| &field.name)
                     .map(|f| f.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1194,6 +1196,7 @@ impl Display for TmData {
                 "{{ {} }}",
                 fields
                     .iter()
+                    .sorted_by_key(|field| &field.name)
                     .map(|f| f.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")

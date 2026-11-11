@@ -8,12 +8,13 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{
         self,
+        eval::env::Env,
         rec::{self, CSVHeader, FullyConcreteRec},
         Effect, Val,
     },
     input::{ExecError, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{cache::Cache, env::Env, recfield::CoreRecField, Arena},
+    util::recfield::CoreRecField,
 };
 
 pub struct DSVReader {
@@ -48,11 +49,10 @@ impl DSVReader {
 }
 
 impl Reader for DSVReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -70,15 +70,16 @@ impl Reader for DSVReader {
                     .par_iter()
                     .map(|record| match record {
                         Ok(read) => {
-                            let arena = Arena::new();
-
                             let val = core::Val::Rec {
-                                rec: Arc::new(rec::CSVRead {
-                                    header: &header,
-                                    fields: read,
-                                }),
+                                rec: rec::RecVal::CSVRead {
+                                    r: rec::CSVRead {
+                                        header: &header,
+                                        fields: read,
+                                    },
+                                },
                             };
-                            prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
+                            prog.eval2(global, &Env::default(), val)
+                                .map_err(ExecError::Eval)
                         }
                         Err(_) => Err(ExecError::Input(InputError::Read)),
                     })
@@ -103,13 +104,11 @@ impl Reader for DSVReader {
         self.reader.records().count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
+    fn get_ty<'a>(&'a self) -> Val<'a> {
         let fields = self
             .field_names
             .iter()
-            .map(|field_name| {
-                CoreRecField::new(arena.alloc(field_name.as_bytes().to_vec()), Val::StrTy)
-            })
+            .map(|field_name| CoreRecField::new(field_name.as_bytes(), Val::StrTy))
             .collect();
 
         Val::RecTy { fields }

@@ -10,21 +10,23 @@
 //!   - "Evaluating the program" involves creating an environment which includes the current read and evaluating the core AST in the context of this environment, which results in a vector of output effects (e.g. incrementing a global count, appending to a file, writing to stdout).
 //!   - The output effects for the chunk of reads are applied (`output.rs`).
 
-use core::{library::standard_library, EvalError};
+use core::library::standard_library;
 use std::{fmt::Debug, fs::File, io::Read, process::exit};
 
+use clap::Parser;
 use codespan_reporting::{
-    diagnostic::{Diagnostic, Label},
+    diagnostic::Label,
     files::SimpleFile,
     term::{self, termcolor::StandardStream},
 };
 use input::{get_extensions, FileType, FileTypeError, InputError, ReaderWithBar};
-use output::{OutputError, OutputHandler};
-use parse::{parse, ParseError};
-use surface::{elab_prog, elab_prog_for_ctx, ElabError};
-use util::{location::Location, Arena};
+use output::OutputHandler;
+use parse::parse;
+use util::location::Location;
 
 mod core;
+mod generic_error;
+mod global_config;
 mod input;
 mod myers;
 mod output;
@@ -34,177 +36,25 @@ mod test;
 mod ui;
 mod util;
 
-use clap::{
-    builder::styling::{self, RgbColor},
-    crate_version, Args, Parser,
-};
-
-use crate::{
-    input::{CLIFileType, ExecError},
-    surface::MatchMode,
-};
-
 fn main() {
     // parse in the command line config
-    let global_config = GlobalConfig::parse();
+    let global_config = global_config::GlobalConfig::parse();
 
     // execute the matchbox script
     run_script(&global_config)
 }
 
-const MATCHBOX_YELLOW: RgbColor = RgbColor(239, 233, 64);
-const MATCHBOX_ORANGE: RgbColor = RgbColor(247, 146, 38);
-const MATCHBOX_RED: RgbColor = RgbColor(196, 39, 54);
-
-const STYLES: styling::Styles = styling::Styles::styled()
-    .header(MATCHBOX_ORANGE.on_default().bold())
-    .usage(MATCHBOX_ORANGE.on_default().bold())
-    .literal(MATCHBOX_YELLOW.on_default().bold())
-    .placeholder(MATCHBOX_YELLOW.on_default());
-
-// The global configuration options, accessible as command line parameters.
-#[derive(Parser)]
-#[command(version = crate_version!(), after_help = "For a guide to the matchbox scripting language, check out the docs at https://jakob-schuster.github.io/matchbox-docs/", styles = STYLES)]
-struct GlobalConfig {
-    #[command(flatten)]
-    input_reads: InputReads,
-
-    #[command(flatten)]
-    input_code: InputCode,
-
-    /// Default error rate permitted when searching for sequences. Given as a proportion of total search sequence length.
-    #[arg(short, long, default_value_t = 0.0)]
-    error: f64,
-
-    /// Number of threads to use when processing reads.
-    #[arg(short, long, default_value_t = 1)]
-    threads: usize,
-
-    /// Values passed into the matchbox script, via the built-in `args` variable.
-    #[arg(short, long, default_value = "")]
-    args: String,
-
-    /// Directory to produce CSVs generated from `count!` and `mean!` functions.
-    #[arg(short, long, default_value = ".")]
-    output_directory: String,
-
-    /// Whether to operate on all matches of a pattern within a read, or just the first one.
-    #[arg(short, long, default_value_t = MatchMode::All)]
-    match_mode: MatchMode,
-}
-
-// Global configuration options related to inputting reads.
-#[derive(Args)]
-struct InputReads {
-    /// The format for parsing stdin. To be used when piping input into matchbox
-    #[arg(long, short = 'f', conflicts_with_all(["reads"]), required_unless_present_any(["reads"]))]
-    stdin_format: Option<CLIFileType>,
-
-    /// A read file to process.
-    #[arg(conflicts_with_all(["stdin_format", "debug"]), required_unless_present_any(["stdin_format", "debug"]))]
-    reads: Option<String>,
-
-    /// Paired reads. Accepts FASTA/FASTQ/SAM/BAM files. File type must match primary read file.
-    #[arg(short, long, requires("reads"))]
-    paired_with: Option<String>,
-
-    /// Also process the reverse complement of each input read. Only works for single-end FASTA/FASTQ/SAM/BAM.
-    #[arg(long, conflicts_with_all(["paired_with"]))]
-    with_reverse_complement: bool,
-
-    /// Compile the script and output debug information
-    #[arg(long, requires("stdin_format"), conflicts_with_all(["reads"]))]
-    debug_compilation: bool,
-
-    /// Run in a single-threaded mode, for easier profiling with flamegraph / samply
-    #[arg(long, conflicts_with_all(["debug_compilation", "threads", "with_reverse_complement"]))]
-    debug_single_threaded_run: bool,
-}
-
-// An optionally-paired reads file.
-#[derive(Args, Clone)]
-struct InputReadsFile {
-    /// A read file to process.
-    #[arg()]
-    reads: String,
-
-    /// Paired reads. Accepts FASTA/FASTQ/SAM/BAM files. File type must match primary read file.
-    #[arg(short, long)]
-    paired_with: Option<String>,
-}
-
-// Global configuration options related to inputting matchbox code.
-#[derive(Args)]
-#[group(required = true, multiple = false)]
-struct InputCode {
-    /// A matchbox script to execute
-    #[arg(long, short = 's')]
-    script_file: Option<String>,
-
-    /// Some matchbox code to execute
-    #[arg(long, short = 'r')]
-    run: Option<String>,
-}
-
-impl InputCode {
-    /// Get the name of the code file, for displaying in error messages.
-    fn name(&self) -> String {
-        if let Some(script_file) = &self.script_file {
-            script_file.to_string()
-        } else if let Some(run) = &self.run {
-            "command line code".to_string()
-        } else {
-            panic!("no script file or run code?!")
-        }
-    }
-
-    /// Get the content of the code file.
-    fn code(&self) -> Result<String, InputError> {
-        if let Some(script_file) = &self.script_file {
-            read_code_from_script(script_file)
-        } else if let Some(run) = &self.run {
-            Ok(run.clone())
-        } else {
-            panic!("no script file or run code?!")
-        }
-    }
-}
-
-impl GlobalConfig {
-    fn default() -> GlobalConfig {
-        GlobalConfig {
-            input_reads: InputReads {
-                stdin_format: Some(CLIFileType::Fastq),
-                reads: None,
-                debug_compilation: false,
-                paired_with: None,
-                with_reverse_complement: false,
-                debug_single_threaded_run: false,
-            },
-            input_code: InputCode {
-                script_file: Some("".to_string()),
-                run: None,
-            },
-            output_directory: ".".to_string(),
-
-            error: 0.0,
-            threads: 1,
-
-            args: "".to_string(),
-            match_mode: MatchMode::All,
-        }
-    }
-}
-
 /// Given the global config,
 /// load the matchbox script and run matchbox on input reads.
 /// Panic on evaluation errors or internal errors.
-fn run_script(global_config: &GlobalConfig) {
+fn run_script(global_config: &global_config::GlobalConfig) {
     let code = if let Some(code) = &global_config.input_code.run {
         code.to_string()
     } else if let Some(filename) = &global_config.input_code.script_file {
         read_code_from_script(filename)
-            .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+            .map_err(|e| {
+                generic_error::GenericError::from(e).codespan_print_and_exit(global_config)
+            })
             // should never unwrap, because program terminates
             .unwrap()
     } else {
@@ -218,7 +68,7 @@ fn run_script(global_config: &GlobalConfig) {
 /// Given matchbox code as a string, and the global config,
 /// run matchbox on input reads.
 /// Panic on evaluation errors or internal errors.
-fn run(code: &str, global_config: &GlobalConfig) {
+fn run(code: &str, global_config: &global_config::GlobalConfig) {
     // set up the thread pool
     if !global_config.input_reads.debug_single_threaded_run {
         rayon::ThreadPoolBuilder::new()
@@ -229,65 +79,58 @@ fn run(code: &str, global_config: &GlobalConfig) {
 
     // establish a global-level arena and context,
     // for values allocated during elaboration
-    let arena = Arena::new();
-    let ctx = standard_library(&arena);
+    let c0 = standard_library();
 
     // parse the standard library
     let library_code = String::from_utf8(include_bytes!("standard_library.mb").to_vec()).unwrap();
     let library_prog = parse(&library_code, global_config)
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        .map_err(|e| generic_error::GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();
 
     // elaborate to generate the context
-    let ctx = elab_prog_for_ctx(&arena, &ctx, arena.alloc(library_prog))
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-        // should never unwrap, because program terminates
-        .unwrap();
+    let (_, c1) = library_prog.elab(&c0);
 
     // parse the args program
     let args_prog = parse(&format!("args = {{{}}}", global_config.args), global_config)
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        .map_err(|e| generic_error::GenericError::from(e).codespan_print_and_exit(global_config))
         .unwrap();
 
-    let ctx = elab_prog_for_ctx(&arena, &ctx, arena.alloc(args_prog))
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-        .unwrap();
+    // elaborate to cache the args value into the context
+    let (_, c2) = args_prog.elab(&c1);
 
     // parse the program
     let prog = parse(code, global_config)
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        .map_err(|e| generic_error::GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap, because program terminates
         .unwrap();
 
     // load in the input reads
     let mut reader_with_bar = ReaderWithBar::new(&global_config.input_reads)
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        .map_err(|e| generic_error::GenericError::from(e).codespan_print_and_exit(global_config))
         .unwrap();
 
     // elaborate to a core program
-    let core_prog = elab_prog(
-        &arena,
-        &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena)),
-        arena.alloc(prog),
-    )
-    .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-    // should never unwrap, because program terminates
-    .unwrap();
+    let (core_prog, c3) =
+        prog.elab(&c2.bind_read_from_reader(reader_with_bar.get_ty().concretise()));
 
-    // cache the values
-    let (core_prog, cache) = core_prog
-        .cache(
-            &arena,
-            &ctx.bind_read_from_reader(&arena, reader_with_bar.get_ty(&arena))
-                .tms,
-        )
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
-        // should never unwrap, because program terminates
-        .unwrap();
+    // drop the read parameter from the context
+    let c4 = c2.with_global_from(c3);
 
+    // if we are printing compilation debug info, print it now
     if global_config.input_reads.debug_compilation {
         eprintln!("{}", core_prog);
+    }
+
+    // at this point, check for elab errors
+    if !c4.get_errors().is_empty() {
+        for error in c4.get_errors() {
+            // WARN currently errors in standard library or arg struct will be printed wrong
+            generic_error::GenericError::from(error).codespan_print(global_config);
+        }
+
+        // terminate execution
+        exit(1);
     }
 
     // create an output handler, to receive output effects
@@ -295,18 +138,18 @@ fn run(code: &str, global_config: &GlobalConfig) {
         global_config.output_directory.clone(),
         reader_with_bar.get_aux_data(),
     )
-    .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+    .map_err(|e| generic_error::GenericError::from(e).codespan_print_and_exit(global_config))
     // should never unwrap
     .unwrap();
-    // create the standard library
-    let env = ctx.tms;
+
+    let global = c4.get_global_env();
 
     // process the reads
     reader_with_bar
-        .map(&core_prog, &env, &cache, &mut output_handler)
-        .map_err(|e| GenericError::from(e).codespan_print_and_exit(global_config))
+        .map(&core_prog, &global, &mut output_handler)
+        .map_err(|e| generic_error::GenericError::from(e).codespan_print_and_exit(global_config))
         // should never unwrap
-        .unwrap()
+        .unwrap();
 }
 
 /// Given the name of a matchbox script,
@@ -350,91 +193,4 @@ fn read_code_from_script(script_filename: &str) -> Result<String, InputError> {
         .unwrap();
 
     Ok(code)
-}
-
-/// A simple wrapper around the various error types,
-/// so that they can all be universally printed with codespan.
-#[derive(Debug)]
-struct GenericError {
-    location: Option<Location>,
-    message: String,
-}
-
-impl GenericError {
-    /// Pretty prints the error with codespan, and terminates execution
-    fn codespan_print_and_exit(&self, global_config: &GlobalConfig) {
-        let mut writer = StandardStream::stderr(term::termcolor::ColorChoice::Always);
-        let config = codespan_reporting::term::Config::default();
-
-        let file = SimpleFile::new(
-            format!("<{}>", global_config.input_code.name()),
-            global_config.input_code.code().unwrap(),
-        );
-
-        // attach a location if one exists
-        let diagnostic = match self.location.clone() {
-            Some(location) => Diagnostic::error()
-                .with_message(self.message.clone())
-                .with_labels(vec![Label::primary((), location.start..location.end)]),
-            None => Diagnostic::error().with_message(&self.message),
-        };
-
-        term::emit_to_io_write(&mut writer, &config, &file, &diagnostic);
-        exit(1)
-    }
-}
-
-impl From<ExecError> for GenericError {
-    fn from(value: ExecError) -> Self {
-        match value {
-            ExecError::Eval(eval_error) => GenericError::from(eval_error),
-            ExecError::Input(input_error) => GenericError::from(input_error),
-            ExecError::Output(output_error) => GenericError::from(output_error),
-        }
-    }
-}
-
-impl From<InputError> for GenericError {
-    fn from(value: InputError) -> Self {
-        GenericError {
-            location: None,
-            message: value.to_string(),
-        }
-    }
-}
-
-impl From<ParseError> for GenericError {
-    fn from(value: ParseError) -> Self {
-        GenericError {
-            location: Some(value.location),
-            message: value.message,
-        }
-    }
-}
-
-impl From<ElabError> for GenericError {
-    fn from(value: ElabError) -> Self {
-        GenericError {
-            location: Some(value.location),
-            message: value.message,
-        }
-    }
-}
-
-impl From<EvalError> for GenericError {
-    fn from(value: EvalError) -> Self {
-        GenericError {
-            location: Some(value.location),
-            message: value.message,
-        }
-    }
-}
-
-impl From<OutputError> for GenericError {
-    fn from(value: OutputError) -> Self {
-        GenericError {
-            location: None,
-            message: value.to_string(),
-        }
-    }
 }

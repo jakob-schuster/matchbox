@@ -5,8 +5,9 @@ use noodles::sam::{
 };
 
 use crate::{
+    core::{self, StrVal},
     input::{Input, InputError},
-    util::{self, bytes_to_string, location::Location, recfield::CoreRecField, Arena},
+    util::{self, bytes_to_string, location::Location, recfield::CoreRecField},
 };
 use std::{collections::HashMap, fmt::Display, io::Read, rc::Rc, sync::Arc};
 
@@ -17,47 +18,169 @@ pub enum RecError {
     BadIndex(String),
 }
 
+#[derive(Clone)]
+pub enum RecVal<'r> {
+    Concrete { r: ConcreteRec<'r> },
+    FullyConcrete { r: FullyConcreteRec<'r> },
+    FastaRead { r: FastaRead<'r> },
+    FastqRead { r: FastqRead<'r> },
+    SamRead { r: SamRead<'r> },
+    BamRead { r: BamRead<'r> },
+    CSVRead { r: CSVRead<'r> },
+}
+
+impl<'r> RecVal<'r> {
+    pub fn get(&self, key: &[u8]) -> Result<Val<'r>, InternalError> {
+        match self {
+            RecVal::Concrete { r } => r.get(key),
+            RecVal::FastaRead { r } => r.get(key),
+            RecVal::FastqRead { r } => r.get(key),
+            RecVal::SamRead { r } => r.get(key),
+            RecVal::BamRead { r } => r.get(key),
+            RecVal::CSVRead { r } => r.get(key),
+            RecVal::FullyConcrete { r } => r.get(key),
+        }
+    }
+
+    pub fn all(&self) -> HashMap<Vec<u8>, Val<'r>> {
+        match self {
+            RecVal::Concrete { r } => r.all_reference(),
+            RecVal::FastaRead { r } => r.all_reference(),
+            RecVal::FastqRead { r } => r.all_reference(),
+            RecVal::SamRead { r } => r.all_reference(),
+            RecVal::BamRead { r } => r.all_reference(),
+            RecVal::CSVRead { r } => r.all_reference(),
+            RecVal::FullyConcrete { r } => r.all_reference(),
+        }
+    }
+
+    pub fn with<'a>(&self, key: &[u8], val: Val<'a>) -> RecVal<'a>
+    where
+        'r: 'a,
+    {
+        match self {
+            RecVal::Concrete { r } => r.with(key, val),
+            RecVal::FullyConcrete { r } => r.with(key, val),
+            RecVal::FastaRead { r } => r.with(key, val),
+            RecVal::FastqRead { r } => r.with(key, val),
+            RecVal::SamRead { r } => r.with(key, val),
+            RecVal::BamRead { r } => r.with(key, val),
+            RecVal::CSVRead { r } => r.with(key, val),
+        }
+    }
+
+    pub fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> RecVal<'a>
+    where
+        'r: 'a,
+    {
+        match self {
+            RecVal::Concrete { r } => r.with_all(entries),
+            RecVal::FullyConcrete { r } => r.with_all(entries),
+            RecVal::FastaRead { r } => r.with_all(entries),
+            RecVal::FastqRead { r } => r.with_all(entries),
+            RecVal::SamRead { r } => r.with_all(entries),
+            RecVal::BamRead { r } => r.with_all(entries),
+            RecVal::CSVRead { r } => r.with_all(entries),
+        }
+    }
+
+    pub fn slice(&self, start: usize, end: usize) -> Result<Val<'r>, InternalError> {
+        match self {
+            RecVal::Concrete { r } => r.slice(start, end),
+            RecVal::FullyConcrete { r } => r.slice(start, end),
+            RecVal::FastaRead { r } => r.slice(start, end),
+            RecVal::FastqRead { r } => r.slice(start, end),
+            RecVal::SamRead { r } => r.slice(start, end),
+            RecVal::BamRead { r } => r.slice(start, end),
+            RecVal::CSVRead { r } => r.slice(start, end),
+        }
+    }
+
+    pub fn is_neutral(&self) -> bool {
+        match self {
+            RecVal::Concrete { r } => r.is_neutral(),
+            RecVal::FullyConcrete { r } => r.is_neutral(),
+            RecVal::FastaRead { r } => r.is_neutral(),
+            RecVal::FastqRead { r } => r.is_neutral(),
+            RecVal::SamRead { r } => r.is_neutral(),
+            RecVal::BamRead { r } => r.is_neutral(),
+            RecVal::CSVRead { r } => r.is_neutral(),
+        }
+    }
+
+    pub fn reference<'a>(&'a self) -> RecVal<'a> {
+        match self {
+            RecVal::Concrete { r } => r.reference(),
+            RecVal::FullyConcrete { r } => r.reference(),
+            RecVal::FastaRead { r } => r.reference(),
+            RecVal::FastqRead { r } => r.reference(),
+            RecVal::SamRead { r } => r.reference(),
+            RecVal::BamRead { r } => r.reference(),
+            RecVal::CSVRead { r } => r.reference(),
+        }
+    }
+
+    pub fn concretise<'q>(&self) -> RecVal<'q> {
+        RecVal::FullyConcrete {
+            r: FullyConcreteRec {
+                map: self
+                    .all()
+                    .iter()
+                    .map(|(key, val)| (key.clone(), val.concretise()))
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl<'r> Display for RecVal<'r> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!(
+            "{{ {} }}",
+            self.all()
+                .iter()
+                .sorted_by_key(|(name, _)| *name)
+                .map(|(name, val)| format!("{} = {}", bytes_to_string(name).unwrap(), val))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .fmt(f)
+    }
+}
+
 pub trait Rec<'p>: Display + Send + Sync {
-    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
-    where
-        'p: 'a;
-    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
-    where
-        'p: 'a;
-    fn with<'a>(&self, key: &[u8], val: Val<'a>) -> FullyConcreteRec<'a>
+    fn get(&self, key: &[u8]) -> Result<Val<'p>, InternalError>;
+
+    fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>>;
+
+    fn with<'a>(&self, key: &[u8], val: Val<'a>) -> RecVal<'a>
     where
         'p: 'a,
     {
-        let mut map = self.all();
+        let mut map = self.all_reference();
         map.insert(key.to_vec(), val);
 
-        FullyConcreteRec { map }
+        RecVal::FullyConcrete {
+            r: FullyConcreteRec { map },
+        }
     }
-    fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> FullyConcreteRec<'a>
+    fn with_all<'a>(&self, entries: &[(&[u8], Val<'a>)]) -> RecVal<'a>
     where
         'p: 'a,
     {
-        let mut map = self.all();
+        let mut map = self.all_reference();
 
         for (key, val) in entries {
             map.insert(key.to_vec(), val.clone());
         }
 
-        FullyConcreteRec { map }
-    }
-
-    fn coerce<'a>(&self) -> Arc<dyn Rec<'a> + 'a>
-    where
-        'p: 'a,
-    {
-        let rec: FullyConcreteRec<'a> =
-            FullyConcreteRec { map: self.all() } as FullyConcreteRec<'a>;
-
-        Arc::new(rec) as Arc<dyn Rec<'a>>
+        RecVal::FullyConcrete {
+            r: FullyConcreteRec { map },
+        }
     }
 
     fn is_neutral(&self) -> bool {
-        self.all().iter().any(|(_, val)| val.is_neutral())
+        self.all_reference().iter().any(|(_, val)| val.is_neutral())
     }
 
     fn slice<'a>(&self, start: usize, end: usize) -> Result<Val<'a>, InternalError>
@@ -65,78 +188,84 @@ pub trait Rec<'p>: Display + Send + Sync {
         'p: 'a,
     {
         // record must have a sequence to be sliced
-        if let Val::Str { s: seq } = self
+        match self
             .get(b"seq")
-            .map_err(|_| InternalError::new("trying to slice a non-read record?!"))?
-            as Val<'p>
+            .map_err(|_| InternalError::new("trying to slice a non-read record?!"))
         {
-            let s2 = seq as &'a [u8];
-
-            match self.get(b"qual") {
+            Ok(Val::Str { s: seq }) => match self.get(b"qual") {
                 Ok(Val::Str { s: qual }) => Ok(Val::Rec {
-                    rec: Arc::new(self.with_all(&[
+                    rec: self.with_all(&[
                         (
                             b"seq",
                             Val::Str {
-                                s: &seq[start..end] as &'a [u8],
+                                s: seq.slice(start, end),
                             },
                         ),
                         (
                             b"qual",
                             Val::Str {
-                                s: &qual[start..end] as &'a [u8],
+                                s: qual.slice(start, end),
                             },
                         ),
-                    ])),
+                    ]),
                 }),
                 _ => Ok(Val::Rec {
-                    rec: Arc::new(self.with(
+                    rec: self.with(
                         b"seq",
                         Val::Str {
-                            s: &seq[start..end],
+                            s: seq.slice(start, end),
                         },
-                    )),
+                    ),
                 }),
-            }
-        } else {
-            Err(InternalError::new("message"))
+            },
+            Ok(_) => Err(InternalError::new("trying to slice a non-read record?!")),
+            Err(e) => Err(e),
         }
     }
+
+    fn reference<'a>(&'a self) -> RecVal<'a>
+    where
+        'p: 'a;
 }
 
+#[derive(Clone)]
 pub struct ConcreteRec<'p> {
     pub map: HashMap<&'p [u8], Val<'p>>,
 }
 
 impl<'p> Rec<'p> for ConcreteRec<'p> {
-    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
-    where
-        'p: 'a,
-    {
-        todo!()
-        // match self.map.get(key) {
-        //     Some(val) => Ok(val.coerce(arena)),
-        //     None => Err(InternalError {
-        //         message: format!(
-        //             "could not find field '{}'",
-        //             String::from_utf8(key.to_vec()).expect("bad field name?!")
-        //         ),
-        //     }),
-        // }
+    fn get(&self, key: &[u8]) -> Result<Val<'p>, InternalError> {
+        match self.map.get(key) {
+            Some(val) => Ok(val.clone()),
+            None => Err(InternalError {
+                message: format!(
+                    "could not find field '{}'",
+                    String::from_utf8(key.to_vec()).expect("bad field name?!")
+                ),
+            }),
+        }
     }
 
-    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
+    fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>> {
+        self.map
+            .iter()
+            .map(|(a, b)| (a.to_vec(), b.clone()))
+            .collect()
+    }
+
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
-        self.map
-            .iter()
-            .map(|(a, b)| (a.to_vec(), b.coerce()))
-            .collect()
-        // self.map
-        //     .iter()
-        //     .map(|(a, b)| (a as &'a [u8], b.coerce(arena) as Val<'a>))
-        //     .collect()
+        RecVal::Concrete {
+            r: ConcreteRec {
+                map: self
+                    .map
+                    .iter()
+                    .map(|(key, val)| (*key, val.reference()))
+                    .collect(),
+            },
+        }
     }
 }
 
@@ -154,17 +283,15 @@ impl<'a> Display for ConcreteRec<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct FullyConcreteRec<'p> {
     pub map: HashMap<Vec<u8>, Val<'p>>,
 }
 
 impl<'p> Rec<'p> for FullyConcreteRec<'p> {
-    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
-    where
-        'p: 'a,
-    {
+    fn get(&self, key: &[u8]) -> Result<Val<'p>, InternalError> {
         match self.map.get(key) {
-            Some(val) => Ok(val.coerce()),
+            Some(val) => Ok(val.clone()),
             None => Err(InternalError {
                 message: format!(
                     "could not find field '{}'",
@@ -174,14 +301,26 @@ impl<'p> Rec<'p> for FullyConcreteRec<'p> {
         }
     }
 
-    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
+    fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>> {
+        self.map
+            .iter()
+            .map(|(a, b)| (a.clone(), b.clone()))
+            .collect()
+    }
+
+    fn reference<'a>(&'a self) -> RecVal<'a>
     where
         'p: 'a,
     {
-        self.map
-            .iter()
-            .map(|(a, b)| (a.clone(), b.coerce() as Val<'a>))
-            .collect()
+        RecVal::FullyConcrete {
+            r: FullyConcreteRec {
+                map: self
+                    .map
+                    .iter()
+                    .map(|(key, val)| (key.clone(), val.reference()))
+                    .collect(),
+            },
+        }
     }
 }
 
@@ -199,22 +338,26 @@ impl<'a> Display for FullyConcreteRec<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct FastaRead<'a> {
     pub read: &'a bio::io::fasta::Record,
 }
 
 impl<'p> Rec<'p> for FastaRead<'p> {
-    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
-    where
-        'p: 'a,
-    {
+    fn get(&self, key: &[u8]) -> Result<Val<'p>, InternalError> {
         match key {
-            b"seq" => Ok(Val::Str { s: self.read.seq() }),
+            b"seq" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.read.seq() },
+            }),
             b"id" => Ok(Val::Str {
-                s: self.read.id().as_bytes(),
+                s: core::StrVal::Reference {
+                    s: self.read.id().as_bytes(),
+                },
             }),
             b"desc" => Ok(Val::Str {
-                s: self.read.desc().unwrap_or_default().as_bytes(),
+                s: core::StrVal::Reference {
+                    s: self.read.desc().unwrap_or_default().as_bytes(),
+                },
             }),
 
             _ => Err(InternalError {
@@ -223,11 +366,8 @@ impl<'p> Rec<'p> for FastaRead<'p> {
         }
     }
 
-    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
-    where
-        'p: 'a,
-    {
-        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+    fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>> {
+        let mut map: HashMap<Vec<u8>, Val<'p>> = HashMap::new();
         let fields: Vec<Vec<u8>> = vec![b"seq".to_vec(), b"id".to_vec(), b"desc".to_vec()];
 
         for field in &fields {
@@ -239,35 +379,50 @@ impl<'p> Rec<'p> for FastaRead<'p> {
 
         map
     }
+
+    fn reference<'a>(&'a self) -> RecVal<'a>
+    where
+        'p: 'a,
+    {
+        RecVal::FastaRead {
+            r: FastaRead { read: self.read },
+        }
+    }
 }
 
 impl<'a> Display for FastaRead<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let map = self.all();
+        let map = self.all_reference();
         let s = FullyConcreteRec { map }.fmt(f);
         s
     }
 }
 
+#[derive(Clone)]
 pub struct FastqRead<'a> {
     pub read: &'a bio::io::fastq::Record,
 }
 
 impl<'p> Rec<'p> for FastqRead<'p> {
-    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
-    where
-        'p: 'a,
-    {
+    fn get(&self, key: &[u8]) -> Result<Val<'p>, InternalError> {
         match key {
-            b"seq" => Ok(Val::Str { s: self.read.seq() }),
+            b"seq" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.read.seq() },
+            }),
             b"id" => Ok(Val::Str {
-                s: self.read.id().as_bytes(),
+                s: core::StrVal::Reference {
+                    s: self.read.id().as_bytes(),
+                },
             }),
             b"desc" => Ok(Val::Str {
-                s: self.read.desc().unwrap_or_default().as_bytes(),
+                s: core::StrVal::Reference {
+                    s: self.read.desc().unwrap_or_default().as_bytes(),
+                },
             }),
             b"qual" => Ok(Val::Str {
-                s: self.read.qual(),
+                s: core::StrVal::Reference {
+                    s: self.read.qual(),
+                },
             }),
 
             _ => Err(InternalError {
@@ -276,11 +431,8 @@ impl<'p> Rec<'p> for FastqRead<'p> {
         }
     }
 
-    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
-    where
-        'p: 'a,
-    {
-        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+    fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>> {
+        let mut map: HashMap<Vec<u8>, Val<'p>> = HashMap::new();
         let fields: Vec<Vec<u8>> = vec![
             b"seq".to_vec(),
             b"id".to_vec(),
@@ -297,17 +449,27 @@ impl<'p> Rec<'p> for FastqRead<'p> {
 
         map
     }
+
+    fn reference<'a>(&'a self) -> RecVal<'a>
+    where
+        'p: 'a,
+    {
+        RecVal::FastqRead {
+            r: FastqRead { read: self.read },
+        }
+    }
 }
 
 impl<'a> Display for FastqRead<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // note: this seems highly wasteful
-        let map = self.all();
+        let map = self.all_reference();
         let s = FullyConcreteRec { map }.fmt(f);
         s
     }
 }
 
+#[derive(Clone)]
 pub struct SamRead<'a> {
     pub read: &'a noodles::sam::Record,
 
@@ -317,37 +479,26 @@ pub struct SamRead<'a> {
     pub data: &'a noodles::sam::record::Data<'a>,
 }
 
-impl<'a> SamRead<'a> {
-    // pub fn new(read: &'a noodles::sam::Record) -> SamRead<'a> {
-    //     SamRead {
-    //         read,
-    //         cigar: read.cigar(),
-    //         seq: todo!(),
-    //         qual: todo!(),
-    //         data: todo!(),
-    //     }
-    // }
-}
-
 impl<'p> Rec<'p> for SamRead<'p> {
-    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
-    where
-        'p: 'a,
-    {
+    fn get(&self, key: &[u8]) -> Result<Val<'p>, InternalError> {
         match key {
             b"qname" | b"id" => Ok(Val::Str {
-                s: self.read.name().unwrap_or_default(),
+                s: core::StrVal::Reference {
+                    s: self.read.name().unwrap_or_default(),
+                },
             }),
 
             b"flag" => Ok(Val::Num {
                 n: self.read.flags().unwrap_or_default().bits() as f64,
             }),
             b"rname" => Ok(Val::Str {
-                s: self
-                    .read
-                    .reference_sequence_name()
-                    .map(|a| a.as_ref())
-                    .unwrap_or(b"*"),
+                s: core::StrVal::Reference {
+                    s: self
+                        .read
+                        .reference_sequence_name()
+                        .map(|a| a.as_ref())
+                        .unwrap_or(b"*"),
+                },
             }),
 
             b"pos" => Ok(Val::Num {
@@ -370,17 +521,19 @@ impl<'p> Rec<'p> for SamRead<'p> {
 
             b"cigar" => Ok(Val::Str {
                 s: match self.cigar.as_ref() {
-                    b"" => b"*",
-                    r => r,
+                    b"" => core::StrVal::Reference { s: b"*" },
+                    r => core::StrVal::Reference { s: r },
                 },
             }),
 
             b"rnext" => Ok(Val::Str {
-                s: self
-                    .read
-                    .mate_reference_sequence_name()
-                    .map(|a| a.as_ref())
-                    .unwrap_or(b"*"),
+                s: core::StrVal::Reference {
+                    s: self
+                        .read
+                        .mate_reference_sequence_name()
+                        .map(|a| a.as_ref())
+                        .unwrap_or(b"*"),
+                },
             }),
 
             b"pnext" => Ok(Val::Num {
@@ -402,18 +555,22 @@ impl<'p> Rec<'p> for SamRead<'p> {
 
             b"seq" => Ok(Val::Str {
                 s: match self.seq.as_ref() {
-                    b"" => b"*",
-                    r => r,
+                    b"" => StrVal::Concrete { s: b"*".to_vec() },
+                    r => StrVal::Reference { s: r },
                 },
             }),
 
             b"qual" => Ok(Val::Str {
-                s: self.qual.as_ref(),
+                s: core::StrVal::Reference {
+                    s: self.qual.as_ref(),
+                },
             }),
 
             // WARN need to do this
             b"tags" | b"desc" => Ok(Val::Str {
-                s: self.data.as_ref(),
+                s: core::StrVal::Reference {
+                    s: self.data.as_ref(),
+                },
             }),
 
             _ => Err(InternalError {
@@ -422,11 +579,8 @@ impl<'p> Rec<'p> for SamRead<'p> {
         }
     }
 
-    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
-    where
-        'p: 'a,
-    {
-        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+    fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>> {
+        let mut map: HashMap<Vec<u8>, Val<'p>> = HashMap::new();
         let fields: Vec<Vec<u8>> = vec![
             b"qname".to_vec(),
             b"id".to_vec(),
@@ -450,17 +604,33 @@ impl<'p> Rec<'p> for SamRead<'p> {
 
         map
     }
+
+    fn reference<'a>(&'a self) -> RecVal<'a>
+    where
+        'p: 'a,
+    {
+        RecVal::SamRead {
+            r: SamRead {
+                read: self.read,
+                cigar: self.cigar,
+                seq: self.seq,
+                qual: self.qual,
+                data: self.data,
+            },
+        }
+    }
 }
 
 impl<'p> Display for SamRead<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // note: this seems highly wasteful
-        let map = self.all();
+        let map = self.all_reference();
         let s = FullyConcreteRec { map }.fmt(f);
         s
     }
 }
 
+#[derive(Clone)]
 pub struct BamRead<'a> {
     pub read: &'a noodles::bam::Record,
     pub rname: &'a [u8],
@@ -485,20 +655,21 @@ impl<'a> BamRead<'a> {
 }
 
 impl<'p> Rec<'p> for BamRead<'p> {
-    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
-    where
-        'p: 'a,
-    {
+    fn get(&self, key: &[u8]) -> Result<Val<'p>, InternalError> {
         match key {
             b"qname" | b"id" => Ok(Val::Str {
-                s: self.read.name().unwrap_or_default(),
+                s: core::StrVal::Reference {
+                    s: self.read.name().unwrap_or_default(),
+                },
             }),
 
             b"flag" => Ok(Val::Num {
                 n: self.read.flags().bits() as f64,
             }),
 
-            b"rname" => Ok(Val::Str { s: self.rname }),
+            b"rname" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.rname },
+            }),
 
             b"pos" => Ok(Val::Num {
                 n: self
@@ -517,9 +688,13 @@ impl<'p> Rec<'p> for BamRead<'p> {
                     .unwrap_or(-1.0),
             }),
 
-            b"cigar" => Ok(Val::Str { s: &self.cigar }),
+            b"cigar" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: &self.cigar },
+            }),
 
-            b"rnext" => Ok(Val::Str { s: self.mate_rname }),
+            b"rnext" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.mate_rname },
+            }),
 
             b"pnext" => Ok(Val::Num {
                 n: self
@@ -536,14 +711,18 @@ impl<'p> Rec<'p> for BamRead<'p> {
 
             b"seq" => Ok(Val::Str {
                 s: match self.seq {
-                    b"" => b"*",
-                    r => r,
+                    b"" => core::StrVal::Reference { s: b"*" },
+                    r => core::StrVal::Reference { s: r },
                 },
             }),
-            b"qual" => Ok(Val::Str { s: self.qual }),
+            b"qual" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.qual },
+            }),
 
             // WARN need to do this
-            b"tags" | b"desc" => Ok(Val::Str { s: self.data }),
+            b"tags" | b"desc" => Ok(Val::Str {
+                s: core::StrVal::Reference { s: self.data },
+            }),
 
             _ => Err(InternalError {
                 message: String::from_utf8(key.to_vec()).expect("Couldn't convert vec to string!"),
@@ -551,11 +730,8 @@ impl<'p> Rec<'p> for BamRead<'p> {
         }
     }
 
-    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
-    where
-        'p: 'a,
-    {
-        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+    fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>> {
+        let mut map: HashMap<Vec<u8>, Val<'p>> = HashMap::new();
         let fields: Vec<Vec<u8>> = vec![
             b"qname".to_vec(),
             b"id".to_vec(),
@@ -579,12 +755,29 @@ impl<'p> Rec<'p> for BamRead<'p> {
 
         map
     }
+
+    fn reference<'a>(&'a self) -> RecVal<'a>
+    where
+        'p: 'a,
+    {
+        RecVal::BamRead {
+            r: BamRead {
+                read: self.read,
+                rname: self.rname,
+                mate_rname: self.mate_rname,
+                cigar: self.cigar,
+                seq: self.seq,
+                qual: self.qual,
+                data: self.data,
+            },
+        }
+    }
 }
 
 impl<'p> Display for BamRead<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // note: this seems highly wasteful
-        let map = self.all();
+        let map = self.all_reference();
         let s = FullyConcreteRec { map }.fmt(f);
         s
     }
@@ -595,18 +788,12 @@ pub struct SamFlags {
 }
 
 impl<'p> Rec<'p> for SamFlags {
-    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
-    where
-        'p: 'a,
-    {
+    fn get(&self, key: &[u8]) -> Result<Val<'p>, InternalError> {
         todo!()
     }
 
-    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
-    where
-        'p: 'a,
-    {
-        let mut map: HashMap<Vec<u8>, Val<'a>> = HashMap::new();
+    fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>> {
+        let mut map: HashMap<Vec<u8>, Val<'p>> = HashMap::new();
         let fields: Vec<Vec<u8>> = vec![
             b"qname".to_vec(),
             b"id".to_vec(),
@@ -628,6 +815,13 @@ impl<'p> Rec<'p> for SamFlags {
         }
 
         map
+    }
+
+    fn reference<'a>(&'a self) -> RecVal<'a>
+    where
+        'p: 'a,
+    {
+        todo!()
     }
 }
 
@@ -666,41 +860,55 @@ impl CSVHeader {
     }
 }
 
+#[derive(Clone)]
 pub struct CSVRead<'a> {
     pub header: &'a CSVHeader,
     pub fields: &'a csv::ByteRecord,
 }
 
 impl<'p> Rec<'p> for CSVRead<'p> {
-    fn get<'a>(&self, key: &[u8]) -> Result<Val<'a>, InternalError>
-    where
-        'p: 'a,
-    {
+    fn get(&self, key: &[u8]) -> Result<Val<'p>, InternalError> {
         match self.fields.get(self.header.get(key)?) {
-            Some(bytes) => Ok(Val::Str { s: bytes }),
+            Some(bytes) => Ok(Val::Str {
+                s: core::StrVal::Reference { s: bytes },
+            }),
             None => Err(InternalError::new("couldn't index CSV row correctly?!")),
         }
     }
 
-    fn all<'a>(&self) -> HashMap<Vec<u8>, Val<'a>>
-    where
-        'p: 'a,
-    {
+    fn all_reference(&self) -> HashMap<Vec<u8>, Val<'p>> {
         let mut map = HashMap::new();
 
         for (key, index) in &self.header.map {
             let bytes = self.fields.get(*index).unwrap();
 
-            map.insert(key.clone(), Val::Str { s: bytes });
+            map.insert(
+                key.clone(),
+                Val::Str {
+                    s: core::StrVal::Reference { s: bytes },
+                },
+            );
         }
 
         map
+    }
+
+    fn reference<'a>(&'a self) -> RecVal<'a>
+    where
+        'p: 'a,
+    {
+        RecVal::CSVRead {
+            r: CSVRead {
+                header: self.header,
+                fields: self.fields,
+            },
+        }
     }
 }
 
 impl<'p> Display for CSVRead<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let map = self.all();
+        let map = self.all_reference();
         let s = FullyConcreteRec { map };
 
         s.fmt(f)

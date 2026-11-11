@@ -8,12 +8,13 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use crate::{
     core::{
         self,
-        rec::{self, FullyConcreteRec},
+        eval::env::Env,
+        rec::{self, FullyConcreteRec, RecVal},
         Effect, Val,
     },
     input::{AuxiliaryInputData, ExecError, Input, InputError, Progress, ProgressSummary, Reader},
     output::OutputHandler,
-    util::{cache::Cache, env::Env, location::Location, recfield::CoreRecField, Arena},
+    util::{location::Location, recfield::CoreRecField},
 };
 
 pub struct SamReader {
@@ -32,66 +33,66 @@ impl SamReader {
             fields: vec![
                 // Query template name
                 CoreRecField {
-                    name: b"qname",
+                    name: b"qname".to_vec(),
                     data: Val::StrTy,
                 },
                 CoreRecField {
-                    name: b"id",
+                    name: b"id".to_vec(),
                     data: Val::StrTy,
                 },
                 // Bitwise flag
                 CoreRecField {
-                    name: b"flag",
+                    name: b"flag".to_vec(),
                     data: Val::NumTy,
                 },
                 // Reference sequence name
                 CoreRecField {
-                    name: b"rname",
+                    name: b"rname".to_vec(),
                     data: Val::StrTy,
                 },
                 // 1-based leftmost mapping position
                 CoreRecField {
-                    name: b"pos",
+                    name: b"pos".to_vec(),
                     data: Val::NumTy,
                 },
                 // Mapping quality
                 CoreRecField {
-                    name: b"mapq",
+                    name: b"mapq".to_vec(),
                     data: Val::NumTy,
                 },
                 // The CIGAR string
                 CoreRecField {
-                    name: b"cigar",
+                    name: b"cigar".to_vec(),
                     data: Val::StrTy,
                 },
                 // Reference name of the mate / next read
                 CoreRecField {
-                    name: b"rnext",
+                    name: b"rnext".to_vec(),
                     data: Val::StrTy,
                 },
                 // Position of the mate / next read
                 CoreRecField {
-                    name: b"pnext",
+                    name: b"pnext".to_vec(),
                     data: Val::NumTy,
                 },
                 // Observed template length
                 CoreRecField {
-                    name: b"tlen",
+                    name: b"tlen".to_vec(),
                     data: Val::NumTy,
                 },
                 // The actual sequence of the alignment
                 CoreRecField {
-                    name: b"seq",
+                    name: b"seq".to_vec(),
                     data: Val::StrTy,
                 },
                 // The quality string of the alignment
                 CoreRecField {
-                    name: b"qual",
+                    name: b"qual".to_vec(),
                     data: Val::StrTy,
                 },
                 // The optional tags associated with the alignment
                 CoreRecField {
-                    name: b"tags",
+                    name: b"tags".to_vec(),
                     data: Val::StrTy,
                     // data: Val::ListTy {
                     //     ty: Arc::new(Val::StrTy),
@@ -99,7 +100,7 @@ impl SamReader {
                 },
                 // The optional tags associated with the alignment
                 CoreRecField {
-                    name: b"desc",
+                    name: b"desc".to_vec(),
                     data: Val::StrTy,
                 },
             ],
@@ -110,11 +111,10 @@ impl SamReader {
 }
 
 impl Reader for SamReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -130,23 +130,25 @@ impl Reader for SamReader {
                     .par_iter()
                     .map(|record| match record {
                         Ok(read) => {
-                            let arena = Arena::new();
                             let cigar = read.cigar();
                             let seq = read.sequence();
                             let qual = read.quality_scores();
                             let data = read.data();
 
                             let val = core::Val::Rec {
-                                rec: Arc::new(rec::SamRead {
-                                    read: &read,
-                                    cigar: &cigar,
-                                    seq: &seq,
-                                    qual: &qual,
-                                    data: &data,
-                                }),
+                                rec: RecVal::SamRead {
+                                    r: rec::SamRead {
+                                        read: &read,
+                                        cigar: &cigar,
+                                        seq: &seq,
+                                        qual: &qual,
+                                        data: &data,
+                                    },
+                                },
                             };
 
-                            prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
+                            prog.eval2(global, &Env::default(), val)
+                                .map_err(ExecError::Eval)
                         }
                         Err(_) => Err(ExecError::Input(InputError::Read)),
                     })
@@ -174,8 +176,8 @@ impl Reader for SamReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
-        self.ty.coerce()
+    fn get_ty<'a>(&'a self) -> Val<'a> {
+        self.ty.reference()
     }
 
     fn get_aux_data(&self) -> super::AuxiliaryInputData {
@@ -209,72 +211,72 @@ impl PairedSamReader {
         let ty = Val::RecTy {
             fields: vec![
                 CoreRecField {
-                    name: b"r1",
+                    name: b"r1".to_vec(),
                     data: Val::RecTy {
                         // in the order as described in the spec
                         fields: vec![
                             // Query template name
                             CoreRecField {
-                                name: b"qname",
+                                name: b"qname".to_vec(),
                                 data: Val::StrTy,
                             },
                             CoreRecField {
-                                name: b"id",
+                                name: b"id".to_vec(),
                                 data: Val::StrTy,
                             },
                             // Bitwise flag
                             CoreRecField {
-                                name: b"flag",
+                                name: b"flag".to_vec(),
                                 data: Val::NumTy,
                             },
                             // Reference sequence name
                             CoreRecField {
-                                name: b"rname",
+                                name: b"rname".to_vec(),
                                 data: Val::StrTy,
                             },
                             // 1-based leftmost mapping position
                             CoreRecField {
-                                name: b"pos",
+                                name: b"pos".to_vec(),
                                 data: Val::NumTy,
                             },
                             // Mapping quality
                             CoreRecField {
-                                name: b"mapq",
+                                name: b"mapq".to_vec(),
                                 data: Val::NumTy,
                             },
                             // The CIGAR string
                             CoreRecField {
-                                name: b"cigar",
+                                name: b"cigar".to_vec(),
                                 data: Val::StrTy,
                             },
                             // Reference name of the mate / next read
                             CoreRecField {
-                                name: b"rnext",
+                                name: b"rnext".to_vec(),
                                 data: Val::StrTy,
                             },
                             // Position of the mate / next read
                             CoreRecField {
-                                name: b"pnext",
+                                name: b"pnext".to_vec(),
                                 data: Val::NumTy,
                             },
                             // Observed template length
                             CoreRecField {
-                                name: b"tlen",
+                                name: b"tlen".to_vec(),
                                 data: Val::NumTy,
                             },
                             // The actual sequence of the alignment
                             CoreRecField {
-                                name: b"seq",
+                                name: b"seq".to_vec(),
                                 data: Val::StrTy,
                             },
                             // The quality string of the alignment
                             CoreRecField {
-                                name: b"qual",
+                                name: b"qual".to_vec(),
                                 data: Val::StrTy,
                             },
                             // The optional tags associated with the alignment
                             CoreRecField {
-                                name: b"tags",
+                                name: b"tags".to_vec(),
                                 data: Val::StrTy,
                                 // data: Val::ListTy {
                                 //     ty: Arc::new(Val::StrTy),
@@ -282,79 +284,79 @@ impl PairedSamReader {
                             },
                             // The optional tags associated with the alignment
                             CoreRecField {
-                                name: b"desc",
+                                name: b"desc".to_vec(),
                                 data: Val::StrTy,
                             },
                         ],
                     },
                 },
                 CoreRecField {
-                    name: b"r2",
+                    name: b"r2".to_vec(),
                     data: Val::RecTy {
                         // in the order as described in the spec
                         fields: vec![
                             // Query template name
                             CoreRecField {
-                                name: b"qname",
+                                name: b"qname".to_vec(),
                                 data: Val::StrTy,
                             },
                             CoreRecField {
-                                name: b"id",
+                                name: b"id".to_vec(),
                                 data: Val::StrTy,
                             },
                             // Bitwise flag
                             CoreRecField {
-                                name: b"flag",
+                                name: b"flag".to_vec(),
                                 data: Val::NumTy,
                             },
                             // Reference sequence name
                             CoreRecField {
-                                name: b"rname",
+                                name: b"rname".to_vec(),
                                 data: Val::StrTy,
                             },
                             // 1-based leftmost mapping position
                             CoreRecField {
-                                name: b"pos",
+                                name: b"pos".to_vec(),
                                 data: Val::NumTy,
                             },
                             // Mapping quality
                             CoreRecField {
-                                name: b"mapq",
+                                name: b"mapq".to_vec(),
                                 data: Val::NumTy,
                             },
                             // The CIGAR string
                             CoreRecField {
-                                name: b"cigar",
+                                name: b"cigar".to_vec(),
                                 data: Val::StrTy,
                             },
                             // Reference name of the mate / next read
                             CoreRecField {
-                                name: b"rnext",
+                                name: b"rnext".to_vec(),
                                 data: Val::StrTy,
                             },
                             // Position of the mate / next read
                             CoreRecField {
-                                name: b"pnext",
+                                name: b"pnext".to_vec(),
                                 data: Val::NumTy,
                             },
                             // Observed template length
                             CoreRecField {
-                                name: b"tlen",
+                                name: b"tlen".to_vec(),
                                 data: Val::NumTy,
                             },
                             // The actual sequence of the alignment
                             CoreRecField {
-                                name: b"seq",
+                                name: b"seq".to_vec(),
                                 data: Val::StrTy,
                             },
                             // The quality string of the alignment
                             CoreRecField {
-                                name: b"qual",
+                                name: b"qual".to_vec(),
                                 data: Val::StrTy,
                             },
                             // The optional tags associated with the alignment
                             CoreRecField {
-                                name: b"tags",
+                                name: b"tags".to_vec(),
                                 data: Val::StrTy,
                                 // data: Val::ListTy {
                                 //     ty: Arc::new(Val::StrTy),
@@ -362,7 +364,7 @@ impl PairedSamReader {
                             },
                             // The optional tags associated with the alignment
                             CoreRecField {
-                                name: b"desc",
+                                name: b"desc".to_vec(),
                                 data: Val::StrTy,
                             },
                         ],
@@ -382,11 +384,10 @@ impl PairedSamReader {
 }
 
 impl Reader for PairedSamReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -403,8 +404,6 @@ impl Reader for PairedSamReader {
                     .par_iter()
                     .map(|(record, paired_record)| match (record, paired_record) {
                         (Ok(read), Ok(paired_read)) => {
-                            let arena = Arena::new();
-
                             let cigar = read.cigar();
                             let paired_cigar = paired_read.cigar();
 
@@ -418,37 +417,44 @@ impl Reader for PairedSamReader {
                             let paired_data = paired_read.data();
 
                             let val = core::Val::Rec {
-                                rec: Arc::new(FullyConcreteRec {
-                                    map: HashMap::from([
-                                        (
-                                            b"r1".to_vec(),
-                                            core::Val::Rec {
-                                                rec: Arc::new(rec::SamRead {
-                                                    read,
-                                                    cigar: &cigar,
-                                                    seq: &seq,
-                                                    qual: &qual,
-                                                    data: &data,
-                                                }),
-                                            },
-                                        ),
-                                        (
-                                            b"r2".to_vec(),
-                                            core::Val::Rec {
-                                                rec: Arc::new(rec::SamRead {
-                                                    read: paired_read,
-                                                    cigar: &paired_cigar,
-                                                    seq: &paired_seq,
-                                                    qual: &paired_qual,
-                                                    data: &paired_data,
-                                                }),
-                                            },
-                                        ),
-                                    ]),
-                                }),
+                                rec: RecVal::FullyConcrete {
+                                    r: FullyConcreteRec {
+                                        map: HashMap::from([
+                                            (
+                                                b"r1".to_vec(),
+                                                core::Val::Rec {
+                                                    rec: RecVal::SamRead {
+                                                        r: rec::SamRead {
+                                                            read,
+                                                            cigar: &cigar,
+                                                            seq: &seq,
+                                                            qual: &qual,
+                                                            data: &data,
+                                                        },
+                                                    },
+                                                },
+                                            ),
+                                            (
+                                                b"r2".to_vec(),
+                                                core::Val::Rec {
+                                                    rec: RecVal::SamRead {
+                                                        r: rec::SamRead {
+                                                            read: paired_read,
+                                                            cigar: &paired_cigar,
+                                                            seq: &paired_seq,
+                                                            qual: &paired_qual,
+                                                            data: &paired_data,
+                                                        },
+                                                    },
+                                                },
+                                            ),
+                                        ]),
+                                    },
+                                },
                             };
 
-                            prog.eval(&arena, env, cache, val).map_err(ExecError::Eval)
+                            prog.eval2(global, &Env::default(), val)
+                                .map_err(ExecError::Eval)
                         }
                         _ => Err(ExecError::Input(InputError::Read)),
                     })
@@ -473,8 +479,8 @@ impl Reader for PairedSamReader {
         self.reader.records().count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
-        self.ty.coerce()
+    fn get_ty<'a>(&'a self) -> Val<'a> {
+        self.ty.reference()
     }
 
     fn get_aux_data(&self) -> AuxiliaryInputData {
@@ -501,66 +507,66 @@ impl RevCompSamReader {
             fields: vec![
                 // Query template name
                 CoreRecField {
-                    name: b"qname",
+                    name: b"qname".to_vec(),
                     data: Val::StrTy,
                 },
                 CoreRecField {
-                    name: b"id",
+                    name: b"id".to_vec(),
                     data: Val::StrTy,
                 },
                 // Bitwise flag
                 CoreRecField {
-                    name: b"flag",
+                    name: b"flag".to_vec(),
                     data: Val::NumTy,
                 },
                 // Reference sequence name
                 CoreRecField {
-                    name: b"rname",
+                    name: b"rname".to_vec(),
                     data: Val::StrTy,
                 },
                 // 1-based leftmost mapping position
                 CoreRecField {
-                    name: b"pos",
+                    name: b"pos".to_vec(),
                     data: Val::NumTy,
                 },
                 // Mapping quality
                 CoreRecField {
-                    name: b"mapq",
+                    name: b"mapq".to_vec(),
                     data: Val::NumTy,
                 },
                 // The CIGAR string
                 CoreRecField {
-                    name: b"cigar",
+                    name: b"cigar".to_vec(),
                     data: Val::StrTy,
                 },
                 // Reference name of the mate / next read
                 CoreRecField {
-                    name: b"rnext",
+                    name: b"rnext".to_vec(),
                     data: Val::StrTy,
                 },
                 // Position of the mate / next read
                 CoreRecField {
-                    name: b"pnext",
+                    name: b"pnext".to_vec(),
                     data: Val::NumTy,
                 },
                 // Observed template length
                 CoreRecField {
-                    name: b"tlen",
+                    name: b"tlen".to_vec(),
                     data: Val::NumTy,
                 },
                 // The actual sequence of the alignment
                 CoreRecField {
-                    name: b"seq",
+                    name: b"seq".to_vec(),
                     data: Val::StrTy,
                 },
                 // The quality string of the alignment
                 CoreRecField {
-                    name: b"qual",
+                    name: b"qual".to_vec(),
                     data: Val::StrTy,
                 },
                 // The optional tags associated with the alignment
                 CoreRecField {
-                    name: b"tags",
+                    name: b"tags".to_vec(),
                     data: Val::StrTy,
                     // data: Val::ListTy {
                     //     ty: Arc::new(Val::StrTy),
@@ -568,7 +574,7 @@ impl RevCompSamReader {
                 },
                 // The optional tags associated with the alignment
                 CoreRecField {
-                    name: b"desc",
+                    name: b"desc".to_vec(),
                     data: Val::StrTy,
                 },
             ],
@@ -579,11 +585,10 @@ impl RevCompSamReader {
 }
 
 impl Reader for RevCompSamReader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<core::Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError> {
@@ -599,35 +604,35 @@ impl Reader for RevCompSamReader {
                     .par_iter()
                     .map(|record| match record {
                         Ok(read) => {
-                            let arena = Arena::new();
                             let cigar = read.cigar();
                             let seq = read.sequence();
                             let qual = read.quality_scores();
                             let data = read.data();
 
                             let val = core::Val::Rec {
-                                rec: Arc::new(rec::SamRead {
-                                    read: &read,
-                                    cigar: &cigar,
-                                    seq: &seq,
-                                    qual: &qual,
-                                    data: &data,
-                                }),
+                                rec: RecVal::SamRead {
+                                    r: rec::SamRead {
+                                        read: &read,
+                                        cigar: &cigar,
+                                        seq: &seq,
+                                        qual: &qual,
+                                        data: &data,
+                                    },
+                                },
                             };
 
                             let reverse_complement_val =
                                 core::library::unary_read_reverse_complement(
-                                    &arena,
                                     &Location::new(0, 0),
                                     &vec![val.clone()],
                                 )
                                 // should never happen
                                 .unwrap();
                             let effs_forward = prog
-                                .eval(&arena, env, cache, val)
+                                .eval2(global, &Env::default(), val)
                                 .map_err(ExecError::Eval)?;
                             let effs_reverse = prog
-                                .eval(&arena, env, cache, reverse_complement_val)
+                                .eval2(global, &Env::default(), reverse_complement_val)
                                 .map_err(ExecError::Eval)?;
 
                             Ok(effs_forward.into_iter().chain(effs_reverse).collect_vec())
@@ -658,8 +663,8 @@ impl Reader for RevCompSamReader {
         input_records.count()
     }
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a> {
-        self.ty.coerce()
+    fn get_ty<'a>(&'a self) -> Val<'a> {
+        self.ty.reference()
     }
 
     fn get_aux_data(&self) -> super::AuxiliaryInputData {

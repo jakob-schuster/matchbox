@@ -4,13 +4,9 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::core::InternalError;
 
-pub mod cache;
-pub mod env;
 pub mod location;
 pub mod ran;
 pub mod recfield;
-
-pub type Arena = bumpalo::Bump;
 
 /// Convert a byte slice to a string.
 pub fn bytes_to_string(bytes: &[u8]) -> Result<String, InternalError> {

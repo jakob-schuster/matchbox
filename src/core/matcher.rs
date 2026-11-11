@@ -3,23 +3,25 @@ use itertools::Itertools;
 pub mod read_matcher;
 
 use crate::{
+    core::eval::env::{self, Env},
     myers::VarMyers,
-    surface::Context,
-    util::{env::Env, ran::Ran, Arena},
+    util::{location::Location, ran::Ran},
 };
 
 use super::{EvalError, Val};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub trait Matcher<'p>: Send + Sync + Display {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a;
+        'q: 'r,
+        'p: 'r,
+        'r: 'a;
 }
 
 pub struct Chain<'p> {
@@ -27,20 +29,21 @@ pub struct Chain<'p> {
     pub m2: Arc<dyn Matcher<'p> + 'p>,
 }
 impl<'p> Matcher<'p> for Chain<'p> {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
-        let r1 = self.m1.evaluate(arena, env, val)?;
-        let r2 = self.m2.evaluate(arena, env, val)?;
+        let r1 = self.m1.eval2(global, local, val)?;
+        let r2 = self.m2.eval2(global, local, val)?;
 
-        todo!()
-        // Ok(r1.into_iter().chain(r2).collect::<Vec<_>>())
+        Ok(r1.into_iter().chain(r2).collect::<Vec<_>>())
     }
 }
 
@@ -55,18 +58,20 @@ pub struct FieldAccess<'p> {
     pub inner: Arc<dyn Matcher<'p> + 'p>,
 }
 impl<'p> Matcher<'p> for FieldAccess<'p> {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
         match val {
             Val::Rec { rec } => match rec.get(self.name.as_bytes()) {
-                Ok(field) => self.inner.evaluate(arena, env, &field),
+                Ok(field) => self.inner.eval2(global, local, &field),
                 // such errors are actually OK when pattern matching,
                 // just means the pattern didn't match!
                 Err(_) => Ok(vec![]),
@@ -83,17 +88,18 @@ impl<'p> Display for FieldAccess<'p> {
 
 pub struct Succeed {}
 impl<'p> Matcher<'p> for Succeed {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
-        // one world, with no binds
-        Ok(vec![vec![]])
+        Ok(vec![Env::default()])
     }
 }
 
@@ -105,16 +111,18 @@ impl Display for Succeed {
 
 pub struct Bind {}
 impl<'p> Matcher<'p> for Bind {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
-        Ok(vec![vec![val.clone()]])
+        Ok(vec![Env::default().with(val.clone())])
     }
 }
 
@@ -125,29 +133,32 @@ impl Display for Bind {
 }
 
 pub struct Equal<'p> {
-    pub val: &'p Val<'p>,
+    pub val: Val<'p>,
 }
 
 impl<'p> Equal<'p> {
-    pub fn new(val: &'p Val<'p>) -> Equal<'p> {
-        Equal { val }
+    pub fn new(val: &Val<'p>) -> Equal<'p> {
+        Equal { val: val.clone() }
     }
 }
 
 impl<'p> Matcher<'p> for Equal<'p> {
-    fn evaluate<'a>(
-        &self,
-        arena: &'a Arena,
-        env: &Env<Val<'a>>,
-        val: &Val<'a>,
-    ) -> Result<Vec<Vec<Val<'a>>>, EvalError>
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
     where
-        'p: 'a,
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
     {
         if val.eq(&self.val) {
             // one world, with no binds
-            Ok(vec![vec![]])
+            Ok(vec![Env::default()])
         } else {
+            // no worlds
             Ok(vec![])
         }
     }
@@ -156,5 +167,42 @@ impl<'p> Matcher<'p> for Equal<'p> {
 impl<'p> Display for Equal<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         format!("equal({})", self.val).fmt(f)
+    }
+}
+
+pub struct ErrorMatcher {
+    location: Location,
+}
+
+impl ErrorMatcher {
+    fn new(location: &Location) -> ErrorMatcher {
+        ErrorMatcher {
+            location: location.clone(),
+        }
+    }
+}
+
+impl Display for ErrorMatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        "error".fmt(f)
+    }
+}
+
+impl<'p> Matcher<'p> for ErrorMatcher {
+    fn eval2<'q, 'r, 'a>(
+        &'q self,
+        global: &'q env::Env<Val<'p>>,
+        local: &'a env::Env<Val<'r>>,
+        val: &Val<'r>,
+    ) -> Result<Vec<env::Env<Val<'r>>>, EvalError>
+    where
+        'q: 'r,
+        'p: 'r,
+        'r: 'a,
+    {
+        Err(EvalError::new(
+            &self.location,
+            "trying to evaluate error branch?!",
+        ))
     }
 }

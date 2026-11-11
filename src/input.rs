@@ -5,7 +5,6 @@ use std::{
     fs::File,
     io::{stdin, BufRead, BufReader, Read},
     path::Path,
-    sync::Arc,
 };
 
 use clap::ValueEnum;
@@ -13,7 +12,8 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 
 use crate::{
-    core::{self, EvalError, Val},
+    core::{self, eval::env::Env, EvalError, Val},
+    global_config::InputReads,
     input::{
         bam::{BamReader, PairedBamReader, RevCompBamReader},
         dsv::DSVReader,
@@ -24,8 +24,6 @@ use crate::{
     },
     output::{OutputError, OutputHandler, OutputHandlerSummary},
     ui::Interface,
-    util::{cache::Cache, env::Env, Arena},
-    InputReads,
 };
 
 mod bam;
@@ -405,19 +403,17 @@ impl ReaderWithBar {
         }
     }
 
-    pub fn map<'p>(
+    pub fn map<'p, 'a>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'a core::Prog<'p>,
+        global: &'a Env<Val<'p>>,
         output_handler: &mut OutputHandler,
     ) -> Result<(), ExecError> {
-        self.reader
-            .map(prog, env, cache, output_handler, &mut self.bar)
+        self.reader.map(prog, global, output_handler, &mut self.bar)
     }
 
-    pub fn get_ty<'a>(&mut self, arena: &'a Arena) -> Val<'a> {
-        self.reader.get_ty(arena)
+    pub fn get_ty<'a>(&'a self) -> Val<'a> {
+        self.reader.get_ty()
     }
 
     pub fn get_aux_data(&self) -> AuxiliaryInputData {
@@ -431,18 +427,17 @@ pub enum AuxiliaryInputData {
 }
 
 pub trait Reader {
-    fn map<'p>(
+    fn map<'p, 'q>(
         &mut self,
-        prog: &core::Prog<'p>,
-        env: &Env<Val<'p>>,
-        cache: &Cache<Val<'p>>,
+        prog: &'q core::Prog<'p>,
+        global: &'q Env<Val<'p>>,
         output_handler: &mut OutputHandler,
         progress: &mut dyn Progress,
     ) -> Result<(), ExecError>;
 
     fn count(&mut self) -> usize;
 
-    fn get_ty<'a>(&self, arena: &'a Arena) -> Val<'a>;
+    fn get_ty<'a>(&'a self) -> Val<'a>;
 
     fn get_aux_data(&self) -> AuxiliaryInputData {
         AuxiliaryInputData::None

@@ -1363,6 +1363,10 @@ impl Tm {
                             c3,
                         )
                     }
+
+                    // don't need to double-report errors
+                    Val::ErrorTy => (core::Tm::new_error(&self.location), Val::ErrorTy, c1),
+
                     _ => (
                         core::Tm::new_error(&self.location),
                         Val::ErrorTy,

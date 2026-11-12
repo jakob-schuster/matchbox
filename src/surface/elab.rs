@@ -418,29 +418,25 @@ impl Stmt {
                 // otherwise, it needs to be represented as a core bind
                 //
                 // if there is an eval error, we also need to report it
-                let (val, c2): (Val<'p>, Context<'_>) =
-                    match ctm.eval2(&c1.get_global_env(), &c1.get_local_env()) {
-                        Ok(val) => (val.concretise(), c1),
-                        Err(e) => (
-                            Val::Error,
-                            c1.report(elab_error::ElabError::from_eval_error(e)),
-                        ),
-                    };
+                let val: Val<'p> = match ctm.eval2(&c1.get_global_env(), &c1.get_local_env()) {
+                    Ok(val) => val.concretise(),
+                    Err(e) => Val::Error,
+                };
 
                 // update the context accordingly
-                let c3 = if val.is_neutral() {
-                    c2.bind_param(name, &ty)
+                let c2 = if val.is_neutral() {
+                    c1.bind_param(name, &ty)
                 } else {
-                    c2.bind(name, ty, val.clone())
+                    c1.bind(name, ty, val.clone())
                 };
 
                 // elaborate the rest of the statements, using the new context
                 let (rest_cstmt, c3) = match &rest[..] {
                     [] => (
                         core::Stmt::new(self.location.clone(), core::StmtData::End),
-                        c3,
+                        c2,
                     ),
-                    [next, rest1 @ ..] => next.elab(&c3, rest1),
+                    [next, rest1 @ ..] => next.elab(&c2, rest1),
                 };
 
                 if val.is_neutral() {
@@ -552,7 +548,7 @@ impl Branch {
                     // check that we can equate the branches
                     cx = if !final_ty.equiv(&core_branch_ty) {
                         cx.report(elab_error::ElabError::new(
-                            &self.location,
+                            &branch.location,
                             &format!(
                                 "mismatched types: expected {}, found {}",
                                 final_ty, core_branch_ty
@@ -871,7 +867,7 @@ impl Tm {
             }
             TmData::RecProj { tm, name } => {
                 let (ctm, ty, c1) = tm.infer(c0);
-                match ty {
+                match &ty {
                     Val::RecTy { fields } => {
                         match fields.iter().find(|field| field.name.eq(name.as_bytes())) {
                             Some(field) => (
@@ -885,16 +881,23 @@ impl Tm {
                                 field.data.clone(),
                                 c1,
                             ),
-                            None => (core::Tm::new_error(&self.location), Val::ErrorTy, c1.report(elab_error::ElabError::new(&self.location, "trying to access field of a value which doesn't have any fields"))),
+                            None => (
+                                core::Tm::new_error(&self.location),
+                                Val::ErrorTy,
+                                c1.report(elab_error::ElabError::new_non_existent_field_access(
+                                    &self.location,
+                                    name,
+                                    &ty,
+                                )),
+                            ),
                         }
                     }
                     _ => (
                         core::Tm::new_error(&self.location),
                         Val::ErrorTy,
-                        c1.report(elab_error::ElabError::new_non_existent_field_access(
+                        c1.report(elab_error::ElabError::new(
                             &self.location,
-                            name,
-                            &ty,
+                            &format!("trying to access field of a value of type {}", ty),
                         )),
                     ),
                 }

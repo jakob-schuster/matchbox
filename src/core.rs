@@ -1441,7 +1441,7 @@ impl<'a> Display for PortableVal {
                 body
             )
             .fmt(f),
-            PortableVal::Fun { s } => format!("#func({})", s).fmt(f),
+            PortableVal::Fun { s } => format!("#fun({})", s).fmt(f),
             PortableVal::EffectTy => "Effect".fmt(f),
             PortableVal::Effect { effect } => format!("#effect({})", effect).fmt(f),
             PortableVal::ErrorTy => "Error".fmt(f),

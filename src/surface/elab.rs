@@ -9,11 +9,11 @@ use crate::core::{self, library, EvalError, FunData, InternalError, StrVal, Val}
 use crate::surface::elab::context::Address;
 use crate::surface::{elab::context::Context, Tm};
 use crate::surface::{
-    BinOp, Branch, BranchData, MatchMode, Pattern, PatternBranch, PatternData, Prog, Stmt,
-    StmtData, StrLitRegion, StrLitRegionData, TmData, UnOp,
+    BinOp, Branch, BranchData, MatchMode, Num, Pattern, PatternBranch, PatternData, Prog, Region,
+    RegionData, Stmt, StmtData, StrLitRegion, StrLitRegionData, TmData, UnOp,
 };
 use crate::util::bytes_to_string;
-use crate::util::location::Location;
+use crate::util::location::{Located, Location};
 use crate::util::recfield::CoreRecField;
 
 pub mod elab_error {
@@ -684,12 +684,17 @@ impl Pattern {
                 (matcher, Val::RecTy { fields: tys }, c1)
             }
             PatternData::Read { regs, binds, mode } => {
+                // first, perform a syntactic transformation to eliminate the bug caused by
+                // the second term in a pair of adjacent terms in a read pattern using a unary minus operator
+                // (if more syntactic transformations end up in matchbox, we should do all of them in a pass pre-elaboration)
+                let regs1 = Pattern::transform_binary_minus(regs);
+
                 // typecheck all the binds;
                 // end up with the name of each bind, the (list) value that it is SELECTING from,
                 // and the type of it itself
 
                 // everything else happens in here
-                let (matcher, c2) = ReadMatcher::infer(c0, regs, binds, mode, &self.location, ty);
+                let (matcher, c2) = ReadMatcher::infer(c0, &regs1, binds, mode, &self.location, ty);
 
                 let matcher1 = match matcher {
                     itertools::Either::Left(m) => Arc::new(m) as Arc<dyn Matcher>,

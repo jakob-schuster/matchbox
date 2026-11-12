@@ -6,8 +6,8 @@ use itertools::Itertools;
 
 use crate::util::{location::Located, recfield::RecField};
 
-// pub mod elab;
 pub mod elab;
+pub mod transform;
 
 pub type Prog = Located<ProgData>;
 /// A matchbox program, consisting of a list of statements.

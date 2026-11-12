@@ -105,6 +105,11 @@ fn run(code: &str, global_config: &global_config::GlobalConfig) {
         // should never unwrap, because program terminates
         .unwrap();
 
+    // if we are printing parsing debug info, print it now
+    if global_config.input_reads.debug_parsing {
+        eprintln!("{:?}", prog);
+    }
+
     // load in the input reads
     let mut reader_with_bar = ReaderWithBar::new(&global_config.input_reads)
         .map_err(|e| generic_error::GenericError::from(e).codespan_print_and_exit(global_config))

@@ -80,6 +80,10 @@ pub(crate) struct InputReads {
     #[arg(long)]
     pub(crate) debug_compilation: bool,
 
+    /// Compile the script and output parsing information
+    #[arg(long)]
+    pub(crate) debug_parsing: bool,
+
     /// Run in a single-threaded mode, for easier profiling with flamegraph / samply
     #[arg(long, conflicts_with_all(["debug_compilation", "threads", "with_reverse_complement"]))]
     pub(crate) debug_single_threaded_run: bool,
@@ -141,6 +145,7 @@ impl GlobalConfig {
                 stdin_format: Some(CLIFileType::Fastq),
                 reads: None,
                 debug_compilation: false,
+                debug_parsing: false,
                 paired_with: None,
                 with_reverse_complement: false,
                 debug_single_threaded_run: false,

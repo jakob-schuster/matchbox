@@ -100,8 +100,8 @@ impl<'p> ReadMatcher<'p> {
                         return (
                             Either::Right(ErrorMatcher::new(location)),
                             cx.report(ElabError::new(
-                                location,
-                                "parameter did not have list type?!",
+                                &param.location,
+                                &format!("parameter expected List type, found {}", ty),
                             )),
                         )
                     }

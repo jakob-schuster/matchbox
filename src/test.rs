@@ -145,6 +145,7 @@ fn eval_one_fastq_read_test(
 
 /// Given some code and a read, which exists within a given arena,
 /// printing the resulting effects as a string
+#[cfg(test)]
 fn eval_one_read_test(code: &str, read: &core::Val) -> Result<String, Vec<GenericError>> {
     use crate::{core::library::standard_library, input::ReaderWithBar};
 

@@ -11,7 +11,6 @@ name = "matchbox"
 path = "src/main.rs"
 
 [dependencies]
-bumpalo = "~3.19"
 bio = "~3.0"
 rayon = "~1.11"
 itertools = "~0.14"
@@ -27,7 +26,6 @@ noodles-util = { version = "0.70.0", features = ["alignment"] }
 indicatif = "~0.18"
 color-eyre = "~0.6"
 ratatui = "~0.29"
-crossterm = "~0.29"
 
 [dev-dependencies]
 insta = { version = "1.42.0", features = ["yaml"] }

@@ -851,8 +851,8 @@ impl<'r> Val<'r> {
                     .collect(),
                 body: Arc::new(body.to_portable()),
             },
-            Val::Fun { .. } => PortableVal::Fun {
-                s: "#fun".to_string(),
+            Val::Fun { data } => PortableVal::Fun {
+                s: format!("{}", data.body),
             },
             Val::FunForeign { body: f, .. } => PortableVal::Fun {
                 s: "#fun-foreign".to_string(),
@@ -1134,8 +1134,8 @@ impl<'a> Display for PatternBranchData<'a> {
 impl Display for TmData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TmData::Global { index } => format!("#cached[{}]", index).fmt(f),
-            TmData::Local { index } => format!("#[{}]", *index).fmt(f),
+            TmData::Global { index } => format!("#global[{}]", index).fmt(f),
+            TmData::Local { index } => format!("#local[{}]", *index).fmt(f),
             TmData::Univ => "Univ".fmt(f),
             TmData::AnyTy => "Any".fmt(f),
             TmData::BoolTy => "Bool".fmt(f),

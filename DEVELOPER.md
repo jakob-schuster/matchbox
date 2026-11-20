@@ -37,12 +37,16 @@ docker run --rm -it matchbox_local bash
 
 *matchbox* runs tests on each push. These are all snapshot tests of elaboration and evaluation, using [insta](https://github.com/mitsuhiko/insta), based on [brendanzab](https://github.com/brendanzab/)'s advice.
 
+When you change the language to support new features, or fix a bug, . 
+
 ### Local testing
 
 If you have insta installed via cargo, you can run the tests locally:
 
 ```bash
 cargo insta test
+# if there are any changes, visually compare them
+# to see if they are expected or not
 cargo insta review
 ```
 
@@ -53,4 +57,5 @@ After merging `develop` into `main` and making the release, you need to publish 
 ```bash
 # always dry run it first
 cargo publish --dry-run
+cargo publish
 ```
